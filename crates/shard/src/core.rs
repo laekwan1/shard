@@ -231,4 +231,18 @@ impl EngineCore {
             "버튼을 눌러 시작하세요".to_string()
         }
     }
+
+    /// The third line, while it is running: whether it is watching for sites
+    /// that get blocked, which is the one thing about it worth knowing without
+    /// opening the settings.
+    pub fn note(&self) -> &'static str {
+        if !self.running() {
+            return "";
+        }
+        if self.shared.config.read().auto_learn {
+            "막히는 사이트는 알아서 감지하고 학습합니다"
+        } else {
+            "자동 학습이 꺼져 있습니다 — 설정에서 켤 수 있습니다"
+        }
+    }
 }

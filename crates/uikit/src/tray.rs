@@ -7,9 +7,12 @@ use crate::icon::Rgba;
 use anyhow::Result;
 use crossbeam_channel::Receiver;
 use tray_icon::menu::MenuEvent;
-use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::{TrayIconBuilder, TrayIconEvent};
 
 pub use tray_icon::menu::{CheckMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem, Submenu};
+// The icon itself, for a window that keeps hold of one rather than handing it
+// straight back to a framework.
+pub use tray_icon::TrayIcon;
 
 /// Event streams for the tray, forwarded from tray-icon's global handlers.
 pub struct TrayEvents {
@@ -35,6 +38,25 @@ pub fn install_handlers(ctx: &egui::Context) -> TrayEvents {
     TrayIconEvent::set_event_handler(Some(move |event| {
         let _ = tray_tx.send(event);
         repaint.request_repaint();
+    }));
+
+    TrayEvents { menu, tray }
+}
+
+/// The same two channels, for a window that is not drawn by egui.
+///
+/// tray-icon publishes to a global handler; the shell has its own message loop
+/// and a timer already turning, so it takes the events on a channel and reads
+/// them there rather than asking a UI framework to wake up.
+pub fn watch() -> TrayEvents {
+    let (menu_tx, menu) = crossbeam_channel::unbounded();
+    MenuEvent::set_event_handler(Some(move |event| {
+        let _ = menu_tx.send(event);
+    }));
+
+    let (tray_tx, tray) = crossbeam_channel::unbounded();
+    TrayIconEvent::set_event_handler(Some(move |event| {
+        let _ = tray_tx.send(event);
     }));
 
     TrayEvents { menu, tray }

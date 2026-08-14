@@ -147,13 +147,18 @@ power.addEventListener("click", () => {
   send("engine.toggle");
 });
 
+const note = document.getElementById("note");
+
 function paintEngine(state) {
   const on = !!state.running;
   power.setAttribute("aria-pressed", String(on));
   power.classList.remove("busy");
   headline.textContent = state.headline;
-  headline.className = state.kind === "bad" ? "bad" : on ? "good" : "";
+  // The same four readings the drawn window had: trouble in red, running with a
+  // caveat in amber, running in green, off in grey.
+  headline.className = state.kind || "idle";
   detail.textContent = state.detail || "";
+  note.textContent = state.note || "";
 }
 
 // ---- downloads -------------------------------------------------------------

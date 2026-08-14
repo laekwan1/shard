@@ -5,15 +5,22 @@
     to match against.
 */
 :root {
-  --surface: #0e0e10;
-  --chrome: #1a1a1d;
-  --raised: #202024;
-  --field: #26262b;
-  --divider: #2e2e34;
-  --on-surface: #e8e6e3;
-  --muted: #8a8a90;
-  --accent: #22d3ee;
+  /* The program's own colours, taken from `uikit::theme` and `ui.rs` rather
+     than chosen again here: the window used to be drawn by that code, and a
+     second palette that is nearly the same reads as a different program. */
+  --surface: #111318;        /* panel_fill  rgb(17, 19, 24)  */
+  --sunken: #0b0d11;         /* extreme_bg  rgb(11, 13, 17)  */
+  --raised: #181b22;         /* faint_bg    rgb(24, 27, 34)  */
+  --chrome: #151820;
+  --field: #1c2029;
+  --divider: #232833;
+  --on-surface: #e2e8f0;
+  --muted: #8a92a2;          /* MUTED       rgb(138, 146, 162) */
+  --accent: #22d3ee;         /* ACCENT      rgb(34, 211, 238)  */
+  --good: #34d399;
+  --warn: #fbbf24;
   --bad: #f87171;
+  --dim: #606878;            /* the power ring when it is off */
   --bar: 38px;
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Malgun Gothic", sans-serif;
 }
@@ -164,7 +171,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .view { height: 100%; overflow-y: auto; overflow-x: hidden; }
 .view[hidden] { display: none; }
 
-/* ---- home ---------------------------------------------------------------- */
+/* ---- home ----------------------------------------------------------------
+   Laid out to the same measurements the drawn window used: 34 above the
+   wordmark, 38 under it, a 156px switch, 26 to the headline. */
 
 #home {
   display: flex;
@@ -173,42 +182,55 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   padding-top: 34px;
 }
 
-.wordmark { margin: 0 0 34px; font-size: 12px; font-weight: 700; letter-spacing: .42em; color: var(--muted); }
+/* Spaced by the text itself, as it was — "S H A R D", not letter-spacing. */
+.wordmark {
+  margin: 0 0 38px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
 
-/* The engine switch. One button, big enough that the window has one obvious
-   thing to do, with the ring carrying the state rather than a label. */
+/* The engine switch, drawn the way it was drawn: a ring around a dark body,
+   with a halo behind it once it is on and the glyph opening at the top. */
 #power {
   position: relative;
   width: 156px;
   height: 156px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-  color: var(--muted);
-  transition: color .25s;
 }
+#power svg { width: 156px; height: 156px; overflow: visible; }
+#power .halo { fill: var(--accent); opacity: 0; transition: opacity .35s; }
+#power .body { fill: var(--raised); transition: fill .35s; }
 #power .ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid var(--divider);
-  transition: border-color .25s, box-shadow .25s, transform .25s;
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 2;
+  transition: stroke .35s, stroke-width .35s;
 }
-#power svg { width: 58px; height: 58px; position: relative; }
-#power:hover .ring { transform: scale(1.02); }
-#power[aria-pressed="true"] { color: var(--accent); }
-#power[aria-pressed="true"] .ring {
-  border-color: var(--accent);
-  /* The glow is the "it is running" signal seen from across the room. */
-  box-shadow: 0 0 0 6px #22d3ee1a, 0 0 34px #22d3ee40;
+#power .glyph {
+  fill: none;
+  stroke: var(--dim);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke .35s;
 }
+#power:hover .halo { opacity: .06; }
+#power[aria-pressed="true"] .body { fill: #192e36; }
+#power[aria-pressed="true"] .ring { stroke: var(--accent); stroke-width: 3; }
+#power[aria-pressed="true"] .glyph { stroke: var(--accent); }
+#power[aria-pressed="true"] .halo { opacity: .10; }
+#power[aria-pressed="true"]:hover .halo { opacity: .13; }
 #power.busy .ring { animation: breathe 1.4s ease-in-out infinite; }
-@keyframes breathe { 50% { opacity: .55; } }
+@keyframes breathe { 50% { opacity: .5; } }
 
 #headline { margin: 26px 0 4px; font-size: 20px; font-weight: 700; }
-#headline.good { color: var(--accent); }
+#headline.good { color: var(--good); }
+#headline.on { color: var(--accent); }
+#headline.warn { color: var(--warn); }
 #headline.bad { color: var(--bad); }
 #detail { margin: 0; font-size: 12px; color: var(--muted); }
+#note { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
 
 /* Downloads in flight: one line each, under the status. */
 #downloads { margin-top: 20px; width: 340px; display: flex; flex-direction: column; gap: 8px; }
@@ -423,16 +445,18 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #volume { width: 84px; accent-color: var(--accent); }
 #now { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* The three ways out of home, pinned to the bottom so they never move. */
+/* The three ways out of home: 34px marks with 18px between them, pinned to the
+   bottom so they do not move as the status line above changes length. */
 #go { margin-top: auto; margin-bottom: 20px; display: flex; gap: 18px; }
 #go button {
   width: 34px;
   height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
   color: var(--muted);
-  transition: color .13s, background .13s;
+  transition: color .15s;
 }
-#go svg { width: 21px; height: 21px; }
-#go button:hover { color: var(--on-surface); background: #ffffff0f; }
+#go svg { width: 22px; height: 22px; }
+#go button:hover { color: #e2e8f0; }
+
+#headline.idle { color: var(--on-surface); }

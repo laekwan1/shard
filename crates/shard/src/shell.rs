@@ -77,6 +77,9 @@ thread_local! {
     /// them out as the window is dragged, and it is handed nothing but a handle.
     static TABS: RefCell<Vec<Rc<wry::WebView>>> = const { RefCell::new(Vec::new()) };
     static SHOWING: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    /// Set once the program has been asked to end, so the close button knows
+    /// whether it is tidying the window away or shutting everything down.
+    static QUITTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Put the shell and the page in front where they belong.
@@ -606,6 +609,47 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
     Ok(shell)
 }
 
+/// The tray icon, its menu, and the state the menu shows.
+struct Tray {
+    icon: uikit::tray::TrayIcon,
+    events: uikit::tray::TrayEvents,
+    toggle: uikit::tray::CheckMenuItem,
+    open: uikit::tray::MenuItem,
+    quit: uikit::tray::MenuItem,
+}
+
+impl Tray {
+    fn build() -> Result<Self> {
+        use uikit::tray::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+        let events = uikit::tray::watch();
+        let menu = Menu::new();
+        let toggle = CheckMenuItem::new("우회 켜기", true, false, None);
+        let open = MenuItem::new("창 열기", true, None);
+        let quit = MenuItem::new("종료", true, None);
+        menu.append(&toggle)?;
+        menu.append(&open)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&quit)?;
+        let icon = uikit::tray::build("Shard — 우회 꺼짐", &uikit::icon::shard(false), menu)?;
+        Ok(Self { icon, events, toggle, open, quit })
+    }
+
+    /// Show what the engine is doing, in the icon and the tooltip.
+    fn follow(&self, core: &crate::core::EngineCore) {
+        let running = core.running();
+        let art = match (running, core.status_kind) {
+            (true, crate::core::StatusKind::Warn) => uikit::icon::warn(true),
+            (true, _) => uikit::icon::shard(true),
+            (false, _) => uikit::icon::shard(false),
+        };
+        uikit::tray::set_icon(&self.icon, &art);
+        let _ = self
+            .icon
+            .set_tooltip(Some(if running { "Shard — 우회 동작 중" } else { "Shard — 우회 꺼짐" }));
+        self.toggle.set_checked(running);
+    }
+}
+
 /// Open the shell, with the real engine behind it.
 pub fn preview() -> Result<()> {
     use crate::core::EngineCore;
@@ -621,6 +665,12 @@ pub fn preview() -> Result<()> {
     if core.borrow().shared.config.read().start_engine_on_launch {
         core.borrow_mut().start();
     }
+
+    // The switch in the notification area. It is what lets the window be put
+    // away while the bypass keeps running — closing the window is tidying it
+    // out of the way, not stopping the program.
+    let tray = Tray::build()?;
+    tray.follow(&core.borrow());
 
     let engine = core.clone();
     let jobs = saving.clone();
@@ -745,6 +795,26 @@ pub fn preview() -> Result<()> {
     // window's own messages: they finish on their own threads, and the page
     // learns about it here.
     shell.run(|shell| {
+        // The tray, first: it is how the window comes back once it has been put
+        // away, so it has to be answered even while nothing else is happening.
+        while let Ok(event) = tray.events.tray.try_recv() {
+            if uikit::tray::is_activation(&event) {
+                shell.show();
+            }
+        }
+        while let Ok(event) = tray.events.menu.try_recv() {
+            let id = event.id();
+            if id == tray.toggle.id() {
+                core.borrow_mut().toggle();
+                shell.say_engine(&core.borrow());
+                tray.follow(&core.borrow());
+            } else if id == tray.open.id() {
+                shell.show();
+            } else if id == tray.quit.id() {
+                shell.quit();
+            }
+        }
+
         let drained = saving.borrow_mut().drain();
         for (note, failed) in &drained.finished {
             shell.tell_page(&if *failed {
@@ -1157,11 +1227,12 @@ impl Shell {
     pub fn say_engine(&self, core: &crate::core::EngineCore) {
         let (headline, kind) = core.headline();
         self.tell(&format!(
-            r#"{{"t":"engine","running":{},"kind":"{}","headline":"{}","detail":"{}"}}"#,
+            r#"{{"t":"engine","running":{},"kind":"{}","headline":"{}","detail":"{}","note":"{}"}}"#,
             core.running(),
             kind,
             escape(headline),
             escape(&core.detail()),
+            escape(core.note()),
         ));
     }
 
@@ -1193,6 +1264,30 @@ impl Shell {
     fn maximise(&self) {
         let zoomed = unsafe { IsZoomed(self.hwnd) } != 0;
         unsafe { ShowWindow(self.hwnd, if zoomed { SW_RESTORE } else { SW_MAXIMIZE }) };
+    }
+
+    /// Put the window away without stopping anything.
+    ///
+    /// Closing is tidying: the bypass carries on, the downloads carry on, and
+    /// the icon in the notification area is how it all comes back. Ending the
+    /// program is a separate thing, and it is asked for from there.
+    pub fn hide(&self) {
+        unsafe { ShowWindow(self.hwnd, SW_HIDE) };
+    }
+
+    /// Bring it back, in front of whatever is there.
+    pub fn show(&self) {
+        unsafe {
+            ShowWindow(self.hwnd, SW_SHOW);
+            SetForegroundWindow(self.hwnd);
+        }
+        self.lay_out();
+    }
+
+    /// End the program for good.
+    pub fn quit(&self) {
+        QUITTING.with(|cell| cell.set(true));
+        unsafe { PostMessageW(self.hwnd, WM_CLOSE, 0, 0) };
     }
 }
 
@@ -1383,6 +1478,13 @@ unsafe extern "system" fn procedure(
                 }
             }
             HTCLIENT as LRESULT
+        }
+        // The close button is "put it away", the way it was when the settings
+        // window closed to the tray. Only an explicit quit ends the program, and
+        // that sets the flag before asking the window to close.
+        WM_CLOSE if !QUITTING.with(|cell| cell.get()) => {
+            unsafe { ShowWindow(hwnd, SW_HIDE) };
+            0
         }
         WM_SIZE => {
             relayout(hwnd);

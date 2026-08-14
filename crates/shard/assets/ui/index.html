@@ -66,16 +66,27 @@
     <section id="home" class="view">
       <p class="wordmark">S H A R D</p>
 
+      <!--
+          The switch, to the same numbers the drawn one used: a 156 box, a body
+          of radius 72, a ring around it, three soft rings behind for the glow,
+          and a glyph of radius 72×0.42 whose arc opens at the top with the stem
+          through the gap.
+      -->
       <button id="power" aria-pressed="false" title="엔진 켜기/끄기">
-        <span class="ring"></span>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3v9" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
-          <path d="M6.6 6.6a7.5 7.5 0 1 0 10.8 0" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        <svg viewBox="0 0 156 156" aria-hidden="true">
+          <circle class="halo" cx="78" cy="78" r="98"/>
+          <circle class="halo" cx="78" cy="78" r="89"/>
+          <circle class="halo" cx="78" cy="78" r="80"/>
+          <circle class="body" cx="78" cy="78" r="72"/>
+          <circle class="ring" cx="78" cy="78" r="72"/>
+          <path class="glyph" d="M103.53 61.80 A30.24 30.24 0 1 1 52.47 61.80"/>
+          <path class="glyph" d="M78 38.69 V72.56"/>
         </svg>
       </button>
 
       <h1 id="headline">꺼짐</h1>
       <p id="detail">버튼을 눌러 시작하세요</p>
+      <p id="note"></p>
 
       <div id="downloads"></div>
 
