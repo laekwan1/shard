@@ -29,7 +29,14 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 /// The colour behind the page while it is still coming up, so the window does
 /// not flash white on the way in.
-const SURFACE: u32 = 0x0010_0e0e;
+/// The colour behind the page: the caption's own, so the band reaches the frame
+/// with nothing showing between them.
+///
+/// The web view is set four pixels in from every edge, because a child window
+/// takes the pointer and the frame would never hear the drag that resizes it.
+/// Those four pixels are this colour — near black, it read as a gap between the
+/// window and its own contents.
+const SURFACE: u32 = 0x0020_2020;
 
 /// The timer that keeps the loop turning while nothing is being pressed.
 const TICK_TIMER: usize = 1;

@@ -283,31 +283,41 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 */
 #library { display: flex; flex-direction: column; background: var(--toolbar); }
 
-/* The segmented control, to the same shape the phone draws: a rounded well with
-   the one in force lifted out of it as a pill, ringed in white. */
+/*
+    The segmented control: a rounded well with the one in force lifted out of it
+    as a pill, ringed in white — the shape the phone draws. Only as wide as the
+    two names need, at the left where the row below it starts, rather than
+    stretched across the window: a control that spans the whole width reads as a
+    header, and this is a switch.
+*/
 #shelves {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   flex: none;
-  margin: 8px 8px 2px;
-  padding: 4px;
+  align-self: flex-start;
+  margin: 8px 12px 6px;
+  padding: 3px;
   background: var(--raised);
-  border-radius: 14px;
+  border-radius: 11px;
 }
 .shelf {
-  flex: 1;
-  height: 34px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 82px;
+  height: 27px;
+  padding: 0 12px;
+  font-size: 11.5px;
   color: var(--muted);
   background: transparent;
-  border: 1.5px solid transparent;
-  border-radius: 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   transition: color .13s, background .13s, border-color .13s;
 }
-.shelf svg { width: 22px; height: 22px; }
+.shelf svg { width: 15px; height: 15px; }
 .shelf:hover { color: var(--on-surface); }
-.shelf.on { color: #fff; background: #34343b; border-color: #ffffffb3; }
+.shelf.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
 
 #sheet {
   flex: 1;
@@ -316,34 +326,37 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   flex-direction: column;
 }
 
-#folders { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; flex-wrap: wrap; }
+#folders { display: flex; align-items: center; gap: 2px; padding: 0 10px; flex-wrap: wrap; }
 .folder {
-  padding: 7px 12px 8px;
-  font-size: 13px;
+  padding: 5px 10px 7px;
+  font-size: 11.5px;
   color: var(--muted);
-  border-bottom: 2.5px solid transparent;
+  border-bottom: 2px solid transparent;
   border-radius: 6px 6px 0 0;
   transition: color .12s, background .12s;
 }
 .folder:hover { color: var(--on-surface); background: #ffffff0a; }
-.folder.on { color: var(--on-surface); font-weight: 700; border-bottom-color: var(--accent); }
+.folder.on { color: var(--on-surface); border-bottom-color: var(--accent); }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #22d3ee26; color: #fff; }
 /* A soft square rather than a circle: it stands beside folder tabs, and a round
    button in a row of square-shouldered ones reads as a different kind of thing. */
-.folder.add { margin-left: auto; color: var(--muted); font-size: 15px; border-radius: 8px; padding: 4px 9px 6px; }
+.folder.add { margin-left: auto; color: var(--muted); font-size: 14px; border-radius: 7px; padding: 3px 8px 5px; border-bottom-width: 0; }
 .folder.add:hover { background: #ffffff14; color: #fff; }
 
 /*
     The list is the page under the chrome: darker, edged, and only as tall as it
     needs to be. What is left below it stays the colour of everything above the
     list, which is what divides the two without a rule drawn between them.
+
+    No line between one row and the next. The rows are far enough apart to be
+    told apart, and a rule under each one turns a short list into a table.
 */
 #files {
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 2px 0 4px;
+  padding: 4px 0 6px;
   background: var(--surface);
   border-top: 1px solid var(--divider);
   border-bottom: 1px solid var(--divider);
@@ -352,28 +365,31 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .file {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 9px 14px;
-  border-bottom: 1px solid #ffffff0a;
+  gap: 8px;
+  padding: 7px 10px 7px 14px;
+  border-radius: 8px;
+  margin: 0 6px;
 }
-.file:hover { background: #ffffff08; }
+.file:hover { background: #ffffff0d; }
 .file.held { background: #22d3ee1f; }
-.file .title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file .facts { font-size: 10px; color: var(--muted); white-space: nowrap; }
+/* The name gives way first: it is the one thing that can be cut and still read,
+   and without this the button at the end was squeezed out of round. */
+.file .title { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file .facts { flex: 0 1 auto; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .file .go {
+  flex: none;
   margin-left: auto;
-  width: 30px; height: 30px;
+  width: 26px; height: 26px;
   display: grid; place-items: center;
   border-radius: 50%;
   color: var(--muted);
-  border: 1px solid transparent;
-  transition: color .12s, border-color .12s, background .12s;
+  transition: color .12s, background .12s;
 }
-.file .go svg { width: 12px; height: 12px; }
-.file .go:hover { color: #fff; border-color: #ffffff59; background: #ffffff14; }
-.file .rename { flex: 1; font: inherit; font-size: 13px; color: var(--on-surface); background: var(--field); border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; }
+.file .go svg { width: 11px; height: 11px; }
+.file .go:hover { color: #fff; background: #ffffff1f; }
+.file .rename { flex: 1; font: inherit; font-size: 12px; color: var(--on-surface); background: var(--field); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 8px; }
 
-#empty { margin: 40px auto; max-width: 34ch; text-align: center; font-size: 12px; color: var(--muted); line-height: 1.6; }
+#empty { margin: 34px auto; text-align: center; font-size: 11.5px; color: var(--muted); }
 
 /* ---- settings -------------------------------------------------------------
    A column of groups, each a few settings: what it is on the left with a line
