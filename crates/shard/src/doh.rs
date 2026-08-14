@@ -241,18 +241,62 @@ fn build_client(cfg: &Doh) -> Result<reqwest::Client> {
         .pool_idle_timeout(Duration::from_secs(90))
         .user_agent("shard/0.1");
 
+    // The named entries first, so a list that says which host it means is not
+    // also read as a list to be counted through.
+    let named: Vec<(String, IpAddr)> = cfg.bootstrap.iter().filter_map(|line| named_bootstrap(line)).collect();
+    let bare: Vec<&String> = cfg.bootstrap.iter().filter(|line| named_bootstrap(line).is_none()).collect();
+
     for (index, url) in cfg.upstreams.iter().enumerate() {
         let Some(host) = url_host(url) else {
             tracing::warn!("skipping malformed upstream {url}");
             continue;
         };
-        let Some(bootstrap) = cfg.bootstrap.get(index) else { continue };
-        match bootstrap.parse::<IpAddr>() {
-            Ok(ip) => builder = builder.resolve(&host, SocketAddr::new(ip, 443)),
-            Err(e) => tracing::warn!("bootstrap {bootstrap} is not an address: {e}"),
+        // Named for this host if it says so; otherwise the one that stands in
+        // the same place in the list, which is what the two lists have always
+        // meant when they are simply two lists of the same length.
+        let found = named
+            .iter()
+            .find(|(name, _)| *name == host)
+            .map(|(_, ip)| *ip)
+            .or_else(|| match bare.get(index) {
+                Some(line) => match line.parse::<IpAddr>() {
+                    Ok(ip) => Some(ip),
+                    Err(e) => {
+                        tracing::warn!("bootstrap {line} is not an address: {e}");
+                        None
+                    }
+                },
+                // Said out loud, because the effect of getting this wrong is a
+                // resolver that quietly stops being reachable without the DNS
+                // it was brought in to replace.
+                None => {
+                    tracing::warn!("no bootstrap address for {host}; it will be looked up normally");
+                    None
+                }
+            });
+        if let Some(ip) = found {
+            builder = builder.resolve(&host, SocketAddr::new(ip, 443));
         }
     }
     builder.build().context("building the DoH HTTP client")
+}
+
+/// A bootstrap line that names the host it belongs to: `dns.example 1.2.3.4`,
+/// or with an `=` between them.
+///
+/// Two lists paired by position hold only while nobody edits them. Reordering
+/// the upstreams, or removing one, pairs every line below it with the wrong
+/// host — and a host pinned to somebody else's address simply stops working,
+/// with nothing on screen to say why. Naming the host makes the pairing the
+/// user's own words rather than an accident of line numbers.
+fn named_bootstrap(line: &str) -> Option<(String, IpAddr)> {
+    // Trimmed before it is split: a line that begins with a space would
+    // otherwise split there and be read as having no name at all.
+    let line = line.trim();
+    let (name, address) = line.split_once('=').or_else(|| line.split_once(char::is_whitespace))?;
+    let ip = address.trim().parse::<IpAddr>().ok()?;
+    let name = name.trim().to_ascii_lowercase();
+    (!name.is_empty()).then_some((name, ip))
 }
 
 /// Host portion of an `https://host/path` URL, without pulling in a URL parser.
@@ -297,6 +341,38 @@ mod tests {
             bootstrap: vec!["1.1.1.1".into()],
             ..Default::default()
         };
+        assert!(build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn bootstrap_lines_can_name_their_host() {
+        assert_eq!(
+            named_bootstrap("dns.google=8.8.8.8"),
+            Some(("dns.google".to_string(), "8.8.8.8".parse().unwrap()))
+        );
+        assert_eq!(
+            named_bootstrap("  DNS.Google   8.8.4.4 "),
+            Some(("dns.google".to_string(), "8.8.4.4".parse().unwrap()))
+        );
+        // A bare address is not a naming; it keeps its place in the list.
+        assert_eq!(named_bootstrap("1.1.1.1"), None);
+        assert_eq!(named_bootstrap("dns.google=not-an-address"), None);
+        assert_eq!(named_bootstrap("=1.1.1.1"), None);
+    }
+
+    #[test]
+    fn a_named_bootstrap_is_not_counted_as_a_bare_one() {
+        // The pairing that matters: the named line belongs to b, and a still
+        // gets the first bare address rather than being pushed along by it.
+        let cfg = Doh {
+            upstreams: vec!["https://a.example/dns-query".into(), "https://b.example/dns-query".into()],
+            bootstrap: vec!["b.example=9.9.9.9".into(), "1.1.1.1".into()],
+            ..Default::default()
+        };
+        let named: Vec<_> = cfg.bootstrap.iter().filter_map(|l| named_bootstrap(l)).collect();
+        let bare: Vec<_> = cfg.bootstrap.iter().filter(|l| named_bootstrap(l).is_none()).collect();
+        assert_eq!(named.len(), 1);
+        assert_eq!(bare, vec![&"1.1.1.1".to_string()]);
         assert!(build_client(&cfg).is_ok());
     }
 

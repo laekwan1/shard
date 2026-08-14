@@ -39,6 +39,17 @@
 * { scrollbar-width: none; }
 *::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
+/*
+    `hidden` means gone, whatever else says otherwise.
+
+    The browser's own rule for it is a plain element rule, so any `display` set
+    on an id quietly beat it — and a screen that had been put away carried on
+    being drawn underneath the one that replaced it. That is what made the
+    library unreachable: pressing its tab did switch to it, but the home screen
+    was still there, full height, on top of it.
+*/
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -129,7 +140,19 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .tab .x { width: 15px; height: 15px; border-radius: 50%; font-size: 10px; color: var(--muted); flex: none; }
 .tab .x:hover { background: #ffffff26; color: #fff; }
 
-#newtab { width: 24px; height: 24px; flex: none; color: var(--muted); font-size: 14px; align-self: center; border-radius: 6px; }
+/* Sized to the tabs it sits beside and standing on the same line as them, not
+   centred in the band: at the caption's full height it read as the largest
+   thing in a row of small ones. */
+#newtab {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  align-self: flex-end;
+  margin-bottom: 3px;
+  border-radius: 6px;
+}
 #newtab:hover { color: var(--on-surface); background: #ffffff14; }
 
 /* ---- the address row ------------------------------------------------------ */
@@ -142,7 +165,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   padding: 0 8px;
   background: var(--toolbar);
 }
-#address[hidden] { display: none; }
 #address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: 8px; color: var(--muted); font-size: 16px; }
 #address button:hover { color: var(--on-surface); background: #ffffff0f; }
 #url {
@@ -177,7 +199,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 
 #screen { height: calc(100% - var(--bar)); overflow: hidden; }
 .view { height: 100%; overflow-y: auto; overflow-x: hidden; }
-.view[hidden] { display: none; }
 
 /* ---- home ----------------------------------------------------------------
    Laid out to the same measurements the drawn window used: 34 above the
@@ -424,15 +445,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   display: flex;
   flex-direction: column;
 }
-/* Setting `display` on an id beats the browser's own rule for `hidden`, so the
-   hidden state has to be spelled out — without this the player covers the whole
-   window from the moment it opens, which is exactly what it did. */
-#player[hidden] { display: none; }
 #stage { flex: 1; position: relative; display: grid; place-items: center; overflow: hidden; }
 #video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 /* A song has no picture, so the note stands in for one. */
 #art { position: absolute; display: grid; place-items: center; width: 148px; height: 148px; border-radius: 26px; background: linear-gradient(135deg, #0e6b7a, #22d3ee); }
-#art[hidden] { display: none; }
 #art svg { width: 62px; height: 62px; color: #04252b; }
 
 #controls { background: #0b0b0d; border-top: 1px solid var(--divider); padding: 10px 14px 12px; }

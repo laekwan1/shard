@@ -76,7 +76,9 @@ function paintTabs(message) {
   // reading the tab as "wherever you already were" made it do nothing at all
   // from the home screen, which is where it is pressed from most.
   const ours = document.createElement("button");
-  ours.className = "tab" + (browsing ? "" : " on");
+  // Lit when the library is what is up — not whenever no site is being browsed,
+  // which had it looking pressed from the home screen it does not belong to.
+  ours.className = "tab" + (!browsing && here === "library" ? " on" : "");
   ours.innerHTML = '<span class="label">보관함</span>';
   ours.addEventListener("click", () => show("library"));
   tabsEl.appendChild(ours);

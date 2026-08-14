@@ -6,7 +6,7 @@
 //! rather than a control in one place and a reader in another.
 
 use crate::config::{AudioQuality, Config, Scope};
-use crate::strategy::{Desync, Fooling, SplitAt};
+use crate::strategy::{Desync, Fooling, QuicMode, SplitAt};
 
 /// What sort of control a setting needs.
 enum Kind {
@@ -62,6 +62,14 @@ fn split_name(v: SplitAt) -> &'static str {
         SplitAt::HostMidpoint => "host",
         SplitAt::RecordHeader => "record",
         SplitAt::Fixed => "fixed",
+    }
+}
+
+fn quic_name(v: QuicMode) -> &'static str {
+    match v {
+        QuicMode::Pass => "pass",
+        QuicMode::Drop => "drop",
+        QuicMode::Decoy => "decoy",
     }
 }
 
@@ -157,6 +165,17 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     help: "같은 곳을 다시 학습하기까지 기다리는 시간.",
                     kind: Kind::Number(cfg.auto_learn_cooldown_min as i64, 1, 1440),
                 },
+                // Learned strategies had no way in or out of this screen, so a
+                // site that had been learned wrongly stayed learned wrongly.
+                // Shown as the list of what has been learned: a line taken out
+                // is that site forgotten, and it goes back to the settings
+                // above the next time it is visited.
+                Item {
+                    key: "overrides",
+                    label: "학습된 사이트",
+                    help: "스스로 찾아낸 전략이 있는 곳들입니다. 줄을 지우면 그 곳의 학습을 잊고 기본 방식으로 돌아갑니다. 여기에 새로 적어 넣을 수는 없습니다.",
+                    kind: Kind::Lines(cfg.overrides.keys().cloned().collect()),
+                },
             ],
         ),
         (
@@ -222,6 +241,41 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     help: "자동으로 구한 값이 이보다 커지지 않게 합니다.",
                     kind: Kind::Number(cfg.strategy.auto_ttl_cap as i64, 1, 12),
                 },
+                Item {
+                    key: "strategy.decoy_host",
+                    label: "미끼 호스트",
+                    help: "미끼가 광고할 이름 — 차단되지 않은 이름이면 무엇이든 됩니다.",
+                    kind: Kind::Text(cfg.strategy.decoy_host.clone()),
+                },
+                Item {
+                    key: "strategy.quic",
+                    label: "QUIC 처리",
+                    help: "QUIC은 ClientHello가 암호화되어 호스트명을 읽을 수 없습니다. 차단하면 브라우저가 TCP로 물러나 위 방식이 적용됩니다.",
+                    kind: choice(cfg.strategy.quic, QuicMode::ALL, quic_name, QuicMode::label),
+                },
+            ],
+        ),
+        (
+            "평문 HTTP",
+            vec![
+                Item {
+                    key: "strategy.http_split",
+                    label: "Host 헤더 값 분할",
+                    help: "암호화되지 않은 HTTP에서 호스트 이름을 두 조각으로 나눠 보냅니다.",
+                    kind: Kind::Toggle(cfg.strategy.http_split),
+                },
+                Item {
+                    key: "strategy.http_host_case",
+                    label: "Host → hOsT 변조",
+                    help: "헤더 이름은 대소문자를 가리지 않으므로 서버는 영향받지 않습니다.",
+                    kind: Kind::Toggle(cfg.strategy.http_host_case),
+                },
+                Item {
+                    key: "strategy.http_host_space",
+                    label: "Host: 뒤 공백 추가",
+                    help: "이름과 값 사이의 빈칸 하나. 규격에 어긋나지 않습니다.",
+                    kind: Kind::Toggle(cfg.strategy.http_host_space),
+                },
             ],
         ),
         (
@@ -254,7 +308,7 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 Item {
                     key: "doh.bootstrap",
                     label: "부트스트랩",
-                    help: "상위 서버의 주소를 처음 알아낼 때 쓰는 곳.",
+                    help: "상위 서버의 주소를 처음 알아낼 때 쓰는 곳. 위 목록과 같은 순서로 짝지어지며, \"dns.google=8.8.8.8\"처럼 쓰면 순서와 무관하게 그 서버에 붙습니다.",
                     kind: Kind::Lines(cfg.doh.bootstrap.clone()),
                 },
             ],
@@ -387,6 +441,12 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
             }
         }
         "domains" => cfg.domains = lines(),
+        // Only ever fewer. What a strategy for a site is cannot be written on a
+        // line, so what is left standing is kept and the rest is forgotten.
+        "overrides" => {
+            let kept = lines();
+            cfg.overrides.retain(|host, _| kept.iter().any(|line| line == host));
+        }
         "exclude" => cfg.exclude = lines(),
         "auto_learn" => cfg.auto_learn = on,
         "auto_learn_threshold" => match number(1, 20) {
@@ -445,6 +505,18 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
             Some(n) => cfg.strategy.auto_ttl_delta = n as u8,
             None => return false,
         },
+        "strategy.decoy_host" => cfg.strategy.decoy_host = value.trim().to_string(),
+        "strategy.http_split" => cfg.strategy.http_split = on,
+        "strategy.http_host_case" => cfg.strategy.http_host_case = on,
+        "strategy.http_host_space" => cfg.strategy.http_host_space = on,
+        "strategy.quic" => {
+            cfg.strategy.quic = match value {
+                "pass" => QuicMode::Pass,
+                "drop" => QuicMode::Drop,
+                "decoy" => QuicMode::Decoy,
+                _ => return false,
+            }
+        }
         "strategy.auto_ttl_cap" => match number(1, 12) {
             Some(n) => cfg.strategy.auto_ttl_cap = n as u8,
             None => return false,
@@ -507,6 +579,23 @@ mod tests {
         assert_eq!(cfg.strategy.fake_ttl, 64);
         assert!(apply(&mut cfg, "auto_learn_threshold", "0"));
         assert_eq!(cfg.auto_learn_threshold, 1);
+    }
+
+    #[test]
+    fn a_learned_site_can_be_forgotten_but_not_invented() {
+        let mut cfg = Config::default();
+        cfg.overrides.insert("a.com".into(), crate::strategy::Strategy::default());
+        cfg.overrides.insert("b.com".into(), crate::strategy::Strategy::default());
+
+        assert!(apply(&mut cfg, "overrides", "a.com"));
+        assert!(cfg.overrides.contains_key("a.com"));
+        assert!(!cfg.overrides.contains_key("b.com"));
+
+        // A name nobody has learned anything about stays unlearned: there is no
+        // strategy to give it.
+        assert!(apply(&mut cfg, "overrides", "a.com\nc.com"));
+        assert!(!cfg.overrides.contains_key("c.com"));
+        assert_eq!(cfg.overrides.len(), 1);
     }
 
     #[test]

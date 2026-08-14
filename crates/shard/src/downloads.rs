@@ -24,6 +24,9 @@ pub struct Job {
     /// What the page calls it when it asks for it to be stopped.
     pub id: u64,
     pub title: String,
+    /// The file this is going to end up as — folder and name together. Two
+    /// downloads with the same one would be two threads writing one file.
+    key: String,
     rx: std::sync::mpsc::Receiver<Step>,
     pub done: u64,
     pub total: u64,
@@ -281,6 +284,19 @@ impl Downloads {
         let expected = job.video.bytes + job.audio.bytes;
         let title = offer.title.clone();
 
+        // The same video twice at once writes one file from two threads, and
+        // what lands is neither of them. Pressing a row twice — while the page
+        // is still there and the panel has not closed yet — is an easy thing to
+        // do, so it is answered rather than obeyed.
+        let key = format!("{}|{}", job.into.display(), title);
+        if self
+            .list
+            .iter()
+            .any(|other| other.state == State::Running && other.key == key)
+        {
+            return youtube::say_script("이미 받고 있습니다.", true);
+        }
+
         let (tx, rx) = std::sync::mpsc::channel::<Step>();
         let cancel = Arc::new(AtomicBool::new(false));
         let stop = cancel.clone();
@@ -300,6 +316,7 @@ impl Downloads {
         self.list.push(Job {
             id,
             title,
+            key,
             rx,
             done: 0,
             total: expected,

@@ -34,6 +34,12 @@ const SURFACE: u32 = 0x0010_0e0e;
 /// The timer that keeps the loop turning while nothing is being pressed.
 const TICK_TIMER: usize = 1;
 
+/// The shortest gap between two turns of the periodic work.
+///
+/// The timer above sets the pace while the window is idle; this is the ceiling
+/// when it is not, and messages are pouring in from the pointer.
+const BEAT: std::time::Duration = std::time::Duration::from_millis(120);
+
 /// How wide the invisible grip around the window is, in pixels.
 const RESIZE_EDGE: i32 = 4;
 
@@ -589,6 +595,7 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))?;
 
     let view = Rc::new(view);
+    watch_process(&view, "shard://shard.localhost/index.html");
     SHELL.with(|cell| *cell.borrow_mut() = Some(view.clone()));
     let (to_pages, pages) = std::sync::mpsc::channel();
     let shell = Shell {
@@ -600,6 +607,8 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         pages,
         to_pages,
         answer: RefCell::new(Some(Box::new(on_ask))),
+        beat: std::cell::Cell::new(std::time::Instant::now()),
+        said_downloads: RefCell::new(String::new()),
     };
     shell.lay_out();
     unsafe { ShowWindow(hwnd, SW_SHOW) };
@@ -675,6 +684,9 @@ pub fn preview() -> Result<()> {
     let jobs = saving.clone();
     let shell = open("Shard", move |shell, ask| match ask {
         Ask::Ready => {
+            // A page that has just loaded knows nothing, whatever was last sent
+            // to the one before it.
+            shell.forget_what_was_said();
             shell.say_engine(&engine.borrow());
             shell.say_downloads(&jobs.borrow());
             shell.say_tabs();
@@ -822,11 +834,8 @@ pub fn preview() -> Result<()> {
                 crate::download::youtube::flash_script(note)
             });
         }
-        if !drained.finished.is_empty() {
-            shell.say_downloads(&saving.borrow());
-        } else if !saving.borrow().list.is_empty() {
-            shell.say_downloads(&saving.borrow());
-        }
+        // Every beat, and sent only when it reads differently from last time.
+        shell.say_downloads(&saving.borrow());
         if drained.saved {
             // A new file is on a shelf: if the library is being looked at, it
             // shows up without anything being pressed.
@@ -836,6 +845,57 @@ pub fn preview() -> Result<()> {
     // The machine's own DNS goes back before the window does.
     core.borrow_mut().stop();
     Ok(())
+}
+
+/// Notice when a page's own process dies, and put the page back.
+///
+/// A web view is two programs: this one, and the process drawing the page. When
+/// the drawing side dies — a page that ran out of memory is the usual reason —
+/// the view stays exactly where it was, blank, and there is nothing from here
+/// that looks wrong. The runtime does say so, but wry does not pass it on, so
+/// this asks the view's own interface to be told.
+///
+/// Held by a weak handle: the view owns the handler, so a strong one would be a
+/// ring neither end could leave, and closing a tab would free nothing.
+fn watch_process(view: &Rc<wry::WebView>, home: &str) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_PROCESS_FAILED_KIND, COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED,
+    };
+    use wry::WebViewExtWindows;
+
+    let weak = Rc::downgrade(view);
+    let home = home.to_string();
+    let handler = webview2_com::ProcessFailedEventHandler::create(Box::new(move |_, args| {
+        let mut kind = COREWEBVIEW2_PROCESS_FAILED_KIND(-1);
+        if let Some(args) = args.as_ref() {
+            let _ = unsafe { args.ProcessFailedKind(&mut kind) };
+        }
+        // The browser process going takes every view in the program with it,
+        // this one included, and nothing left here can draw. Said plainly in the
+        // log rather than dressed up as a recovery that cannot work.
+        if kind == COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED {
+            tracing::error!("WebView2 browser process exited; Shard must be restarted");
+            return Ok(());
+        }
+        let Some(view) = weak.upgrade() else { return Ok(()) };
+        // Where it was, if it can still be asked; where it started, if not.
+        let back = match view.url() {
+            Ok(url) if !url.is_empty() && url != "about:blank" => url,
+            _ => home.clone(),
+        };
+        tracing::warn!("page process failed (kind {}); reloading {back}", kind.0);
+        if let Err(e) = view.load_url(&back) {
+            tracing::error!("could not reload after a process failure: {e}");
+        }
+        Ok(())
+    }));
+
+    // Registered for as long as the view lives, so the token is not kept: there
+    // is nothing later that would want to stop listening.
+    let mut token = 0i64;
+    if let Err(e) = unsafe { view.webview().add_ProcessFailed(&handler, &mut token) } {
+        tracing::warn!("could not watch for page process failures: {e}");
+    }
 }
 
 /// A tab's label, taken from its address: the host, which is what a tab strip
@@ -894,6 +954,13 @@ pub struct Shell {
     /// closure quietly took its place — so every ask but the window buttons was
     /// thrown away and the program did almost nothing it was told.
     answer: RefCell<Option<Box<dyn Fn(&Shell, Ask)>>>,
+    /// When the periodic work last ran, so it runs on a beat rather than once
+    /// per window message. See `run`.
+    beat: std::cell::Cell<std::time::Instant>,
+    /// The last thing the download list was told, so an unchanged list is not
+    /// sent again. Each send crosses into the page and makes it lay out a list
+    /// that looks exactly as it already did.
+    said_downloads: RefCell<String>,
 }
 
 /// One tab: the page, and what the strip needs to draw it.
@@ -906,9 +973,16 @@ pub struct Tab {
 impl Shell {
     /// Run until the window is closed, answering the page as it asks.
     ///
-    /// `tick` is called every turn — after the page's messages, and on the
-    /// timer that keeps running while nothing is being pressed — for the work
-    /// that has to happen whether or not anyone is typing.
+    /// `tick` is called on a beat — a few times a second, whether or not
+    /// anything is being pressed — for the work that has to happen anyway:
+    /// the tray, and what the running downloads have to say.
+    ///
+    /// On a beat rather than after every message. Windows sends one for every
+    /// pixel the pointer moves, and the tick tells the page how the downloads
+    /// stand; while something was downloading, moving the mouse across the
+    /// window put hundreds of those a second into the page's own thread. That
+    /// is what made the window crawl and the pointer flicker between shapes as
+    /// soon as a download had been started.
     pub fn run(&self, tick: impl Fn(&Shell)) {
         let mut message = MSG {
             hwnd: std::ptr::null_mut(),
@@ -927,8 +1001,13 @@ impl Shell {
                 TranslateMessage(&message);
                 DispatchMessageW(&message);
             }
+            // What the page asked for, straight away: these arrive by hand and
+            // waiting for the next beat to answer them would be felt.
             self.pump();
-            tick(self);
+            if self.beat.get().elapsed() >= BEAT {
+                self.beat.set(std::time::Instant::now());
+                tick(self);
+            }
         }
     }
 
@@ -1046,6 +1125,7 @@ impl Shell {
         match crate::download::browser::new_view(self.hwnd, url, &startup, &self.to_pages, id) {
             Ok(view) => {
                 let view = Rc::new(view);
+                watch_process(&view, url);
                 TABS.with(|cell| cell.borrow_mut().push(view.clone()));
                 self.tabs.borrow_mut().push(Tab {
                     view,
@@ -1205,6 +1285,11 @@ impl Shell {
         ));
     }
 
+    /// Forget what the page has been told, so the next telling goes through.
+    pub fn forget_what_was_said(&self) {
+        self.said_downloads.borrow_mut().clear();
+    }
+
     /// Tell the page what is being fetched, so the home screen can show it.
     pub fn say_downloads(&self, downloads: &crate::downloads::Downloads) {
         let rows: Vec<String> = downloads
@@ -1219,7 +1304,14 @@ impl Shell {
                 )
             })
             .collect();
-        self.tell(&format!(r#"{{"t":"downloads","list":[{}]}}"#, rows.join(",")));
+        let message = format!(r#"{{"t":"downloads","list":[{}]}}"#, rows.join(","));
+        // Only when it reads differently. Nothing downloading means the same
+        // empty list over and over, and a stalled one means the same numbers.
+        if *self.said_downloads.borrow() == message {
+            return;
+        }
+        *self.said_downloads.borrow_mut() = message.clone();
+        self.tell(&message);
     }
 
     /// Tell the page how the engine stands, in the shape its home screen reads.
