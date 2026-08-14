@@ -30,6 +30,53 @@ for (const button of document.querySelectorAll("#frame-buttons button")) {
   button.addEventListener("click", () => send("window." + button.dataset.window));
 }
 
+// ---- the window's own edges -------------------------------------------------
+//
+// This page fills the window, and a child window takes the pointer wherever it
+// reaches, so the frame never hears a press on its own edge. Within a few pixels
+// of one the press is reported instead, and Windows carries on with the resize
+// exactly as if the edge had been grabbed — which is what lets the page be laid
+// out flush to the frame rather than a few pixels inside it.
+
+const GRIP = 6;
+const EDGES = ["t", "b", "l", "r", "tl", "tr", "bl", "br"];
+
+function edgeAt(e) {
+  // With a site in front this page is only the strip at the top, so its own
+  // bottom is not the window's — unless something is playing, which gives it
+  // the whole window again. Reading it as the window's bottom would have made
+  // the row under the tabs resize the window downwards.
+  const toTheFloor = !browsing || !player.hidden;
+  let at = "";
+  if (e.clientY <= GRIP) at += "t";
+  else if (toTheFloor && e.clientY >= window.innerHeight - GRIP) at += "b";
+  if (e.clientX <= GRIP) at += "l";
+  else if (e.clientX >= window.innerWidth - GRIP) at += "r";
+  return at;
+}
+
+document.addEventListener("mousemove", (e) => {
+  const at = edgeAt(e);
+  // On the root, where a rule can reach every element under the pointer: the
+  // shape has to be the edge's whatever it is passing over.
+  for (const edge of EDGES) {
+    document.documentElement.classList.toggle("grip-" + edge, edge === at);
+  }
+});
+
+document.addEventListener(
+  "mousedown",
+  (e) => {
+    if (e.button !== 0) return;
+    const at = edgeAt(e);
+    if (!at) return;
+    e.preventDefault();
+    e.stopPropagation();
+    send("window.resize", { edge: at });
+  },
+  true
+);
+
 // ---- where we are ----------------------------------------------------------
 
 const views = ["home", "library", "settings"];

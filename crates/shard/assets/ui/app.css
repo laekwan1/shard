@@ -50,6 +50,16 @@
 */
 [hidden] { display: none !important; }
 
+/*
+    The shape the pointer takes on the window's own edges. Set on the root and
+    forced onto everything under it: the edges run along the tab strip, the list
+    and the settings alike, and each of those sets a cursor of its own.
+*/
+html.grip-t, html.grip-t *, html.grip-b, html.grip-b * { cursor: ns-resize !important; }
+html.grip-l, html.grip-l *, html.grip-r, html.grip-r * { cursor: ew-resize !important; }
+html.grip-tl, html.grip-tl *, html.grip-br, html.grip-br * { cursor: nwse-resize !important; }
+html.grip-tr, html.grip-tr *, html.grip-bl, html.grip-bl * { cursor: nesw-resize !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -122,11 +132,11 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 25px;
+  height: 27px;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 150px;
-  padding: 0 7px 0 10px;
+  max-width: 172px;
+  padding: 0 8px 0 11px;
   border-radius: 7px 7px 0 0;
   font-size: 12px;
   color: var(--muted);
@@ -150,7 +160,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   color: var(--muted);
   font-size: 12px;
   align-self: flex-end;
-  margin-bottom: 3px;
+  margin: 0 0 4px 5px;
   border-radius: 6px;
 }
 #newtab:hover { color: var(--on-surface); background: #ffffff14; }
@@ -266,7 +276,9 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .download { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
 .download .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .download .track { width: 96px; height: 4px; border-radius: 99px; background: var(--field); overflow: hidden; }
-.download .fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .2s; }
+/* Told to be a block. A span is inline, and a width set on an inline box is
+   ignored — which is why the track was there and the colour in it never was. */
+.download .fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .2s; }
 .download .stop { width: 20px; height: 20px; border-radius: 50%; color: var(--muted); }
 .download .stop:hover { background: #ffffff14; color: var(--on-surface); }
 
@@ -295,7 +307,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   gap: 3px;
   flex: none;
   align-self: flex-start;
-  margin: 8px 12px 6px;
+  margin: 5px 9px 5px;
   padding: 3px;
   background: var(--raised);
   border-radius: 11px;
@@ -326,43 +338,66 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   flex-direction: column;
 }
 
-#folders { display: flex; align-items: center; gap: 2px; padding: 0 10px; flex-wrap: wrap; }
+/*
+    The folders stand on the list rather than above it: one panel, the darker
+    colour of a page, holding what is in the shelf and how it is being narrowed.
+*/
+#folders {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  flex-wrap: wrap;
+  flex: none;
+  background: var(--surface);
+  border-top: 1px solid var(--divider);
+}
+/* Named by an outline, chosen by being filled: the same pair the shelf switch
+   above is drawn with, so one row does not answer differently from the other. */
 .folder {
-  padding: 5px 10px 7px;
+  padding: 4px 11px;
   font-size: 11.5px;
   color: var(--muted);
-  border-bottom: 2px solid transparent;
-  border-radius: 6px 6px 0 0;
-  transition: color .12s, background .12s;
+  background: transparent;
+  border: 1px solid #ffffff1c;
+  border-radius: 99px;
+  transition: color .12s, background .12s, border-color .12s;
 }
-.folder:hover { color: var(--on-surface); background: #ffffff0a; }
-.folder.on { color: var(--on-surface); border-bottom-color: var(--accent); }
+.folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
+.folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
 /* Lit while a file is held over it, so a drop is never a guess. */
-.folder.over { background: #22d3ee26; color: #fff; }
-/* A soft square rather than a circle: it stands beside folder tabs, and a round
-   button in a row of square-shouldered ones reads as a different kind of thing. */
-.folder.add { margin-left: auto; color: var(--muted); font-size: 14px; border-radius: 7px; padding: 3px 8px 5px; border-bottom-width: 0; }
-.folder.add:hover { background: #ffffff14; color: #fff; }
+.folder.over { background: #22d3ee26; border-color: var(--accent); color: #fff; }
+/* Square with itself, and the same box the new-tab button in the title strip
+   is: it does the same thing a row further down. */
+.folder.add {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 12px;
+  border-color: transparent;
+  border-radius: 6px;
+}
+.folder.add:hover { background: #ffffff14; color: #fff; border-color: transparent; }
 
 /*
-    The list is the page under the chrome: darker, edged, and only as tall as it
-    needs to be. What is left below it stays the colour of everything above the
-    list, which is what divides the two without a rule drawn between them.
-
-    No line between one row and the next. The rows are far enough apart to be
-    told apart, and a rule under each one turns a short list into a table.
+    The list, in the same panel the folders are on. What is left below it stays
+    the colour of the chrome above, which is what divides the two without a rule
+    drawn between them.
 */
 #files {
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 4px 0 6px;
+  padding: 0 0 4px;
   background: var(--surface);
-  border-top: 1px solid var(--divider);
   border-bottom: 1px solid var(--divider);
 }
 #files:empty { display: none; }
 .file {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -370,7 +405,19 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   border-radius: 8px;
   margin: 0 6px;
 }
+/* A hair between one row and the next, held off both walls so it reads as a
+   division inside the list rather than as the list being ruled into a table. */
+.file + .file::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  height: 1px;
+  background: #ffffff14;
+}
 .file:hover { background: #ffffff0d; }
+.file:hover::before, .file:hover + .file::before { background: transparent; }
 .file.held { background: #22d3ee1f; }
 /* The name gives way first: it is the one thing that can be cut and still read,
    and without this the button at the end was squeezed out of round. */
@@ -566,7 +613,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* Off the floor. At the window's opening height this is the 20 it always was;
    filling a screen, it lifts with the window rather than sitting on the very
    bottom edge with everything else stranded far above it. */
-#go { margin-top: auto; margin-bottom: clamp(20px, 7vh, 96px); display: flex; gap: 18px; }
+#go { margin-top: auto; margin-bottom: clamp(30px, 13vh, 150px); display: flex; gap: 18px; }
 #go button {
   width: 34px;
   height: 34px;

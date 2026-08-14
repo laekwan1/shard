@@ -48,7 +48,14 @@ const TICK_TIMER: usize = 1;
 const BEAT: std::time::Duration = std::time::Duration::from_millis(120);
 
 /// How wide the invisible grip around the window is, in pixels.
-const RESIZE_EDGE: i32 = 4;
+///
+/// One, not four. A child window takes the pointer wherever it reaches, so this
+/// much of the frame is kept clear of the web view for the window to hear a drag
+/// on its own edge — and every pixel of it is a line of a colour that is not the
+/// page's, between the window and its contents. The page reports the edges
+/// itself now (see `Ask::WindowResize`), so this is only what is left for when
+/// a page is too busy to answer.
+const RESIZE_EDGE: i32 = 1;
 
 /// How tall the title strip is — a Windows caption's own height, since that is
 /// what it stands in for. The page draws it; this is what the layout code has to
@@ -254,6 +261,9 @@ pub enum Ask {
     WindowMinimise,
     WindowMaximise,
     WindowClose,
+    /// A press on one of the window's own edges, named by the page under the
+    /// pointer: "t", "bl", "r" and so on.
+    WindowResize(String),
     /// Anything this build does not know, kept whole so it can be reported.
     Unknown(String),
 }
@@ -308,6 +318,7 @@ pub fn read_ask(body: &str) -> Ask {
         "window.minimise" => Ask::WindowMinimise,
         "window.maximise" => Ask::WindowMaximise,
         "window.close" => Ask::WindowClose,
+        "window.resize" => Ask::WindowResize(field(body, "edge").unwrap_or_default()),
         _ => Ask::Unknown(body.to_string()),
     }
 }
@@ -1154,6 +1165,7 @@ impl Shell {
                 Ask::WindowClose => unsafe {
                     PostMessageW(self.hwnd, WM_CLOSE, 0, 0);
                 },
+                Ask::WindowResize(edge) => self.resize_from(&edge, true),
                 other => self.answer(other),
             }
         }
@@ -1192,6 +1204,13 @@ impl Shell {
             // these as the front tab's meant a page loading in the background
             // rewrote the label of the tab being looked at — the name flickering
             // between two sites.
+            // A press on the window's own edge, over a page. The site fills the
+            // window down to its corners, so this is the only way the frame ever
+            // hears about one.
+            if frame == "resize" {
+                self.resize_from(&text, false);
+                return;
+            }
             let said_by = field(payload, "tab").and_then(|id| id.parse::<u64>().ok());
             let Some(said_by) = said_by else { return };
             let changed = {
@@ -1486,6 +1505,45 @@ impl Shell {
         unsafe {
             ReleaseCapture();
             SendMessageW(self.hwnd, WM_NCLBUTTONDOWN, HTCAPTION as usize, 0);
+        }
+    }
+
+    /// Hand a drag on the window's own edge to the system, the same way.
+    ///
+    /// The page says which edge because the page is what the pointer is over: a
+    /// web view fills the window, and a window whose whole face is a child
+    /// window never hears a press on its frame. Told which edge it was, this is
+    /// the same gesture the system would have started itself.
+    fn resize_from(&self, edge: &str, from_shell: bool) {
+        // A window filling the screen has no edge to pull.
+        if unsafe { IsZoomed(self.hwnd) } != 0 {
+            return;
+        }
+        // The shell's page is only the strip at the top while a site is in
+        // front — unless something is playing, which gives it the window again.
+        // Its bottom is not the window's bottom then, and a press near it means
+        // nothing about the frame.
+        if from_shell
+            && edge.starts_with('b')
+            && self.showing.get().is_some()
+            && !PLAYING.with(|cell| cell.get())
+        {
+            return;
+        }
+        let corner = match edge {
+            "t" => HTTOP,
+            "b" => HTBOTTOM,
+            "l" => HTLEFT,
+            "r" => HTRIGHT,
+            "tl" => HTTOPLEFT,
+            "tr" => HTTOPRIGHT,
+            "bl" => HTBOTTOMLEFT,
+            "br" => HTBOTTOMRIGHT,
+            _ => return,
+        };
+        unsafe {
+            ReleaseCapture();
+            SendMessageW(self.hwnd, WM_NCLBUTTONDOWN, corner as usize, 0);
         }
     }
 
