@@ -11,17 +11,19 @@
   --surface: #111318;        /* panel_fill  rgb(17, 19, 24)  */
   --sunken: #0b0d11;         /* extreme_bg  rgb(11, 13, 17)  */
   --raised: #181b22;         /* faint_bg    rgb(24, 27, 34)  */
-  --chrome: #151820;
-  --field: #1c2029;
+  --chrome: #202020;        /* CAPTION/SURFACE 0x00202020 */
+  --toolbar: #2c2e32;       /* TOOLBAR_BG  0x00322E2C */
+  --field: #383838;         /* FIELD       0x00383838 */
   --divider: #232833;
-  --on-surface: #e2e8f0;
+  --on-surface: #f0f0f0;    /* TEXT        0x00F0F0F0 */
   --muted: #8a92a2;          /* MUTED       rgb(138, 146, 162) */
   --accent: #22d3ee;         /* ACCENT      rgb(34, 211, 238)  */
   --good: #34d399;
   --warn: #fbbf24;
   --bad: #f87171;
   --dim: #606878;            /* the power ring when it is off */
-  --bar: 38px;
+  --bar: 32px;              /* a Windows caption's own height */
+  --toolbar-h: 46px;        /* TOOLBAR_HEIGHT */
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Malgun Gothic", sans-serif;
 }
 
@@ -63,7 +65,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   display: flex;
   align-items: stretch;
   background: var(--chrome);
-  border-bottom: 1px solid var(--divider);
 }
 
 /* The chip: the app's mark and name, and the way home from anywhere.
@@ -73,23 +74,23 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #chip {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 0 14px 0 12px;
-  color: var(--muted);
+  gap: 7px;
+  padding: 0 12px 0 10px;
+  flex: none;
+  color: var(--on-surface);
   transition: color .13s;
 }
 #chip svg {
-  width: 17px;
-  height: 17px;
+  width: 16px;
+  height: 16px;
   color: var(--accent);
   /* Dimmed until wanted, so the mark is not the loudest thing on screen. */
   opacity: .82;
   transition: opacity .13s, transform .1s;
 }
 #chip span {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: .015em;
+  font-size: 12.5px;
+  font-weight: 400;
   transition: transform .1s;
 }
 #chip:hover { color: #fff; }
@@ -102,43 +103,47 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 /* Everything between the chip and the buttons drags the window. */
 #drag { flex: 1; }
 
-/* The tabs: the library and every site, in the strip beside the chip. */
-#tabs { display: flex; align-items: stretch; gap: 2px; padding: 4px 2px 0; max-width: 62%; overflow: hidden; }
+/* The tabs. Sized to sit inside a caption rather than to fill it: only as wide
+   as the name needs, up to a limit, so two tabs do not stretch across the whole
+   window the way they did when each took an equal share of it. */
+#tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0; min-width: 0; overflow: hidden; }
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  max-width: 190px;
-  padding: 0 8px 0 11px;
-  border-radius: 9px 9px 0 0;
+  gap: 5px;
+  height: 25px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 150px;
+  padding: 0 7px 0 10px;
+  border-radius: 7px 7px 0 0;
   font-size: 12px;
   color: var(--muted);
-  background: #131316;
+  background: #1a1a1a;
   transition: background .12s, color .12s;
 }
-.tab:hover { background: #1f1f24; color: var(--on-surface); }
+.tab:hover { background: #262626; color: var(--on-surface); }
 /* The one in front is the sheet below it: same colour, no seam. */
-.tab.on { background: var(--surface); color: #fff; }
+.tab.on { background: var(--toolbar); color: var(--on-surface); }
 .tab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab .x { width: 16px; height: 16px; border-radius: 50%; font-size: 11px; color: var(--muted); flex: none; }
+.tab .x { width: 15px; height: 15px; border-radius: 50%; font-size: 10px; color: var(--muted); flex: none; }
 .tab .x:hover { background: #ffffff26; color: #fff; }
 
-#newtab { width: 30px; color: var(--muted); font-size: 15px; }
-#newtab:hover { color: var(--on-surface); background: #ffffff0f; }
+#newtab { width: 24px; height: 24px; flex: none; color: var(--muted); font-size: 14px; align-self: center; border-radius: 6px; }
+#newtab:hover { color: var(--on-surface); background: #ffffff14; }
 
 /* ---- the address row ------------------------------------------------------ */
 
 #address {
-  height: 40px;
+  height: var(--toolbar-h);
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--divider);
+  background: var(--toolbar);
 }
 #address[hidden] { display: none; }
-#address button { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 16px; }
+#address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: 8px; color: var(--muted); font-size: 16px; }
 #address button:hover { color: var(--on-surface); background: #ffffff0f; }
 #url {
   flex: 1;
@@ -156,12 +161,15 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #url:focus { border-color: var(--accent); background: #1c1c21; }
 
 #frame-buttons { display: flex; }
+#frame-buttons { align-items: center; padding-right: 8px; }
 #frame-buttons button {
-  width: 44px;
-  color: var(--muted);
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--on-surface);
   transition: background .12s, color .12s;
 }
-#frame-buttons svg { width: 12px; height: 12px; }
+#frame-buttons svg { width: 11px; height: 11px; }
 #frame-buttons button:hover { background: #ffffff14; color: var(--on-surface); }
 #frame-buttons button.danger:hover { background: #e81123; color: #fff; }
 
@@ -186,7 +194,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .wordmark {
   margin: 0 0 38px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 400;
   color: var(--muted);
 }
 
@@ -224,7 +232,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #power.busy .ring { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: .5; } }
 
-#headline { margin: 26px 0 4px; font-size: 20px; font-weight: 700; }
+#headline { margin: 26px 0 4px; font-size: 20px; font-weight: 400; }
 #headline.good { color: var(--good); }
 #headline.on { color: var(--accent); }
 #headline.warn { color: var(--warn); }

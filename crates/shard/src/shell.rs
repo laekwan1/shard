@@ -31,35 +31,34 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 /// not flash white on the way in.
 const SURFACE: u32 = 0x0010_0e0e;
 
-/// The window's own border, told to the desktop manager so it stops drawing the
-/// pale one it uses by default — a white hairline around a black window.
-///
-/// `DWMWA_BORDER_COLOR`, which Windows 11 added and older versions ignore.
-const BORDER_ATTRIBUTE: u32 = 34;
-
 /// The timer that keeps the loop turning while nothing is being pressed.
 const TICK_TIMER: usize = 1;
 
 /// How wide the invisible grip around the window is, in pixels.
 const RESIZE_EDGE: i32 = 4;
 
-/// How tall the title strip is. The page draws it; this is what the layout code
-/// has to agree with, so it is stated once and read from both sides.
-pub const BAR: i32 = 38;
+/// How tall the title strip is — a Windows caption's own height, since that is
+/// what it stands in for. The page draws it; this is what the layout code has to
+/// agree with, so it is stated once and read from both sides.
+pub const BAR: i32 = 32;
 
 /// How much of the window the page keeps while a site is being looked at: the
 /// title strip with its tabs, and the address row under it. Everything below is
 /// the page being browsed, which is a child web view of its own.
-pub const CHROME: i32 = BAR + 40;
+pub const CHROME: i32 = BAR + 46;
 
-/// The size the window opens at — the one the settings window always had, so
-/// nothing about the move changes where things sit on screen.
+/// The size the window opens at.
+///
+/// The settings window asked for 500×620 of *content* and Windows put a caption
+/// on top of that. Here the caption is part of the window, so the same content
+/// means asking for that much again plus the strip — otherwise everything sits
+/// a caption's height higher than it used to.
 const WIDTH: i32 = 500;
-const HEIGHT: i32 = 620;
+const HEIGHT: i32 = 620 + BAR;
 
 /// The smallest it may be dragged to, the same floor the settings window had.
 const MIN_WIDTH: i32 = 440;
-const MIN_HEIGHT: i32 = 540;
+const MIN_HEIGHT: i32 = 540 + BAR;
 
 const CLASS: &[u16] = &[
     b'S' as u16, b'h' as u16, b'a' as u16, b'r' as u16, b'd' as u16, b'S' as u16, b'h' as u16,
@@ -1402,26 +1401,27 @@ fn create_window(title: &str) -> Result<HWND> {
     Ok(hwnd)
 }
 
-/// Tell the desktop manager this window is a dark one, so the shadow, the snap
-/// preview and the line it draws around the edge match what is inside it.
+/// Ask the desktop manager for a dark, rounded frame — the same three lines the
+/// browser window has always used.
+///
+/// The border itself is left to Windows. An imitation of a system edge is never
+/// quite the system edge, and setting a border colour of our own is what put a
+/// pale outline around the window. The light frame that appears when a window
+/// loses focus is stopped instead by answering the deactivation notice without
+/// letting the frame be redrawn (`WM_NCACTIVATE`).
 fn dark_title_bar(hwnd: HWND) {
-    let on: u32 = 1;
+    const CORNER_PREFERENCE: u32 = 33;
+    const ROUND: i32 = 2;
+    let on: i32 = 1;
+    let round: i32 = ROUND;
     unsafe {
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
-            &on as *const u32 as *const _,
-            std::mem::size_of::<u32>() as u32,
+            (&on as *const i32).cast(),
+            4,
         );
-        // The border, in the same breath. Left alone, Windows draws a pale
-        // hairline around the frame — a white edge on a black window.
-        let border: u32 = SURFACE;
-        DwmSetWindowAttribute(
-            hwnd,
-            BORDER_ATTRIBUTE,
-            &border as *const u32 as *const _,
-            std::mem::size_of::<u32>() as u32,
-        );
+        DwmSetWindowAttribute(hwnd, CORNER_PREFERENCE, (&round as *const i32).cast(), 4);
     }
 }
 
@@ -1485,6 +1485,16 @@ unsafe extern "system" fn procedure(
         WM_CLOSE if !QUITTING.with(|cell| cell.get()) => {
             unsafe { ShowWindow(hwnd, SW_HIDE) };
             0
+        }
+        // Never let the frame be redrawn as "inactive": that redraw is the pale
+        // outline that appears the moment the window loses focus.
+        WM_NCACTIVATE => 1,
+        // A click on an unfocused window should both bring it forward and press
+        // what was pressed, rather than being spent on the activation alone.
+        WM_MOUSEACTIVATE => MA_ACTIVATE as LRESULT,
+        WM_ACTIVATE => {
+            dark_title_bar(hwnd);
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_SIZE => {
             relayout(hwnd);
