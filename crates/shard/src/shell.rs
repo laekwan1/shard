@@ -53,6 +53,11 @@ pub const BAR: i32 = 32;
 /// the page being browsed, which is a child web view of its own.
 pub const CHROME: i32 = BAR + 46;
 
+/// How tall the strip along the bottom is while something is playing and one of
+/// the browsed pages is in front. The page draws it; this is the room kept for
+/// it, and the two have to be the same number or it is drawn cut in half.
+pub const NOW_PLAYING: i32 = 58;
+
 /// The size the window opens at.
 ///
 /// The settings window asked for 500×620 of *content* and Windows put a caption
@@ -85,6 +90,15 @@ thread_local! {
     /// Set once the program has been asked to end, so the close button knows
     /// whether it is tidying the window away or shutting everything down.
     static QUITTING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Whether something is playing. Beside the others so the window procedure
+    /// keeps the room for the strip while the window is being dragged.
+    static PLAYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The window the shell's page is drawn in — a child of ours, taken while it
+    /// was the only one. Needed to say which of two overlapping children is in
+    /// front, which nothing in the web view binding can be asked.
+    static SHELL_WINDOW: std::cell::Cell<HWND> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+    /// Whether that has been said already.
+    static SUNK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Put the shell and the page in front where they belong.
@@ -105,11 +119,26 @@ fn relayout(hwnd: HWND) {
     let height = (rect.bottom - rect.top - edge * 2).max(0) as u32;
     let showing = SHOWING.with(|cell| cell.get());
     let chrome = chrome_height(hwnd);
+    // Room kept along the bottom for the strip that says what is playing. The
+    // page draws it, and the page is underneath the site being browsed, so the
+    // site has to be made shorter or the strip is simply covered up.
+    let bar = if PLAYING.with(|cell| cell.get()) { scaled(hwnd, NOW_PLAYING) } else { 0 };
 
     // With a site in front the page keeps only its chrome — the tabs and the
     // address row — and the site fills what is left. With one of our own screens
     // up, the page is the whole window.
-    let ours = if showing.is_some() { (chrome as u32).min(height) } else { height };
+    //
+    // Except while something is playing: then the page also has the strip along
+    // the bottom, so it is given the whole window and the site is laid over its
+    // middle. Two children of one window overlapping is only safe if the order
+    // is known, so the page is put at the back of it (see [`sink_shell`]).
+    let ours = match (showing.is_some(), bar > 0) {
+        (true, false) => (chrome as u32).min(height),
+        _ => height,
+    };
+    if showing.is_some() && bar > 0 {
+        sink_shell();
+    }
     SHELL.with(|cell| {
         if let Some(view) = cell.borrow().as_ref() {
             let _ = view.set_bounds(wry::Rect {
@@ -130,7 +159,7 @@ fn relayout(hwnd: HWND) {
                     position: wry::dpi::PhysicalPosition::new(edge, edge + chrome).into(),
                     size: wry::dpi::PhysicalSize::new(
                         width,
-                        height.saturating_sub(chrome as u32),
+                        height.saturating_sub((chrome + bar) as u32),
                     )
                     .into(),
                 });
@@ -139,15 +168,43 @@ fn relayout(hwnd: HWND) {
     });
 }
 
+/// Put the shell's page behind every site being browsed.
+///
+/// They only overlap while the playing strip is up: the page needs the whole
+/// window to put a strip along the bottom of it, and the site has to be over the
+/// middle of that. Windows puts each new child in front of the ones before it,
+/// which already has the tabs in front — this says so rather than relying on it,
+/// because the way it fails is a blank page over the site being watched.
+fn sink_shell() {
+    // Once. This runs from the layout, which runs for every pixel a window is
+    // dragged, and reordering the children of a window sixty times a second to
+    // say what it already says is work that shows.
+    if SUNK.with(|cell| cell.replace(true)) {
+        return;
+    }
+    let shell = SHELL_WINDOW.with(|cell| cell.get());
+    if shell.is_null() {
+        return;
+    }
+    unsafe {
+        SetWindowPos(shell, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 /// How tall the page's chrome is in real pixels on this window's display.
 ///
 /// The page lays its strip out in its own units and the browser scales them by
 /// the display's zoom; the site underneath is placed in real pixels. Without
 /// this the two disagreed on a display at 125% and the page overlapped the site.
 fn chrome_height(hwnd: HWND) -> i32 {
+    scaled(hwnd, CHROME)
+}
+
+/// A measurement the page lays out in its own units, in this display's pixels.
+fn scaled(hwnd: HWND, units: i32) -> i32 {
     let dpi = unsafe { GetDpiForWindow(hwnd) };
     let dpi = if dpi == 0 { 96 } else { dpi };
-    (CHROME * dpi as i32) / 96
+    (units * dpi as i32) / 96
 }
 
 /// What the page asked for. Parsed here rather than in every caller so the
@@ -167,6 +224,10 @@ pub enum Ask {
     LibraryRename { id: u64, title: String },
     LibraryDelete(u64),
     LibraryNewFolder { kind: String, name: String },
+    LibraryDropFolder { kind: String, name: String },
+    /// Something is playing, or has stopped: the window keeps room along the
+    /// bottom for the strip that says so.
+    Playing(bool),
     /// Browsing: a tab to open, pick or drop, and where to point it.
     TabNew(String),
     TabPick(usize),
@@ -214,6 +275,12 @@ pub fn read_ask(body: &str) -> Ask {
             kind: field(body, "kind").unwrap_or_else(|| "video".into()),
             name: field(body, "name").unwrap_or_default(),
         },
+        "library.dropFolder" => Ask::LibraryDropFolder {
+            kind: field(body, "kind").unwrap_or_else(|| "video".into()),
+            name: field(body, "name").unwrap_or_default(),
+        },
+        // A plain boolean, not a string, so it is read as one.
+        "playing" => Ask::Playing(body.contains(r#""on":true"#)),
         "tab.new" => Ask::TabNew(field(body, "url").unwrap_or_default()),
         "tab.pick" => Ask::TabPick(number(body, "at").unwrap_or(0) as usize),
         "tab.shut" => Ask::TabShut(number(body, "at").unwrap_or(0) as usize),
@@ -594,6 +661,10 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         .build_as_child(&host)
         .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))?;
 
+    // Taken while it is the only child there is, which is what makes it the one
+    // that can be named later. See [`sink_shell`].
+    SHELL_WINDOW.with(|cell| cell.set(unsafe { GetWindow(hwnd, GW_CHILD) }));
+
     let view = Rc::new(view);
     watch_process(&view, "shard://shard.localhost/index.html");
     SHELL.with(|cell| *cell.borrow_mut() = Some(view.clone()));
@@ -608,6 +679,7 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         to_pages,
         answer: RefCell::new(Some(Box::new(on_ask))),
         beat: std::cell::Cell::new(std::time::Instant::now()),
+        next_tab: std::cell::Cell::new(1),
         said_downloads: RefCell::new(String::new()),
     };
     shell.lay_out();
@@ -799,6 +871,15 @@ pub fn preview() -> Result<()> {
             crate::library::add_folder(shelf, &name);
             shell.say_library(shelf);
         }
+        Ask::LibraryDropFolder { kind, name } => {
+            let shelf = shelf_of(&kind);
+            match crate::library::drop_folder(shelf, &name) {
+                Ok(moved) => tracing::info!("folder {name} removed; {moved} file(s) came out of it"),
+                Err(e) => tracing::warn!("could not remove folder {name}: {e:#}"),
+            }
+            shell.say_library(shelf);
+        }
+        Ask::Playing(on) => shell.now_playing(on),
         other => tracing::info!("shell ask: {other:?}"),
     })?;
 
@@ -957,6 +1038,8 @@ pub struct Shell {
     /// When the periodic work last ran, so it runs on a beat rather than once
     /// per window message. See `run`.
     beat: std::cell::Cell<std::time::Instant>,
+    /// The number the next tab opened will carry. See [`Tab::id`].
+    next_tab: std::cell::Cell<u64>,
     /// The last thing the download list was told, so an unchanged list is not
     /// sent again. Each send crosses into the page and makes it lay out a list
     /// that looks exactly as it already did.
@@ -965,6 +1048,10 @@ pub struct Shell {
 
 /// One tab: the page, and what the strip needs to draw it.
 pub struct Tab {
+    /// Its own number for as long as it is open, which is what the page in it
+    /// puts on everything it says. Not its place in the strip: that shifts when
+    /// a tab to its left is closed, and reports would land on a stranger.
+    id: u64,
     view: Rc<wry::WebView>,
     pub title: String,
     pub url: String,
@@ -1017,15 +1104,13 @@ impl Shell {
         // and the answers the download hooks send back.
         for event in self.page_events() {
             match event {
-                crate::download::browser::Event::Navigated(url) => {
-                    if let Some(at) = self.showing.get() {
-                        if let Some(tab) = self.tabs.borrow_mut().get_mut(at) {
-                            tab.title = title_of(&url);
-                            tab.url = url;
-                        }
-                    }
-                    self.say_tabs();
-                }
+                // Nothing is written from here. This fires for whichever page
+                // is loading, which is not necessarily the page in front, and
+                // the report carries no way to tell which tab it came from —
+                // taking it as the front tab's was the other half of the label
+                // flickering between sites. Each page reports its own address
+                // and names itself when it does.
+                crate::download::browser::Event::Navigated(_) => {}
                 crate::download::browser::Event::Offer(payload) => self.from_page(&payload),
                 crate::download::browser::Event::Closed => {}
             }
@@ -1074,10 +1159,17 @@ impl Shell {
         if let Some(frame) = field(payload, "frame") {
             // The hooks put the value in `text`, whatever the report is about.
             let Some(text) = field(payload, "text") else { return };
-            let Some(at) = self.showing.get() else { return };
+            // Whichever tab said it, not whichever tab is in front. Every page
+            // reports its title and address a few times a second, so reading
+            // these as the front tab's meant a page loading in the background
+            // rewrote the label of the tab being looked at — the name flickering
+            // between two sites.
+            let said_by = field(payload, "tab").and_then(|id| id.parse::<u64>().ok());
+            let Some(said_by) = said_by else { return };
             let changed = {
                 let mut tabs = self.tabs.borrow_mut();
-                match (frame.as_str(), tabs.get_mut(at)) {
+                let held = tabs.iter_mut().find(|tab| tab.id == said_by);
+                match (frame.as_str(), held) {
                     ("title", Some(tab)) if !text.trim().is_empty() && tab.title != text => {
                         tab.title = text;
                         true
@@ -1121,13 +1213,17 @@ impl Shell {
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
         );
-        let id = self.tabs.borrow().len() as u64 + 1;
+        // Never reused, so a report from a page that is closing cannot land on
+        // the tab that took its place.
+        let id = self.next_tab.get();
+        self.next_tab.set(id + 1);
         match crate::download::browser::new_view(self.hwnd, url, &startup, &self.to_pages, id) {
             Ok(view) => {
                 let view = Rc::new(view);
                 watch_process(&view, url);
                 TABS.with(|cell| cell.borrow_mut().push(view.clone()));
                 self.tabs.borrow_mut().push(Tab {
+                    id,
                     view,
                     title: title_of(url),
                     url: url.to_string(),
@@ -1285,6 +1381,15 @@ impl Shell {
         ));
     }
 
+    /// Keep, or give back, the room along the bottom for the playing strip.
+    pub fn now_playing(&self, on: bool) {
+        if PLAYING.with(|cell| cell.get()) == on {
+            return;
+        }
+        PLAYING.with(|cell| cell.set(on));
+        self.lay_out();
+    }
+
     /// Forget what the page has been told, so the next telling goes through.
     pub fn forget_what_was_said(&self) {
         self.said_downloads.borrow_mut().clear();
@@ -1311,6 +1416,10 @@ impl Shell {
             return;
         }
         *self.said_downloads.borrow_mut() = message.clone();
+        // Written down when the list changes, which is rarely: whether the home
+        // screen ever heard about a download is the first question when its bar
+        // is not there, and it cannot be answered from this side otherwise.
+        tracing::info!("downloads: {}", message);
         self.tell(&message);
     }
 
@@ -1485,12 +1594,48 @@ fn create_window(title: &str) -> Result<HWND> {
     if hwnd.is_null() {
         return Err(anyhow!("창을 만들지 못했습니다"));
     }
+    centre(hwnd);
     dark_title_bar(hwnd);
     // A beat of its own. The loop only turns when a message arrives, and a
     // download reports on another thread — without this the bar sat still and a
     // finished download went unnoticed until something was clicked.
     unsafe { SetTimer(hwnd, TICK_TIMER, 250, None) };
     Ok(hwnd)
+}
+
+/// Put the window in the middle of the screen it is opening on.
+///
+/// Windows only honours `CW_USEDEFAULT` for windows that have a caption of their
+/// own to cascade. This one does not, so it was being put at the very corner of
+/// the display every time it was launched.
+///
+/// The work area rather than the whole screen: the middle of the space a window
+/// may actually use, which is not the middle of the glass when the taskbar is
+/// along one side.
+fn centre(hwnd: HWND) {
+    let mut work = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    let got = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            (&mut work as *mut RECT).cast(),
+            0,
+        )
+    };
+    if got == 0 {
+        return;
+    }
+    let mut window = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetWindowRect(hwnd, &mut window) };
+    let width = window.right - window.left;
+    let height = window.bottom - window.top;
+    // Never off the top or the left, however small the work area is: a title bar
+    // above the screen cannot be taken hold of.
+    let left = (work.left + (work.right - work.left - width) / 2).max(work.left);
+    let top = (work.top + (work.bottom - work.top - height) / 2).max(work.top);
+    unsafe {
+        SetWindowPos(hwnd, std::ptr::null_mut(), left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 }
 
 /// Ask the desktop manager for a dark, rounded frame — the same three lines the

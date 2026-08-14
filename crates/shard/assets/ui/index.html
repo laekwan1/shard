@@ -137,7 +137,10 @@
       <div id="controls">
         <div id="scrub"><div id="played"></div><div id="knob"></div></div>
         <div id="row">
+          <button id="prev" title="이전 (PageUp)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M12 3v10L5 8z" fill="currentColor"/><rect x="3" y="3" width="1.8" height="10" rx=".9" fill="currentColor"/></svg></button>
           <button id="play" title="재생/일시정지"></button>
+          <button id="next" title="다음 (PageDown)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 3v10l7-5z" fill="currentColor"/><rect x="11.2" y="3" width="1.8" height="10" rx=".9" fill="currentColor"/></svg></button>
+          <span id="title"></span>
           <span id="clock">0:00 / 0:00</span>
           <span class="spacer"></span>
           <button id="mute" title="음소거"></button>
@@ -150,12 +153,14 @@
       </div>
     </div>
 
-    <!-- What a right-click on a file offers. -->
+    <!-- What a right-click offers, on a file or on a folder. -->
     <div id="menu" hidden>
-      <button data-do="rename">이름 바꾸기</button>
-      <button data-do="unfile" hidden>폴더에서 빼기</button>
-      <hr>
-      <button data-do="delete" class="danger">삭제</button>
+      <button data-do="rename" data-on="file">이름 바꾸기</button>
+      <button data-do="unfile" data-on="file">폴더에서 빼기</button>
+      <hr data-on="file">
+      <button data-do="delete" data-on="file" class="danger">삭제</button>
+      <button data-do="dropFolder" data-on="folder" class="danger">폴더 삭제</button>
+      <p class="hint" data-on="folder">안에 있던 파일은 보관함으로 나옵니다</p>
     </div>
     <section id="settings" class="view" hidden></section>
   </main>

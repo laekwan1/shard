@@ -138,6 +138,66 @@ pub fn add_folder(kind: Kind, name: &str) -> bool {
     std::fs::create_dir_all(kind.folder().join(clean)).is_ok()
 }
 
+/// Take a folder off a shelf, keeping everything that was in it.
+///
+/// What is inside comes out to the top of the shelf first, and only the empty
+/// folder itself is removed. Deleting a folder is a tidying-up gesture — the
+/// files in it are hours of downloading, and nobody means to lose them by
+/// putting a folder away. Anything already at the top with that name is left
+/// alone and the file inside keeps a number on the end.
+///
+/// Returns how many files came out.
+pub fn drop_folder(kind: Kind, name: &str) -> anyhow::Result<usize> {
+    use anyhow::Context;
+    let clean = clean(name);
+    if clean.is_empty() {
+        anyhow::bail!("이름이 비어 있습니다");
+    }
+    let root = kind.folder();
+    let folder = root.join(&clean);
+    if !folder.is_dir() {
+        anyhow::bail!("{} 폴더가 없습니다", folder.display());
+    }
+    let mut moved = 0;
+    for entry in std::fs::read_dir(&folder).with_context(|| format!("reading {}", folder.display()))? {
+        let Ok(entry) = entry else { continue };
+        let from = entry.path();
+        if !from.is_file() {
+            continue;
+        }
+        let Some(file) = from.file_name() else { continue };
+        if std::fs::rename(&from, free_name(&root, file)).is_ok() {
+            moved += 1;
+        }
+    }
+    // Only when it is empty. A folder that still holds something — a file that
+    // could not be moved, a folder of its own — is left where it is rather than
+    // taken away with what is inside it.
+    std::fs::remove_dir(&folder).with_context(|| format!("removing {}", folder.display()))?;
+    Ok(moved)
+}
+
+/// `name` inside `root`, with a number added if something is already there.
+fn free_name(root: &std::path::Path, name: &std::ffi::OsStr) -> std::path::PathBuf {
+    let first = root.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let name = std::path::Path::new(name);
+    let stem = name.file_stem().unwrap_or(name.as_os_str()).to_string_lossy().to_string();
+    let extension = name.extension().map(|e| e.to_string_lossy().to_string());
+    for n in 2..1000 {
+        let tried = match &extension {
+            Some(extension) => root.join(format!("{stem} ({n}).{extension}")),
+            None => root.join(format!("{stem} ({n})")),
+        };
+        if !tried.exists() {
+            return tried;
+        }
+    }
+    first
+}
+
 /// Put an item in a folder, or back at the top of its shelf when [folder] is
 /// empty. The file is moved on disk, so Explorer sees the same thing this does.
 pub fn move_to(item: &Item, folder: &str) -> bool {
@@ -300,6 +360,25 @@ mod tests {
         let music = Kind::Music.folder();
         assert!(video.ends_with(std::path::Path::new("Videos").join(ROOT)));
         assert!(music.ends_with(std::path::Path::new("Music").join(ROOT)));
+    }
+
+    #[test]
+    fn a_file_coming_out_of_a_folder_does_not_land_on_one_already_there() {
+        let root = std::env::temp_dir().join("shard-free-name-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let name = std::ffi::OsString::from("노래.webm");
+
+        // Nothing there: the name it already has.
+        assert_eq!(free_name(&root, &name), root.join("노래.webm"));
+
+        // Something there: numbered, and the extension stays an extension.
+        std::fs::write(root.join("노래.webm"), b"x").unwrap();
+        assert_eq!(free_name(&root, &name), root.join("노래 (2).webm"));
+        std::fs::write(root.join("노래 (2).webm"), b"x").unwrap();
+        assert_eq!(free_name(&root, &name), root.join("노래 (3).webm"));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

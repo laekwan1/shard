@@ -36,10 +36,11 @@ const views = ["home", "library", "settings"];
 let here = "home";
 
 function show(where) {
-  // The player covers the whole window, so it goes with the screen it belongs
-  // to; left up, it hid whatever was navigated to and kept playing out of reach.
-  if (where !== "library" && typeof shutPlayer === "function") shutPlayer();
   here = where;
+  // The player belongs to the library, but what it is playing does not stop
+  // because somewhere else was opened: away from the library it shrinks to a
+  // strip along the bottom instead of covering the screen that was asked for.
+  if (typeof syncPlayer === "function") syncPlayer();
   for (const name of views) {
     document.getElementById(name).hidden = name !== where;
   }
@@ -75,6 +76,9 @@ function paintTabs(message) {
   // Our own screens, as the first tab. It says what it opens and opens it:
   // reading the tab as "wherever you already were" made it do nothing at all
   // from the home screen, which is where it is pressed from most.
+  // A site in front means the player cannot have the screen either.
+  if (typeof syncPlayer === "function") syncPlayer();
+
   const ours = document.createElement("button");
   // Lit when the library is what is up — not whenever no site is being browsed,
   // which had it looking pressed from the home screen it does not belong to.
@@ -249,6 +253,14 @@ function paintFolders() {
       const id = Number(e.dataTransfer.getData("text/plain"));
       if (id) send("library.folder", { id, folder: name || "" });
     });
+    // A folder made by hand can be unmade the same way. "전체" is not a folder
+    // and has nothing to offer.
+    if (name) {
+      button.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        openMenu(e.clientX, e.clientY, { folder: name });
+      });
+    }
     foldersEl.appendChild(button);
   };
 
@@ -327,7 +339,7 @@ function paintFiles() {
     row.addEventListener("dblclick", () => play(item));
     row.addEventListener("contextmenu", (e) => {
       e.preventDefault();
-      openMenu(e.clientX, e.clientY, item, row);
+      openMenu(e.clientX, e.clientY, { file: item, row });
     });
     filesEl.appendChild(row);
   }
@@ -338,12 +350,23 @@ function paintFiles() {
 const menu = document.getElementById("menu");
 let menuFor = null;
 let menuRow = null;
+let menuFolder = null;
 
-function openMenu(x, y, item, row) {
-  menuFor = item;
-  menuRow = row;
+// One menu, two things it can be about: the file under the pointer, or the
+// folder tab under it. What belongs to the other is put away rather than a
+// second menu being built beside this one.
+function openMenu(x, y, on) {
+  menuFor = on.file || null;
+  menuRow = on.row || null;
+  menuFolder = on.folder || null;
+  const about = menuFolder ? "folder" : "file";
+  for (const el of menu.querySelectorAll("[data-on]")) {
+    el.hidden = el.dataset.on !== about;
+  }
+  if (menuFor) {
+    menu.querySelector('[data-do="unfile"]').hidden = !menuFor.folder;
+  }
   menu.hidden = false;
-  menu.querySelector('[data-do="unfile"]').hidden = !item.folder;
   // Kept inside the window: a menu opened near the edge would otherwise run off.
   const box = menu.getBoundingClientRect();
   menu.style.left = Math.min(x, window.innerWidth - box.width - 6) + "px";
@@ -354,6 +377,7 @@ function closeMenu() {
   menu.hidden = true;
   menuFor = null;
   menuRow = null;
+  menuFolder = null;
 }
 
 document.addEventListener("click", (e) => {
@@ -367,7 +391,12 @@ for (const button of menu.querySelectorAll("button")) {
   button.addEventListener("click", () => {
     const item = menuFor;
     const row = menuRow;
+    const folder = menuFolder;
     closeMenu();
+    if (button.dataset.do === "dropFolder") {
+      if (folder) send("library.dropFolder", { kind: shelf.kind, name: folder });
+      return;
+    }
     if (!item) return;
     switch (button.dataset.do) {
       case "rename":
@@ -431,6 +460,10 @@ const PAUSE = '<svg viewBox="0 0 16 16" width="15" height="15"><rect x="4" y="2.
 const LOUD = '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 6h2.6L9 3v10L5.6 10H3z" fill="currentColor"/><path d="M11 5.6a3.4 3.4 0 0 1 0 4.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 const QUIET = '<svg viewBox="0 0 16 16" width="14" height="14"><path d="M3 6h2.6L9 3v10L5.6 10H3z" fill="currentColor"/><path d="M11 6l3 4M14 6l-3 4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
 
+const titleLine = document.getElementById("title");
+const prevButton = document.getElementById("prev");
+const nextButton = document.getElementById("next");
+
 let playing = null;
 
 function play(item) {
@@ -440,11 +473,13 @@ function play(item) {
   art.hidden = !music;
   video.style.visibility = music ? "hidden" : "visible";
   nowLine.textContent = item.title;
+  titleLine.textContent = item.title;
   video.src = "/media/" + item.id;
   video.play().catch(() => {});
   // Where it left off, remembered per file so a long video is not started over.
   const at = Number(localStorage.getItem("at:" + item.id) || 0);
   if (at > 5) video.currentTime = at;
+  syncPlayer();
 }
 
 function shutPlayer() {
@@ -453,7 +488,33 @@ function shutPlayer() {
   video.load();
   player.hidden = true;
   playing = null;
+  syncPlayer();
 }
+
+// Full height on the screen it belongs to, a strip along the bottom anywhere
+// else. Rust is told either way: while a site is in front the strip is the one
+// part of this page not covered by it, and the site has to be made shorter by
+// exactly its height or it is drawn over.
+function syncPlayer() {
+  const own = !browsing && here === "library";
+  player.classList.toggle("mini", !own);
+  send("playing", { on: !player.hidden });
+}
+
+// The file before or after this one, in the order the shelf is showing them.
+// Wrapping round at the ends: a shelf of songs is a loop, not a queue that runs
+// out.
+function step(by) {
+  if (!playing) return;
+  const list = shown();
+  const at = list.findIndex((i) => i.id === playing.id);
+  if (at < 0) return;
+  const found = list[(at + by + list.length) % list.length];
+  if (found) play(found);
+}
+
+prevButton.addEventListener("click", () => step(-1));
+nextButton.addEventListener("click", () => step(1));
 
 document.getElementById("shut").addEventListener("click", shutPlayer);
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
@@ -534,10 +595,18 @@ document.addEventListener("keydown", (e) => {
       video.paused ? video.play() : video.pause();
       break;
     case "ArrowRight":
-      video.currentTime += e.shiftKey ? 30 : 5;
+      video.currentTime += e.shiftKey ? 30 : 3;
       break;
     case "ArrowLeft":
-      video.currentTime -= e.shiftKey ? 30 : 5;
+      video.currentTime -= e.shiftKey ? 30 : 3;
+      break;
+    case "PageUp":
+      e.preventDefault();
+      step(-1);
+      break;
+    case "PageDown":
+      e.preventDefault();
+      step(1);
       break;
     case "ArrowUp":
       video.volume = Math.min(1, video.volume + 0.05);
