@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Veil</string>
+    <string name="server">서버</string>
+    <string name="server_title">서버 링크</string>
+    <string name="server_help">서버에서 veil-server setup 을 실행하면 나오는 trojan:// 링크를 붙여넣으세요.</string>
+    <string name="link_hint">trojan://…</string>
+    <string name="save">저장</string>
+    <string name="server_saved">서버를 저장했습니다 · %1$s</string>
+    <string name="bad_link">링크를 읽을 수 없습니다: %1$s</string>
+    <string name="mode_title">연결 방식</string>
+    <string name="mode_tor">Tor · 익명성 최우선</string>
+    <string name="mode_server">내 서버 · 속도 우선</string>
+    <string name="status_tor">Tor 경유 중</string>
+    <string name="tor_not_running_title">Tor를 시작하지 못했습니다</string>
+    <string name="tor_failed">Tor를 시작하지 못했습니다: %1$s</string>
+    <string name="tor_starting">Tor 연결 중… 처음에는 30초 이상 걸릴 수 있습니다</string>
+    <string name="status_connected">서버 경유 중</string>
+    <string name="status_stopped">터널이 멈췄습니다</string>
+    <string name="tor_preparing">Tor 연결을 준비하는 중입니다… 잠시 기다려 주세요</string>
+</resources>

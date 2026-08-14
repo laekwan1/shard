@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The violet the desktop build uses for a running Veil. -->
+    <color name="accent">#A78BFA</color>
+    <color name="ink">#141210</color>
+</resources>

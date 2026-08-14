@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Everything else the browser shows comes from :core. -->
+    <string name="app_name">Shard</string>
+</resources>

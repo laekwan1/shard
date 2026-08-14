@@ -1,0 +1,438 @@
+/*
+    The shell's look: the same dark ground and cyan accent the program has worn
+    since it was two windows, so nothing about the move reads as a different
+    program. Everything here is drawn by us — there is no system title bar left
+    to match against.
+*/
+:root {
+  --surface: #0e0e10;
+  --chrome: #1a1a1d;
+  --raised: #202024;
+  --field: #26262b;
+  --divider: #2e2e34;
+  --on-surface: #e8e6e3;
+  --muted: #8a8a90;
+  --accent: #22d3ee;
+  --bad: #f87171;
+  --bar: 38px;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Malgun Gothic", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+/*
+    No bars down the side or along the bottom. What scrolls still scrolls — a
+    long list, the settings — but the window is furniture, and a scrollbar
+    running through it reads as a page inside a program rather than the program
+    itself. Sideways scrolling is switched off outright: nothing here is meant
+    to be wider than the window, so a bar there is always a mistake somewhere.
+*/
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--surface);
+  color: var(--on-surface);
+  overflow: hidden;
+  /* Let the text be hinted against the pixels it is actually drawn on. The
+     window now asks Windows for the display's true resolution, so this is a
+     real grid to snap to rather than one that gets stretched afterwards. */
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  /* The page is furniture, not a document: nothing here is meant to be
+     selected, and a stray drag that highlights the title bar looks broken. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+
+/* ---- the window's own bar ------------------------------------------------ */
+
+#bar {
+  height: var(--bar);
+  display: flex;
+  align-items: stretch;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--divider);
+}
+
+/* The chip: the app's mark and name, and the way home from anywhere.
+   Not drawn as a button — no box, no fill. It is the window's name, and it
+   answers the pointer by lighting up and pressing in, which is what says it can
+   be clicked without turning the title bar into a toolbar. */
+#chip {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px 0 12px;
+  color: var(--muted);
+  transition: color .13s;
+}
+#chip svg {
+  width: 17px;
+  height: 17px;
+  color: var(--accent);
+  /* Dimmed until wanted, so the mark is not the loudest thing on screen. */
+  opacity: .82;
+  transition: opacity .13s, transform .1s;
+}
+#chip span {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .015em;
+  transition: transform .1s;
+}
+#chip:hover { color: #fff; }
+#chip:hover svg { opacity: 1; }
+/* Pressed in, very slightly: the whole chip, so the mark and the name move
+   together rather than the name sliding under a still mark. */
+#chip:active svg,
+#chip:active span { transform: scale(.94); }
+
+/* Everything between the chip and the buttons drags the window. */
+#drag { flex: 1; }
+
+/* The tabs: the library and every site, in the strip beside the chip. */
+#tabs { display: flex; align-items: stretch; gap: 2px; padding: 4px 2px 0; max-width: 62%; overflow: hidden; }
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 190px;
+  padding: 0 8px 0 11px;
+  border-radius: 9px 9px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+  background: #131316;
+  transition: background .12s, color .12s;
+}
+.tab:hover { background: #1f1f24; color: var(--on-surface); }
+/* The one in front is the sheet below it: same colour, no seam. */
+.tab.on { background: var(--surface); color: #fff; }
+.tab .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab .x { width: 16px; height: 16px; border-radius: 50%; font-size: 11px; color: var(--muted); flex: none; }
+.tab .x:hover { background: #ffffff26; color: #fff; }
+
+#newtab { width: 30px; color: var(--muted); font-size: 15px; }
+#newtab:hover { color: var(--on-surface); background: #ffffff0f; }
+
+/* ---- the address row ------------------------------------------------------ */
+
+#address {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--divider);
+}
+#address[hidden] { display: none; }
+#address button { width: 30px; height: 30px; border-radius: 8px; color: var(--muted); font-size: 16px; }
+#address button:hover { color: var(--on-surface); background: #ffffff0f; }
+#url {
+  flex: 1;
+  height: 30px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--on-surface);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: 15px;
+  outline: none;
+  user-select: text;
+}
+#url:focus { border-color: var(--accent); background: #1c1c21; }
+
+#frame-buttons { display: flex; }
+#frame-buttons button {
+  width: 44px;
+  color: var(--muted);
+  transition: background .12s, color .12s;
+}
+#frame-buttons svg { width: 12px; height: 12px; }
+#frame-buttons button:hover { background: #ffffff14; color: var(--on-surface); }
+#frame-buttons button.danger:hover { background: #e81123; color: #fff; }
+
+/* ---- screens ------------------------------------------------------------- */
+
+#screen { height: calc(100% - var(--bar)); overflow: hidden; }
+.view { height: 100%; overflow-y: auto; overflow-x: hidden; }
+.view[hidden] { display: none; }
+
+/* ---- home ---------------------------------------------------------------- */
+
+#home {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 34px;
+}
+
+.wordmark { margin: 0 0 34px; font-size: 12px; font-weight: 700; letter-spacing: .42em; color: var(--muted); }
+
+/* The engine switch. One button, big enough that the window has one obvious
+   thing to do, with the ring carrying the state rather than a label. */
+#power {
+  position: relative;
+  width: 156px;
+  height: 156px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--muted);
+  transition: color .25s;
+}
+#power .ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--divider);
+  transition: border-color .25s, box-shadow .25s, transform .25s;
+}
+#power svg { width: 58px; height: 58px; position: relative; }
+#power:hover .ring { transform: scale(1.02); }
+#power[aria-pressed="true"] { color: var(--accent); }
+#power[aria-pressed="true"] .ring {
+  border-color: var(--accent);
+  /* The glow is the "it is running" signal seen from across the room. */
+  box-shadow: 0 0 0 6px #22d3ee1a, 0 0 34px #22d3ee40;
+}
+#power.busy .ring { animation: breathe 1.4s ease-in-out infinite; }
+@keyframes breathe { 50% { opacity: .55; } }
+
+#headline { margin: 26px 0 4px; font-size: 20px; font-weight: 700; }
+#headline.good { color: var(--accent); }
+#headline.bad { color: var(--bad); }
+#detail { margin: 0; font-size: 12px; color: var(--muted); }
+
+/* Downloads in flight: one line each, under the status. */
+#downloads { margin-top: 20px; width: 340px; display: flex; flex-direction: column; gap: 8px; }
+.download { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
+.download .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download .track { width: 96px; height: 4px; border-radius: 99px; background: var(--field); overflow: hidden; }
+.download .fill { height: 100%; background: var(--accent); border-radius: 99px; transition: width .2s; }
+.download .stop { width: 20px; height: 20px; border-radius: 50%; color: var(--muted); }
+.download .stop:hover { background: #ffffff14; color: var(--on-surface); }
+
+/* ---- library --------------------------------------------------------------
+   The two shelves are tabs, and the sheet below carries their colour, so the
+   folders and the files read as the open tab's contents. */
+
+#shelves { display: flex; height: 40px; }
+.shelf {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: #131316;
+  border-bottom: 1px solid var(--divider);
+  border-radius: 10px 10px 0 0;
+  transition: color .12s, background .12s;
+}
+.shelf svg { width: 24px; height: 24px; }
+.shelf:hover { color: var(--on-surface); background: #17171b; }
+/* The open one is the sheet: same colour, no line under it. */
+.shelf.on { color: #fff; background: var(--chrome); border-bottom-color: transparent; }
+
+#sheet {
+  height: calc(100% - 40px);
+  background: var(--chrome);
+  display: flex;
+  flex-direction: column;
+}
+
+#folders { display: flex; align-items: center; gap: 2px; padding: 6px 8px 0; flex-wrap: wrap; }
+.folder {
+  padding: 7px 12px 8px;
+  font-size: 13px;
+  color: var(--muted);
+  border-bottom: 2.5px solid transparent;
+  border-radius: 6px 6px 0 0;
+  transition: color .12s, background .12s;
+}
+.folder:hover { color: var(--on-surface); background: #ffffff0a; }
+.folder.on { color: var(--on-surface); font-weight: 700; border-bottom-color: var(--accent); }
+/* Lit while a file is held over it, so a drop is never a guess. */
+.folder.over { background: #22d3ee26; color: #fff; }
+.folder.add { margin-left: auto; color: var(--muted); font-size: 15px; border-radius: 50%; padding: 4px 9px 6px; }
+.folder.add:hover { background: #ffffff14; color: #fff; }
+
+#files { flex: 1; overflow: auto; padding: 4px 0 10px; }
+.file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #ffffff0a;
+}
+.file:hover { background: #ffffff08; }
+.file.held { background: #22d3ee1f; }
+.file .title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file .facts { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.file .go {
+  margin-left: auto;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  color: var(--muted);
+  border: 1px solid transparent;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.file .go svg { width: 12px; height: 12px; }
+.file .go:hover { color: #fff; border-color: #ffffff59; background: #ffffff14; }
+.file .rename { flex: 1; font: inherit; font-size: 13px; color: var(--on-surface); background: var(--field); border: 1px solid var(--accent); border-radius: 6px; padding: 5px 8px; }
+
+#empty { margin: 40px auto; max-width: 34ch; text-align: center; font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+/* ---- settings -------------------------------------------------------------
+   A column of groups, each a few settings: what it is on the left with a line
+   saying why, and the control on the right. */
+
+#settings { padding: 18px 20px 30px; }
+.group { max-width: 720px; margin: 0 auto 26px; }
+.group h2 {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+.setting {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 12px 2px;
+  border-bottom: 1px solid var(--divider);
+}
+.setting.tall { align-items: flex-start; }
+.what { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.what span { font-size: 13.5px; }
+.what small { font-size: 11px; color: var(--muted); line-height: 1.5; }
+
+/* A switch, not a tick box: it is a thing being turned on. */
+.switch {
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 99px;
+  background: var(--field);
+  position: relative;
+  transition: background .16s;
+}
+.switch span {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform .16s, background .16s;
+}
+.switch.on { background: #22d3ee3d; }
+.switch.on span { transform: translateX(18px); background: var(--accent); }
+
+.choice { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.choice button {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--raised);
+  transition: color .12s, background .12s;
+}
+.choice button:hover { color: var(--on-surface); }
+.choice button.on { color: #04252b; background: var(--accent); font-weight: 700; }
+
+.box {
+  flex: none;
+  width: 280px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--on-surface);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  outline: none;
+  resize: vertical;
+  user-select: text;
+}
+.box:focus { border-color: var(--accent); }
+.box.short { width: 84px; text-align: right; }
+
+/* ---- the menu a right-click opens ---------------------------------------- */
+
+#menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 160px;
+  padding: 5px;
+  background: var(--raised);
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px #000000a6;
+}
+#menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 12.5px; }
+#menu button:hover { background: #ffffff14; }
+#menu button.danger:hover { background: #7f1d1d; color: #fff; }
+#menu hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
+
+/* ---- the player ----------------------------------------------------------- */
+
+#player {
+  position: fixed;
+  inset: var(--bar) 0 0 0;
+  z-index: 30;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+}
+/* Setting `display` on an id beats the browser's own rule for `hidden`, so the
+   hidden state has to be spelled out — without this the player covers the whole
+   window from the moment it opens, which is exactly what it did. */
+#player[hidden] { display: none; }
+#stage { flex: 1; position: relative; display: grid; place-items: center; overflow: hidden; }
+#video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+/* A song has no picture, so the note stands in for one. */
+#art { position: absolute; display: grid; place-items: center; width: 148px; height: 148px; border-radius: 26px; background: linear-gradient(135deg, #0e6b7a, #22d3ee); }
+#art[hidden] { display: none; }
+#art svg { width: 62px; height: 62px; color: #04252b; }
+
+#controls { background: #0b0b0d; border-top: 1px solid var(--divider); padding: 10px 14px 12px; }
+
+/* The scrubber: a line to press anywhere along. */
+#scrub { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
+#scrub::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: 99px; background: var(--field); }
+#played { position: absolute; left: 0; height: 4px; width: 0; border-radius: 99px; background: var(--accent); }
+#knob { position: absolute; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
+#scrub:hover #knob { opacity: 1; }
+
+#row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+#row button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); font-size: 13px; transition: color .12s, background .12s; }
+#row button:hover { color: #fff; background: #ffffff14; }
+#play { color: #fff !important; }
+#clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.spacer { flex: 1; }
+#volume { width: 84px; accent-color: var(--accent); }
+#now { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The three ways out of home, pinned to the bottom so they never move. */
+#go { margin-top: auto; margin-bottom: 20px; display: flex; gap: 18px; }
+#go button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--muted);
+  transition: color .13s, background .13s;
+}
+#go svg { width: 21px; height: 21px; }
+#go button:hover { color: var(--on-surface); background: #ffffff0f; }

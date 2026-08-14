@@ -1,0 +1,28 @@
+﻿[workspace]
+resolver = "2"
+members = [
+    "crates/uikit",
+    "crates/shard",
+    "crates/shard-mobile",
+    "crates/veil",
+    "crates/veil-core",
+    "crates/veil-mobile",
+    "crates/veil-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["Shard/Veil"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# The desync engine runs in the packet hot path; keep it fast even in dev builds.
+[profile.dev.package.shard]
+opt-level = 2
+

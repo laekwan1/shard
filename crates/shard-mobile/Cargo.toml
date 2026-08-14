@@ -1,0 +1,30 @@
+﻿[package]
+name = "shard-mobile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# staticlib for iOS (linked into the Network Extension), cdylib for Android JNI.
+crate-type = ["lib", "staticlib", "cdylib"]
+
+[dependencies]
+# The portable core only: no packet driver, no window, no async runtime.
+shard = { path = "../shard", default-features = false }
+anyhow = "1.0.104"
+tracing = "0.1.44"
+# For the encrypted resolver only. Blocking rustls, no async runtime.
+rustls = { version = "0.23.43", default-features = false, features = ["std", "ring", "tls12"] }
+webpki-roots = "1.0.9"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock", "Win32_Foundation"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# JNI expects mangled symbol names; the C ABI in `jni.rs` is what iOS links.
+jni = "0.21.1"
+android_logger = "0.14.1"
+log = "0.4.28"

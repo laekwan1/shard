@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Shard's mark, matching the desktop build: a rounded square cut in two by a
+    diagonal — a packet split.
+
+    The gap is empty, not white: whatever is behind the icon shows through it,
+    which is why the background layer is transparent.
+
+    Drawn as the two halves. A gap punched out with even-odd filling has to be a
+    shape of its own, and a shape crossing a rounded corner either overhangs it
+    or stops short of it — the stripe past the corners, and the sliver left
+    inside them, were the two sides of that.
+
+    The desktop's proportions on the 72dp a launcher promises to show.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M36.79,30 L72,30 A6,6 0 0 1 78,36 L78,71.21 Z" />
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M30,36.79 L30,72 A6,6 0 0 0 36,78 L71.21,78 Z" />
+</vector>

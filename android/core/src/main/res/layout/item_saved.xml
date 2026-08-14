@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One saved item. A thumbnail leads — a video's own frame with a play mark, or
+    a music tile with a note — so the list is scanned by eye rather than read
+    line by line. Then the name and the two facts worth knowing about a kept
+    file: how large it is and when it arrived.
+
+    `blocksDescendants` is what makes tapping the row work at all. A row holding
+    anything focusable — the menu button here — has its own click swallowed by
+    that child, so the list appeared dead while the menu on it worked perfectly:
+    every way into a file except the obvious one.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="?attr/selectableItemBackground"
+    android:descendantFocusability="blocksDescendants"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="8dp">
+
+    <FrameLayout
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:layout_marginEnd="12dp">
+
+        <com.google.android.material.imageview.ShapeableImageView
+            android:id="@+id/art"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/tile"
+            android:scaleType="centerInside"
+            android:padding="14dp"
+            android:contentDescription="@null" />
+
+        <!-- Laid over a video frame; hidden for music. -->
+        <ImageView
+            android:id="@+id/playBadge"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_gravity="center"
+            android:src="@drawable/ic_play_badge"
+            android:visibility="gone"
+            android:contentDescription="@null" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/on_surface"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/detail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:textColor="@color/muted"
+            android:textSize="12sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <ImageButton
+        android:id="@+id/more"
+        android:focusable="false"
+        android:focusableInTouchMode="false"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_marginStart="6dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_more"
+        android:scaleType="fitCenter"
+        android:padding="9dp"
+        android:contentDescription="@string/menu" />
+</LinearLayout>

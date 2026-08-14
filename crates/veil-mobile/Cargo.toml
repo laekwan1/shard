@@ -1,0 +1,19 @@
+[package]
+name = "veil-mobile"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+veil-core = { path = "../veil-core" }
+anyhow = "1.0.104"
+tokio = { version = "1.53.1", features = ["rt-multi-thread"] }
+tracing = "0.1.44"
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21.1"
+android_logger = "0.14.1"
+log = "0.4.28"

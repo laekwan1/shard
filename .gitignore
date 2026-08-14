@@ -1,0 +1,48 @@
+/target
+**/*.rs.bk
+*.pdb
+/dist
+profiles.local.toml
+
+# Server credentials. A private key is the access itself — never commit one.
+*.key
+*.pem
+*.ppk
+id_rsa*
+ssh-key-*
+*.env
+
+# Anything built. All of it comes back from `cargo build` and `gradlew`, and a
+# repository that carries its own output is one where a diff no longer says what
+# changed.
+/release/**/*.exe
+/release/**/*.apk
+/release/**/*.dll
+/release/**/*.sys
+/release/**/*.aab
+# The browser engine's own profile, written beside the executable when it runs.
+*.WebView2/
+android/**/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+node_modules/
+
+# Third-party programs kept beside the source so a build machine needs nothing
+# installed. Large, not ours, and each has its own upstream: they are restored
+# rather than versioned here.
+/vendor/
+
+# What Windows and editors leave behind.
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Built by the mobile toolchain and copied in; `cargo ndk` puts them back.
+android/**/jniLibs/
+
+# Tor's own data files, shipped with it rather than written by us.
+/release/PC/Veil/tor/
+
+# Machine-local editor settings, which are one person's and not the project's.
+.claude/settings.local.json

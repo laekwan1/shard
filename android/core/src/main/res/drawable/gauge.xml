@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A rounded progress bar: a quiet track with the accent filling it, both
+     pill-capped so a part-done download reads as a rounded sliver, not a
+     hard-edged block. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <corners android:radius="100dp" />
+            <solid android:color="@color/field_fill" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <corners android:radius="100dp" />
+                <solid android:color="@color/accent" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A faint rounded box the playback buttons sit in, so they read as their own
+    control rather than more of the engine switch beside them. Grey and
+    translucent, which shows on a light shade and a dark one alike.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <corners android:radius="20dp" />
+    <solid android:color="#26808080" />
+</shape>

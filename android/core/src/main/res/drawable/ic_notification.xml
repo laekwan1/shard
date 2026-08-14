@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Shard's mark for the status bar: a rounded square cut in two by a diagonal.
+
+    Drawn as the two halves rather than as a square with a hole punched in it.
+    A hole made by even-odd filling has to be a shape of its own, and a shape
+    that crosses a rounded corner either overhangs it or stops short of it —
+    both of which showed. Each half traces the square's own outline and stops at
+    the cut, so the gap meets the edge exactly and nothing reaches past it.
+
+    White, because a small notification icon is drawn as a silhouette whatever
+    colour it carries. The gap survives because it is empty, not white.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M6.263,4 L18,4 A2,2 0 0 1 20,6 L20,17.737 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M4,6.263 L4,18 A2,2 0 0 0 6,20 L17.737,20 Z" />
+</vector>

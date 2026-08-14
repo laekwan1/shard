@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    One download in flight. Deliberately tiny: several can be running and the
+    row they sit in is a few millimetres tall, so the bar carries the progress
+    and the number carries the precision.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:layout_marginStart="8dp">
+
+    <ProgressBar
+        android:id="@+id/gauge"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="44dp"
+        android:layout_height="5dp"
+        android:max="100"
+        android:progressDrawable="@drawable/gauge" />
+
+    <TextView
+        android:id="@+id/percent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="4dp"
+        android:textSize="9sp"
+        android:textColor="@color/muted"
+        android:minWidth="26dp"
+        android:text="0%" />
+</LinearLayout>

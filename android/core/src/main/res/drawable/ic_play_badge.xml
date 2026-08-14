@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A small play mark laid over a video thumbnail. The white triangle sits on a
+    translucent dark disc so it reads over a bright frame (snow, a document, a
+    screen recording) as clearly as over a dark one.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="22dp" android:height="22dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#8A000000" android:pathData="M12,1A11,11 0 1 0 12,23A11,11 0 1 0 12,1z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M9.5,7.5v9l7,-4.5z" />
+</vector>

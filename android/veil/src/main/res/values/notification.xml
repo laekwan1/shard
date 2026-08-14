@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Veil's own mark colour, replacing the one :core carries for Shard. -->
+<resources>
+    <color name="notification_tint">#A78BFA</color>
+</resources>

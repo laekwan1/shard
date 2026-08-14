@@ -1,0 +1,88 @@
+[package]
+name = "shard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["desktop"]
+# The Windows desktop app: packet driver, tray icon, settings window, prober.
+# The phone build takes this crate without the feature and gets only the
+# portable core — parsers, strategy model, config format — so that both builds
+# make the same decisions from the same code.
+desktop = [
+    "dep:eframe",
+    "dep:egui",
+    "dep:global-hotkey",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:tray-icon",
+    "dep:wry",
+    "dep:raw-window-handle",
+    "uikit/gui",
+]
+
+# The binary carries a requireAdministrator manifest, so its (empty) test
+# harness cannot be launched by `cargo test`. All logic lives in the library.
+[[bin]]
+name = "shard"
+path = "src/main.rs"
+test = false
+required-features = ["desktop"]
+
+# Headless strategy finder, used to characterise a blocked site in one run.
+[[bin]]
+name = "probe"
+path = "src/bin/probe.rs"
+test = false
+required-features = ["desktop"]
+
+# Feasibility test for a phone port: socket-only techniques, no driver.
+[[bin]]
+name = "mobile"
+path = "src/bin/mobile.rs"
+test = false
+required-features = ["desktop"]
+
+[dependencies]
+anyhow = "1.0.104"
+crossbeam-channel = "0.5.16"
+hex = "0.4.3"
+# QUIC Initial packets are encrypted under keys derived from the connection ID,
+# so reading the hostname out of one means doing the derivation and the AEAD.
+# Primitives only — the protocol itself is ours.
+aes = "0.8.4"
+aes-gcm = "0.10.3"
+hkdf = "0.12.4"
+sha2 = "0.10.9"
+once_cell = "1.21.4"
+parking_lot = "0.12.5"
+rand = "0.10.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.19"
+toml = "1.1.4"
+tracing = "0.1.44"
+
+eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow"], optional = true }
+egui = { version = "0.35.0", optional = true }
+global-hotkey = { version = "0.8.0", optional = true }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "blocking"], optional = true }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util", "signal"], optional = true }
+tray-icon = { version = "0.24.2", default-features = false, optional = true }
+# The download window. WebView2 is already on every Windows 11 machine, so this
+# is a binding to something present rather than a browser we ship — the same
+# bargain as using the platform's TLS or its packet driver.
+wry = { version = "0.56.0", default-features = false, optional = true }
+raw-window-handle = { version = "0.6.2", optional = true }
+# The config format is shared with the desktop build; only its window is not.
+uikit = { path = "../uikit", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Security", "Win32_UI_Shell", "Win32_System_LibraryLoader", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_Registry", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_Graphics_Dwm", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Controls"] }
+
+[build-dependencies]
+# The icon is generated from the same marks the tray draws, so the build needs
+# the drawing code — without its window dependencies.
+uikit = { path = "../uikit", default-features = false }
+winresource = "0.1.23"

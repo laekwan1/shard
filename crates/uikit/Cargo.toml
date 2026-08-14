@@ -1,0 +1,33 @@
+[package]
+name = "uikit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["gui"]
+# The window, tray and elevation check. Without it only the parts that are
+# genuinely portable remain — the config file format and logging — which is
+# what the phone build links through `shard`.
+gui = ["dep:crossbeam-channel", "dep:eframe", "dep:egui", "dep:tray-icon"]
+
+[dependencies]
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.4"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+crossbeam-channel = { version = "0.5.16", optional = true }
+eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow"], optional = true }
+egui = { version = "0.35.0", optional = true }
+tray-icon = { version = "0.24.2", default-features = false, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }

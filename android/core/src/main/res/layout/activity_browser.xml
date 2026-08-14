@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The page fills the screen and the controls sit on top of it, out of the way
+    until they are pulled down. A browser is the page; everything else is
+    furniture, and furniture that is always visible is furniture in the way.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface">
+
+    <FrameLayout
+        android:id="@+id/shell"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <WebView
+            android:id="@+id/web"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/surface" />
+
+        <!--
+            The pull-down panel. Height is set at runtime to a tenth of the
+            screen; it starts translated out of view.
+        -->
+        <!--
+            Grows with what it holds. A fixed height was clipping the download
+            rows, and the panel covers the page anyway — there is no reason for
+            it to be smaller than its contents.
+        -->
+        <LinearLayout
+            android:id="@+id/bar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/chrome"
+            android:elevation="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="4dp"
+                android:paddingHorizontal="10dp">
+
+                <!-- The same amber toggle the desktop build uses. -->
+                <ImageButton
+                    android:id="@+id/power"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="@drawable/power_backdrop"
+                    android:src="@drawable/ic_power"
+                    android:scaleType="fitCenter"
+                    android:padding="11dp"
+                    android:contentDescription="@string/on" />
+
+                <EditText
+                    android:id="@+id/url"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/field"
+                    android:paddingHorizontal="14dp"
+                    android:hint="@string/url_hint"
+                    android:imeOptions="actionGo"
+                    android:inputType="textUri"
+                    android:maxLines="1"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:textColorHint="@color/muted"
+                    android:importantForAutofill="no" />
+
+                <ImageButton
+                    android:id="@+id/reload"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="4dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_refresh"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/menu_reload" />
+
+                <!--
+                    The way into what has already been saved. Beside the address
+                    rather than buried in a menu: it is the other half of what
+                    this browser is for.
+                -->
+                <ImageButton
+                    android:id="@+id/openLibrary"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_library"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_open" />
+
+            </LinearLayout>
+
+            <!-- State on the left, downloads on the right. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="14dp"
+                android:paddingBottom="5dp">
+
+                <TextView
+                    android:id="@+id/status"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="10sp"
+                    android:textColor="@color/muted"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:text="@string/status_idle" />
+
+            </LinearLayout>
+
+            <!-- Only present while something is downloading, so the panel is
+                 its normal size the rest of the time. -->
+            <View
+                android:id="@+id/downloadDivider"
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginHorizontal="14dp"
+                android:background="@color/divider"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/downloads"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="14dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="4dp" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:max="100"
+            android:visibility="invisible" />
+
+        <!--
+            Always-visible handle, top-left and the same height as the address
+            bar it opens onto — so the panel appears to slide out from under it
+            rather than from somewhere unrelated. Tap it, or swipe right.
+        -->
+        <FrameLayout
+            android:id="@+id/handleArea"
+            android:layout_width="30dp"
+            android:layout_height="38dp"
+            android:layout_gravity="start|top"
+            android:layout_marginTop="12dp">
+
+            <View
+                android:layout_width="4dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:background="@drawable/handle" />
+        </FrameLayout>
+    </FrameLayout>
+
+    <!-- Holds the player when a page asks for full screen. -->
+    <FrameLayout
+        android:id="@+id/fullscreen"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone" />
+</FrameLayout>

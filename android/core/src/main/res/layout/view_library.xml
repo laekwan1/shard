@@ -1,0 +1,455 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The offline library: a screen of its own over the browser.
+
+    It is not a page and it is not a panel. What is saved has nothing to do with
+    what is loaded, and mixing the two would mean a back press could land in
+    either — so this covers the browser entirely and back returns to it.
+
+    The shape is the one every video app settles on, because it is the one that
+    lets you pick the next thing while the current one plays: the player across
+    the top, the list under it. Expanding hides the list and nothing else, so
+    coming back is the same gesture in reverse.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/library"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/surface"
+    android:visibility="gone"
+    android:clickable="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!--
+            The stage. Sixteen by nine while the list is showing; the whole
+            screen once expanded, which is done by changing this height.
+        -->
+        <FrameLayout
+            android:id="@+id/stage"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:background="#000000"
+            android:visibility="gone">
+
+            <!--
+                A surface and a player of our own rather than a VideoView.
+                A VideoView lets its player go the moment its surface does, and
+                a surface goes as soon as the app leaves the screen — so sound
+                could never carry on in the background while one was in charge
+                of it. Holding the player here means the picture can go and the
+                sound stay, which is what background playback is.
+            -->
+            <SurfaceView
+                android:id="@+id/player"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center" />
+
+            <!--
+                The way out of full screen, top left, where every screen keeps
+                it. Only shown while full screen, because the header carries it
+                the rest of the time.
+            -->
+            <ImageButton
+                android:id="@+id/leaveFullScreen"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:layout_gravity="top|start"
+                android:layout_margin="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_back"
+                android:scaleType="fitCenter"
+                android:padding="9dp"
+                android:visibility="gone"
+                android:contentDescription="@string/library_back" />
+
+            <!-- Sits over the video, bottom right, out of the picture's way. -->
+            <ImageButton
+                android:id="@+id/expand"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="6dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_expand"
+                android:scaleType="fitCenter"
+                android:padding="9dp"
+                android:contentDescription="@string/library_expand" />
+
+            <!--
+                The brightness/volume gauge. Shown for a moment while the sides of
+                the picture are dragged, so an adjustment has something to read
+                against rather than being felt out in the dark.
+            -->
+            <LinearLayout
+                android:id="@+id/gauge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/gauge_backdrop"
+                android:paddingHorizontal="18dp"
+                android:paddingVertical="16dp"
+                android:visibility="gone">
+
+                <ImageView
+                    android:id="@+id/gaugeIcon"
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:src="@drawable/ic_brightness"
+                    android:contentDescription="@null" />
+
+                <ProgressBar
+                    android:id="@+id/gaugeBar"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="110dp"
+                    android:layout_height="4dp"
+                    android:layout_marginTop="12dp"
+                    android:max="100"
+                    android:progressDrawable="@drawable/gauge" />
+            </LinearLayout>
+
+        </FrameLayout>
+
+        <!--
+            The music player: a bar at the top where a video's picture would be,
+            not the video stage. A song has no picture, so it does not take the
+            screen — it carries its art, title, a scrubber to move through it, and
+            play/pause and stop. Only up while a song is playing.
+        -->
+        <LinearLayout
+            android:id="@+id/nowPlaying"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@color/chrome"
+            android:elevation="6dp"
+            android:paddingHorizontal="12dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="8dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                    android:id="@+id/npArt"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/tile"
+                    android:scaleType="centerInside"
+                    android:padding="12dp"
+                    android:src="@drawable/ic_music"
+                    android:contentDescription="@null" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/npTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/on_surface"
+                        android:textStyle="bold"
+                        android:textSize="14sp"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/npSub"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp"
+                        android:text="@string/library_playing" />
+                </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/npToggle"
+                    android:layout_width="42dp"
+                    android:layout_height="42dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_pb_pause"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_playing" />
+
+                <ImageButton
+                    android:id="@+id/npStop"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_close"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/stop_download_description" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="2dp">
+
+                <TextView
+                    android:id="@+id/npElapsed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="38dp"
+                    android:gravity="center"
+                    android:textColor="@color/muted"
+                    android:textSize="10sp"
+                    android:fontFeatureSettings="tnum"
+                    android:text="0:00" />
+
+                <SeekBar
+                    android:id="@+id/npSeek"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:max="1000" />
+
+                <TextView
+                    android:id="@+id/npTotal"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:minWidth="38dp"
+                    android:gravity="center"
+                    android:textColor="@color/muted"
+                    android:textSize="10sp"
+                    android:fontFeatureSettings="tnum"
+                    android:text="0:00" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Everything below is hidden while the player is expanded. -->
+        <LinearLayout
+            android:id="@+id/libraryChrome"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <!--
+                Leaving is a back arrow at the left, where every screen on this
+                phone puts it. A cross at the right reads as "dismiss this
+                thing", and the library is not a thing on top of a screen — it
+                is the screen, and what is behind it is where back goes.
+            -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="8dp">
+
+                <ImageButton
+                    android:id="@+id/backFromLibrary"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_back"
+                    android:scaleType="fitCenter"
+                    android:padding="8dp"
+                    android:contentDescription="@string/library_back" />
+
+                <TextView
+                    android:id="@+id/libraryTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:text="@string/library_title"
+                    android:textColor="@color/on_surface"
+                    android:textStyle="bold"
+                    android:letterSpacing="-0.01"
+                    android:textSize="19sp" />
+            </LinearLayout>
+
+            <!--
+                Two shelves: videos and music. A segmented control, the primary
+                split above the folders, because a video and a song are different
+                things to want and mixing them in one list makes each harder to
+                find. The one in force lifts to a pill; folders filter within the
+                video shelf, music is a flat list.
+            -->
+            <LinearLayout
+                android:id="@+id/kinds"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/segment_track"
+                android:layout_marginHorizontal="14dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="12dp"
+                android:padding="4dp">
+
+                <LinearLayout
+                    android:id="@+id/tabVideo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:background="@drawable/segment_pill">
+
+                    <ImageView
+                        android:id="@+id/tabVideoIcon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="8dp"
+                        android:src="@drawable/ic_video"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/tabVideoText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/library_tab_video"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/tabMusic"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:background="@drawable/segment_pill">
+
+                    <ImageView
+                        android:id="@+id/tabMusicIcon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="8dp"
+                        android:src="@drawable/ic_music"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/tabMusicText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/library_tab_music"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!--
+                One row of folders, scrolled sideways, with the folder-making and
+                settings buttons pinned to its right end — on the same line as the
+                tabs they belong beside, not up in the title bar. A folder is a
+                filter over the list below, not a place to navigate into.
+            -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="6dp">
+
+                <HorizontalScrollView
+                    android:id="@+id/folderScroll"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:scrollbars="none"
+                    android:paddingHorizontal="10dp">
+
+                    <LinearLayout
+                        android:id="@+id/folders"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal" />
+                </HorizontalScrollView>
+
+                <ImageButton
+                    android:id="@+id/newFolder"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_new_folder"
+                    android:scaleType="fitCenter"
+                    android:padding="8dp"
+                    android:contentDescription="@string/library_new_folder" />
+
+                <ImageButton
+                    android:id="@+id/librarySettings"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_more"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_settings" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/divider" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <ListView
+                    android:id="@+id/saved"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:divider="@null"
+                    android:scrollbarStyle="outsideOverlay" />
+
+                <LinearLayout
+                    android:id="@+id/libraryEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:paddingHorizontal="34dp"
+                    android:visibility="gone">
+
+                    <ImageView
+                        android:id="@+id/emptyIcon"
+                        android:layout_width="46dp"
+                        android:layout_height="46dp"
+                        android:layout_marginBottom="14dp"
+                        android:alpha="0.5"
+                        android:src="@drawable/ic_video"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/emptyText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:gravity="center"
+                        android:text="@string/library_empty"
+                        android:textColor="@color/muted"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

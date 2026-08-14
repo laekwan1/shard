@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Nothing behind the mark.
+
+    A background layer is drawn behind everything the foreground paints,
+    including the diagonal the foreground deliberately leaves empty — so giving
+    it a colour paints a stripe through the mark in that colour. Dark plate,
+    dark stripe. The gap is meant to be a gap: whatever is behind the icon shows
+    through it, the same as on the desktop.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@android:color/transparent" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

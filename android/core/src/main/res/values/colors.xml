@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Dark throughout. The controls sit over the page, so a light chrome would
+    flash white every time the panel is pulled down.
+
+    `accent` is overridden by each app — amber for Shard, blue for Veil — so the
+    power toggle carries the app's identity without another asset.
+-->
+<resources>
+    <color name="surface">#0E0E10</color>
+    <color name="chrome">#1A1A1D</color>
+    <!-- A warm-neutral step above the surface, for segmented-control tracks and
+         the tiles a thumbnail has not filled yet. -->
+    <color name="raised">#202024</color>
+    <color name="field_fill">#26262B</color>
+    <color name="on_surface">#E8E6E3</color>
+    <color name="muted">#8A8A90</color>
+    <color name="divider">#2E2E34</color>
+    <color name="handle">#66FFFFFF</color>
+    <color name="on_accent">#141210</color>
+    <color name="accent">#E0A030</color>
+    <!--
+        The colour behind the notification's silhouette. Each app overrides it
+        with its own mark's colour: the service that draws the notification is
+        shared, so the only thing that can tell the two apps apart is a resource
+        the app module replaces.
+    -->
+    <color name="notification_tint">#22D3EE</color>
+</resources>

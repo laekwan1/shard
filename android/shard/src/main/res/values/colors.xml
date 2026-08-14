@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The cyan the desktop build uses for a running Shard. Overrides the
+         shared default so the power toggle carries the app's identity. -->
+    <color name="accent">#22D3EE</color>
+    <color name="ink">#141210</color>
+</resources>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Veil's mark, matching the desktop build: a disc behind horizontal slits.
+
+    The slits are empty, not white: whatever is behind the icon shows through
+    them, which is why the background layer is transparent.
+
+    Drawn as the three pieces the slits leave, so each follows the disc's own
+    arc and the slits meet the edge exactly — see the status bar copy for why a
+    punched-out bar cannot.
+
+    The desktop's proportions on the 72dp a launcher promises to show.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#A78BFA"
+        android:pathData="M30.41,40.14 A27.36,27.36 0 0 1 77.59,40.14 Z" />
+    <path
+        android:fillColor="#A78BFA"
+        android:pathData="M27.76,46.26 L80.24,46.26 A27.36,27.36 0 0 1 80.24,61.74 L27.76,61.74 A27.36,27.36 0 0 1 27.76,46.26 Z" />
+    <path
+        android:fillColor="#A78BFA"
+        android:pathData="M30.41,67.86 A27.36,27.36 0 0 0 77.59,67.86 Z" />
+</vector>

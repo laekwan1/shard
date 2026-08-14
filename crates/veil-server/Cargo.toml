@@ -1,0 +1,20 @@
+[package]
+name = "veil-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "veil-server"
+path = "src/main.rs"
+
+[dependencies]
+veil-core = { path = "../veil-core" }
+anyhow = "1.0.104"
+rcgen = "0.14.8"
+rustls-pki-types = "1.15.1"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "io-util", "time", "macros", "signal"] }
+toml = "1.1.4"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
