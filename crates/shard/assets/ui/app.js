@@ -305,8 +305,8 @@ function paintFiles() {
   emptyEl.hidden = list.length > 0;
   emptyEl.textContent =
     shelf.kind === "music"
-      ? "받은 음악이 없습니다. 음악만 저장하면 여기에 모입니다."
-      : "저장한 영상이 없습니다. 브라우저에서 영상을 받으면 여기에 모입니다.";
+      ? "받은 음악이 없습니다."
+      : "받은 영상이 없습니다.";
 
   for (const item of list) {
     const row = document.createElement("div");
@@ -466,6 +466,14 @@ const nextButton = document.getElementById("next");
 
 let playing = null;
 
+// Positions written under the old key, which was the address's own number and
+// meant a different file every run. They cannot be matched to anything now, and
+// left there they go on starting videos in the wrong place.
+for (let i = localStorage.length - 1; i >= 0; i--) {
+  const key = localStorage.key(i);
+  if (key && /^at:\d+$/.test(key)) localStorage.removeItem(key);
+}
+
 function play(item) {
   playing = item;
   player.hidden = false;
@@ -477,7 +485,12 @@ function play(item) {
   video.src = "/media/" + item.id;
   video.play().catch(() => {});
   // Where it left off, remembered per file so a long video is not started over.
-  const at = Number(localStorage.getItem("at:" + item.id) || 0);
+  //
+  // Under the file's own name, not the number the address uses: that number is
+  // handed out fresh each run and means a different file the next time, so what
+  // came back was some other video's position — which is why films started in
+  // the middle of nowhere.
+  const at = Number(localStorage.getItem("at:" + item.key) || 0);
   if (at > 5) video.currentTime = at;
   syncPlayer();
 }
@@ -522,18 +535,20 @@ video.addEventListener("click", () => (video.paused ? video.play() : video.pause
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
 video.addEventListener("pause", () => (playButton.innerHTML = PLAY));
 video.addEventListener("ended", () => {
-  localStorage.removeItem("at:" + (playing && playing.id));
+  if (playing) localStorage.removeItem("at:" + playing.key);
   playButton.innerHTML = PLAY;
 });
 
 video.addEventListener("timeupdate", () => {
+  // Not while the line is being dragged: the picture belongs to the hand then,
+  // and letting playback write over it makes the knob jump back under the
+  // pointer.
+  if (scrubbing) return;
   const length = video.duration || 0;
   const at = video.currentTime || 0;
-  const part = length ? (at / length) * 100 : 0;
-  played.style.width = part + "%";
-  knob.style.left = part + "%";
+  markScrub(length ? at / length : 0);
   clock.textContent = say(at) + " / " + say(length);
-  if (playing && at > 5) localStorage.setItem("at:" + playing.id, String(at));
+  if (playing && at > 5) localStorage.setItem("at:" + playing.key, String(at));
 });
 
 function say(seconds) {
@@ -545,17 +560,42 @@ function say(seconds) {
 }
 
 // Anywhere along the line, and dragging along it scrubs.
-function seekTo(e) {
-  const box = scrub.getBoundingClientRect();
-  const part = Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
-  if (video.duration) video.currentTime = part * video.duration;
+//
+// The line follows the hand at once; the film only moves when the hand is let
+// go. Every move of the pointer used to set the play position, and every one of
+// those makes the player throw away what it had and ask for the file again from
+// a new place — hundreds of times across one drag. That is what made dragging
+// feel like it was catching: the picture was seeking to somewhere the pointer
+// had already left.
+let scrubbing = false;
+
+function markScrub(part) {
+  const percent = Math.min(1, Math.max(0, part)) * 100;
+  played.style.width = percent + "%";
+  knob.style.left = percent + "%";
 }
+
+function partAt(e) {
+  const box = scrub.getBoundingClientRect();
+  return Math.min(1, Math.max(0, (e.clientX - box.left) / box.width));
+}
+
 scrub.addEventListener("mousedown", (e) => {
-  seekTo(e);
-  const move = (m) => seekTo(m);
+  if (!video.duration) return;
+  scrubbing = true;
+  let part = partAt(e);
+  const show = (at) => {
+    part = at;
+    markScrub(part);
+    clock.textContent = say(part * video.duration) + " / " + say(video.duration);
+  };
+  show(part);
+  const move = (m) => show(partAt(m));
   const up = () => {
     document.removeEventListener("mousemove", move);
     document.removeEventListener("mouseup", up);
+    scrubbing = false;
+    video.currentTime = part * video.duration;
   };
   document.addEventListener("mousemove", move);
   document.addEventListener("mouseup", up);
@@ -660,6 +700,40 @@ function paintSettings(message) {
     }
     settingsEl.appendChild(section);
   }
+  settingsEl.appendChild(resetRow());
+}
+
+// The way back, for a setting changed by mistake. Asked twice rather than
+// through a dialog: the second press is the confirmation, and it forgets it was
+// asked if nothing follows.
+function resetRow() {
+  const section = document.createElement("section");
+  section.className = "group";
+  const button = document.createElement("button");
+  button.className = "reset";
+  button.textContent = "설정 초기화";
+  let asked = false;
+  let forget = 0;
+  button.addEventListener("click", () => {
+    if (asked) {
+      clearTimeout(forget);
+      asked = false;
+      button.classList.remove("sure");
+      button.textContent = "설정 초기화";
+      send("settings.reset");
+      return;
+    }
+    asked = true;
+    button.classList.add("sure");
+    button.textContent = "한 번 더 누르면 처음 상태로";
+    forget = setTimeout(() => {
+      asked = false;
+      button.classList.remove("sure");
+      button.textContent = "설정 초기화";
+    }, 4000);
+  });
+  section.appendChild(button);
+  return section;
 }
 
 function control(item) {

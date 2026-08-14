@@ -173,7 +173,7 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 Item {
                     key: "overrides",
                     label: "학습된 사이트",
-                    help: "스스로 찾아낸 전략이 있는 곳들입니다. 줄을 지우면 그 곳의 학습을 잊고 기본 방식으로 돌아갑니다. 여기에 새로 적어 넣을 수는 없습니다.",
+                    help: "줄을 지우면 그 곳의 학습을 잊습니다.",
                     kind: Kind::Lines(cfg.overrides.keys().cloned().collect()),
                 },
             ],
@@ -308,7 +308,7 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 Item {
                     key: "doh.bootstrap",
                     label: "부트스트랩",
-                    help: "상위 서버의 주소를 처음 알아낼 때 쓰는 곳. 위 목록과 같은 순서로 짝지어지며, \"dns.google=8.8.8.8\"처럼 쓰면 순서와 무관하게 그 서버에 붙습니다.",
+                    help: "위 목록과 같은 순서로 짝지어집니다. \"dns.google=8.8.8.8\"처럼도 됩니다.",
                     kind: Kind::Lines(cfg.doh.bootstrap.clone()),
                 },
             ],

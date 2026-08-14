@@ -239,6 +239,8 @@ pub enum Ask {
     PageOffer(String),
     /// The settings: read them, or put one back.
     SettingsRead,
+    /// Put every setting back to what it was on the first launch.
+    SettingsReset,
     SettingsSet { key: String, value: String },
     /// The window itself: what a page cannot do to the frame around it.
     WindowDrag,
@@ -290,6 +292,7 @@ pub fn read_ask(body: &str) -> Ask {
         },
         "chose" => Ask::Chose(number(body, "itag").unwrap_or(0)),
         "settings.read" => Ask::SettingsRead,
+        "settings.reset" => Ask::SettingsReset,
         "settings.set" => Ask::SettingsSet {
             key: field(body, "key").unwrap_or_default(),
             value: field(body, "value").unwrap_or_default(),
@@ -828,6 +831,24 @@ pub fn preview() -> Result<()> {
             // clamped, and the control has to show where it actually landed.
             let json = crate::settings::as_json(&engine.borrow().shared.config.read());
             shell.tell(&json);
+        }
+
+        // Everything back to what it was on the first launch, except the one
+        // thing that is not a setting: what has been learned about which sites
+        // are blocked stays, because relearning it takes days of ordinary use.
+        Ask::SettingsReset => {
+            {
+                let core = engine.borrow();
+                let mut cfg = core.shared.config.write();
+                let learned = std::mem::take(&mut cfg.overrides);
+                *cfg = crate::config::Config::default();
+                cfg.overrides = learned;
+            }
+            engine.borrow().save_config();
+            engine.borrow_mut().restart_if_running();
+            let json = crate::settings::as_json(&engine.borrow().shared.config.read());
+            shell.tell(&json);
+            shell.say_engine(&engine.borrow());
         }
 
         Ask::LibraryList(kind) => shell.say_library(shelf_of(&kind)),

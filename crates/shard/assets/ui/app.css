@@ -274,45 +274,44 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
    The two shelves are tabs, and the sheet below carries their colour, so the
    folders and the files read as the open tab's contents. */
 
-/* Set down from the strip above rather than hard against it, so the two rows of
-   tabs do not read as one stack of four. */
-#shelves { display: flex; align-items: flex-end; gap: 3px; height: 46px; padding: 8px 8px 0; }
+/*
+    The library reads the way the browser above it does: one unbroken colour
+    from the lit tab down through the controls, and below that the list, in the
+    darker colour a page has. What is in force is said by an effect, not by a
+    block of colour — that is the tab strip's job, and two things claiming it
+    would be two things claiming to be the front.
+*/
+#library { display: flex; flex-direction: column; background: var(--toolbar); }
+
+/* The segmented control, to the same shape the phone draws: a rounded well with
+   the one in force lifted out of it as a pill, ringed in white. */
+#shelves {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  margin: 8px 8px 2px;
+  padding: 4px;
+  background: var(--raised);
+  border-radius: 14px;
+}
 .shelf {
   flex: 1;
-  height: 38px;
+  height: 34px;
   display: grid;
   place-items: center;
   color: var(--muted);
-  background: #17181c;
-  /* The line under it is the sheet's own top edge, drawn here so the two are
-     never a pixel apart. */
-  border: 1px solid transparent;
-  border-bottom: 1px solid var(--divider);
-  border-radius: 9px 9px 0 0;
-  transition: color .12s, background .12s, border-color .12s;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: 11px;
+  transition: color .13s, background .13s, border-color .13s;
 }
-.shelf svg { width: 24px; height: 24px; }
-.shelf:hover { color: var(--on-surface); background: #1d1e23; }
-/*
-    The open one is the sheet. Its sides and top are drawn, its bottom edge is
-    not, and it sits one pixel further down than the others so its opening runs
-    straight into the sheet below with no seam across it — the shape a tab makes
-    when it is the front of the thing under it.
-*/
-.shelf.on {
-  color: #fff;
-  background: var(--toolbar);
-  border-color: var(--divider);
-  border-bottom-color: transparent;
-  margin-bottom: -1px;
-}
+.shelf svg { width: 22px; height: 22px; }
+.shelf:hover { color: var(--on-surface); }
+.shelf.on { color: #fff; background: #34343b; border-color: #ffffffb3; }
 
-/* One colour from the library tab in the title strip all the way down: the tab
-   that is lit, the shelf that is open, and the sheet they open onto. */
 #sheet {
-  height: calc(100% - 46px);
-  background: var(--toolbar);
-  border-top: 1px solid var(--divider);
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -335,7 +334,21 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .folder.add { margin-left: auto; color: var(--muted); font-size: 15px; border-radius: 8px; padding: 4px 9px 6px; }
 .folder.add:hover { background: #ffffff14; color: #fff; }
 
-#files { flex: 1; overflow: auto; padding: 4px 0 10px; }
+/*
+    The list is the page under the chrome: darker, edged, and only as tall as it
+    needs to be. What is left below it stays the colour of everything above the
+    list, which is what divides the two without a rule drawn between them.
+*/
+#files {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 4px;
+  background: var(--surface);
+  border-top: 1px solid var(--divider);
+  border-bottom: 1px solid var(--divider);
+}
+#files:empty { display: none; }
 .file {
   display: flex;
   align-items: center;
@@ -383,6 +396,20 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   padding: 12px 2px;
   border-bottom: 1px solid var(--divider);
 }
+
+/* The way back from a setting changed by mistake. Quiet until it is asked to
+   be sure of itself. */
+.reset {
+  width: 100%;
+  padding: 11px 0;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--muted);
+  border: 1px solid var(--divider);
+  transition: color .13s, background .13s, border-color .13s;
+}
+.reset:hover { color: var(--on-surface); background: #ffffff0a; }
+.reset.sure { color: #fff; background: #7f1d1d; border-color: #7f1d1d; }
 .setting.tall { align-items: flex-start; }
 .what { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .what span { font-size: 13.5px; }
@@ -456,8 +483,6 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #menu button:hover { background: #ffffff14; }
 #menu button.danger:hover { background: #7f1d1d; color: #fff; }
 #menu hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
-/* What the entry above it will do, for the one that is not obvious. */
-#menu .hint { margin: 2px 10px 4px; max-width: 21ch; font-size: 10.5px; line-height: 1.45; color: var(--muted); }
 
 /* ---- the player ----------------------------------------------------------- */
 
