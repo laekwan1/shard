@@ -335,19 +335,21 @@ button svg { display: block; }
   content: "";
   position: absolute;
   bottom: 0;
-  width: 12px;
-  height: 12px;
+  /* A short turn rather than a long sweep: the joint should read as a corner
+     easing off, not as the control melting into the list. */
+  width: 6px;
+  height: 6px;
   background: var(--surface);
 }
 #shelves::before {
-  left: -12px;
-  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 12px, #000 12.5px);
-  mask-image: radial-gradient(circle at 0 0, transparent 12px, #000 12.5px);
+  left: -6px;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 6px, #000 6.5px);
+  mask-image: radial-gradient(circle at 0 0, transparent 6px, #000 6.5px);
 }
 #shelves::after {
-  right: -12px;
-  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 12px, #000 12.5px);
-  mask-image: radial-gradient(circle at 100% 0, transparent 12px, #000 12.5px);
+  right: -6px;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 6px, #000 6.5px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 6px, #000 6.5px);
 }
 .shelf {
   display: flex;

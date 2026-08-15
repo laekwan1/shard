@@ -150,8 +150,29 @@ fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Re
     if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
         bail!("그림이 아닙니다 ({} 바이트)", bytes.len());
     }
-    std::fs::write(saved.with_extension("jpg"), &bytes)?;
+    let Some(extension) = picture_kind(&bytes) else {
+        bail!("그림이 아닙니다");
+    };
+    std::fs::write(saved.with_extension(extension), &bytes)?;
     Ok(())
+}
+
+/// What a picture actually is, by its first bytes.
+///
+/// Not by the address it came from: an address ending in `.jpg` is served as
+/// WebP as often as not, and a file named for something it is not opens in this
+/// program — which sniffs — and nowhere else.
+pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        return Some("jpg");
+    }
+    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        return Some("png");
+    }
+    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("webp");
+    }
+    None
 }
 
 /// What to call an audio stream, judged by what it turns out to be.
@@ -375,6 +396,17 @@ fn unused(mut file: File) -> std::io::Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_picture_is_named_for_what_it_actually_is() {
+        assert_eq!(picture_kind(&[0xff, 0xd8, 0xff, 0xe0]), Some("jpg"));
+        assert_eq!(picture_kind(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0]), Some("png"));
+        let mut webp = b"RIFF    WEBPVP8 ".to_vec();
+        webp.push(0);
+        assert_eq!(picture_kind(&webp), Some("webp"));
+        // An address ending in .jpg that answers with a page is not a picture.
+        assert_eq!(picture_kind(b"<!doctype html>"), None);
+    }
 
     #[test]
     fn names_survive_what_a_filesystem_refuses() {

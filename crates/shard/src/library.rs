@@ -109,11 +109,13 @@ fn sweep(dir: &Path, folder: &str, kind: Kind, out: &mut Vec<Item>) {
             continue;
         }
         // The picture is not a row of its own.
-        if path.extension().map(|e| e.eq_ignore_ascii_case("jpg")).unwrap_or(false) {
+        if is_picture(&path) {
             continue;
         }
-        let cover = path.with_extension("jpg");
-        let cover = cover.is_file().then_some(cover);
+        let cover = COVER_KINDS
+            .iter()
+            .map(|kind| path.with_extension(kind))
+            .find(|beside| beside.is_file());
         out.push(Item {
             path,
             title,
@@ -156,6 +158,17 @@ pub fn add_folder(kind: Kind, name: &str) -> bool {
         return false;
     }
     std::fs::create_dir_all(kind.folder().join(clean)).is_ok()
+}
+
+/// What a saved picture may be called. The address a cover comes from ends in
+/// `.jpg` whatever is actually sent, so the file is named for its own bytes.
+const COVER_KINDS: [&str; 3] = ["jpg", "webp", "png"];
+
+fn is_picture(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| COVER_KINDS.iter().any(|kind| e.eq_ignore_ascii_case(kind)))
+        .unwrap_or(false)
 }
 
 /// A name for a file that means the same file next time the program runs.
@@ -315,7 +328,8 @@ pub fn rename(item: &Item, title: &str) -> bool {
     let renamed = std::fs::rename(&item.path, &target).is_ok();
     if renamed {
         if let Some(cover) = &item.cover {
-            let _ = std::fs::rename(cover, target.with_extension("jpg"));
+            let kind = cover.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
+            let _ = std::fs::rename(cover, target.with_extension(kind));
         }
     }
     renamed
