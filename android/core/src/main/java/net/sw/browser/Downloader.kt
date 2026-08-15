@@ -162,25 +162,69 @@ class Downloader(private val context: Context) {
         val extension = if (webm) "webm" else "m4a"
         val mime = if (webm) "audio/webm" else "audio/mp4"
         val name = nameFor(media, extension)
+
+        // The picture goes into the file itself, before it is written anywhere.
+        //
+        // A song has no cover of its own — the sound is all that was kept — and
+        // put inside the header it travels with the file: the phone's music app
+        // and anything the file is copied to all read it from there. Beside the
+        // file it would be a second thing to keep, lose and copy.
+        val withCover = if (webm) null else media.cover
+            ?.takeIf { it.isNotBlank() }
+            ?.let { fetchPicture(it) }
+            ?.let { (picture, png) ->
+                runCatching { Cover.into(audioFile.readBytes(), picture, png) }.getOrNull()
+            }
+
         val sink = Storage.createMusicFile(context, name, mime)
         var ok = false
         try {
-            java.io.FileInputStream(audioFile).use { input ->
-                java.io.FileOutputStream(sink.descriptor.fileDescriptor).use { output ->
-                    input.copyTo(output)
+            java.io.FileOutputStream(sink.descriptor.fileDescriptor).use { output ->
+                if (withCover != null) {
+                    output.write(withCover)
+                } else {
+                    java.io.FileInputStream(audioFile).use { input -> input.copyTo(output) }
                 }
             }
             ok = true
-            // The song has no picture of its own, so the video's thumbnail stands
-            // in as its cover in the library. Best effort — a cover that will not
-            // fetch is a blank tile, not a failed download.
-            media.cover?.takeIf { it.isNotBlank() }?.let { saveCover(name, it) }
+            // Nothing to put inside a WebM, and nothing for a picture that would
+            // not come: the tile falls back to what is remembered beside it,
+            // which is what songs saved before this did.
+            if (withCover == null) {
+                media.cover?.takeIf { it.isNotBlank() }?.let { saveCover(name, it) }
+            }
             return sink.where
         } finally {
             sink.close()
             if (!ok) Storage.remove(context, sink)
         }
     }
+
+    /**
+     * The picture at an address, and whether it is a PNG.
+     *
+     * Asked for as a photograph: an address ending in `.jpg` is answered with
+     * AVIF as often as not, and no music player knows what to do with one of
+     * those once it is inside a file.
+     */
+    private fun fetchPicture(url: String): Pair<ByteArray, Boolean>? = runCatching {
+        val connection = (java.net.URL(url).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            connectTimeout = 10_000
+            readTimeout = 10_000
+            setRequestProperty("Accept", "image/jpeg,image/png;q=0.9")
+        }
+        val bytes = connection.inputStream.use { it.readBytes() }
+        val jpeg = bytes.size > 3 &&
+            bytes[0] == 0xff.toByte() && bytes[1] == 0xd8.toByte() && bytes[2] == 0xff.toByte()
+        val png = bytes.size > 8 && bytes[0] == 0x89.toByte() &&
+            bytes[1] == 'P'.code.toByte() && bytes[2] == 'N'.code.toByte()
+        when {
+            jpeg -> bytes to false
+            png -> bytes to true
+            else -> null
+        }
+    }.getOrNull()
 
     /**
      * Fetch the song's cover straight from the thumbnail host.

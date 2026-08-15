@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.view.DragEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.SurfaceHolder
@@ -146,6 +147,25 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 dragged.startDragAndDrop(label, View.DragShadowBuilder(dragged), item, 0)
                 true
             }
+            // Dropped on a folder along the top, a row goes into it; dropped on
+            // another row, it takes that row's place. The two gestures are told
+            // apart by what is underneath when the finger lifts, which is the
+            // only thing the user was aiming at.
+            view.setOnDragListener { row, event ->
+                val carried = event.localState as? Library.Item ?: return@setOnDragListener false
+                when (event.action) {
+                    DragEvent.ACTION_DRAG_ENTERED -> if (carried.id != item.id) row.alpha = 0.6f
+                    DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> row.alpha = 1f
+                    DragEvent.ACTION_DROP -> {
+                        row.alpha = 1f
+                        // Above or below, by which half of the row it landed on.
+                        if (carried.id != item.id) {
+                            rearrange(carried, item, event.y < row.height / 2f)
+                        }
+                    }
+                }
+                true
+            }
             return view
         }
     }
@@ -200,9 +220,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         thumbWork.execute {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-            // A song carries no frame of its own, so its saved cover is the first
-            // place to look; the video's own frame is what a film shows.
-            var bmp = if (music) Covers.load(activity, Covers.keyFor(item.name)) else null
+            // A song carries no frame of its own. The picture inside the file is
+            // the first place to look — that is where a download puts it, and
+            // where every music app looks — then the one remembered beside it,
+            // from before songs carried their own.
+            var bmp = if (music) embeddedArt(item) else null
+            if (bmp == null && music) bmp = Covers.load(activity, Covers.keyFor(item.name))
             if (bmp == null) {
                 bmp = runCatching {
                     activity.contentResolver.loadThumbnail(item.uri, android.util.Size(200, 200), null)
@@ -213,6 +236,65 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             ui.post { if (art.tag == item.uri) showThumb(art, badge, bmp, music) }
         }
     }
+
+    /**
+     * Put one file before or after another and remember the whole shelf.
+     *
+     * The whole shelf, not the part being shown: a list narrowed to one folder
+     * is still a slice of one order, and saving only the slice would forget
+     * where everything else stood.
+     */
+    private fun rearrange(carried: Library.Item, target: Library.Item, above: Boolean) {
+        val shelf = Library.arranged(activity, items.filter { it.kind == tab }, tab).toMutableList()
+        val from = shelf.indexOfFirst { it.id == carried.id }
+        if (from < 0) return
+        shelf.removeAt(from)
+        var to = shelf.indexOfFirst { it.id == target.id }
+        if (to < 0) to = shelf.size else if (!above) to += 1
+        shelf.add(to, carried)
+        Library.setOrder(activity, tab, shelf.map { it.name })
+        adapter.notifyDataSetChanged()
+    }
+
+    /**
+     * Ask a file to start where it is now, or to forget that.
+     *
+     * On the row's own menu rather than on the picture: the phone has no second
+     * button, and a long press on the stage is already the gesture that carries
+     * a row somewhere.
+     */
+    private fun holdHere(item: Library.Item) {
+        val at = player?.currentPosition ?: 0L
+        if (playing?.id != item.id || at <= 1_000) {
+            toast(activity.getString(R.string.library_hold_needs_playing))
+            return
+        }
+        Library.setHold(activity, item, at)
+        toast(activity.getString(R.string.library_hold_saved, clock(at.toInt())))
+    }
+
+    private fun forgetHold(item: Library.Item) {
+        Library.clearHold(activity, item)
+        toast(activity.getString(R.string.library_hold_cleared))
+    }
+
+    /**
+     * The picture a file carries in its own header.
+     *
+     * Android reads it out for us, so this is the platform's own answer to
+     * "what is this song's cover" rather than a second copy of the parsing that
+     * put it there.
+     */
+    private fun embeddedArt(item: Library.Item): android.graphics.Bitmap? = runCatching {
+        val reader = android.media.MediaMetadataRetriever()
+        try {
+            reader.setDataSource(activity, item.uri)
+            val bytes = reader.embeddedPicture ?: return null
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        } finally {
+            runCatching { reader.release() }
+        }
+    }.getOrNull()
 
     /** The tile before a thumbnail lands: a type mark centred on the well. */
     private fun showTilePlaceholder(
@@ -661,7 +743,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      * applies within videos, since music is kept as one flat list.
      */
     private fun shown(): List<Library.Item> {
-        val shelf = items.filter { it.kind == tab }
+        val shelf = Library.arranged(activity, items.filter { it.kind == tab }, tab)
         return showing?.let { name -> shelf.filter { it.folder == name } } ?: shelf
     }
 
@@ -974,6 +1056,9 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             exo.setVideoSurfaceView(surface)
         }
         exo.setMediaItem(MediaItem.fromUri(item.uri))
+        // From the beginning, unless a place was put down on this file by hand.
+        val hold = Library.holdAt(activity, item)
+        if (hold > 1_000) exo.seekTo(hold)
         exo.playWhenReady = true
         exo.prepare()
     }
@@ -1271,11 +1356,19 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             menu.menu.add(1, FOLDER_BASE + at, 1, name)
         }
         menu.menu.add(0, NEW_FOLDER, 2, R.string.library_new_folder)
-        menu.menu.add(0, DELETE, 3, R.string.library_delete)
+        // Where this one should start from. Offered on the file that is playing,
+        // and the way back offered on any file that has been given one.
+        if (playing?.id == item.id) menu.menu.add(0, HOLD, 3, R.string.library_hold)
+        if (Library.holdAt(activity, item) > 0) {
+            menu.menu.add(0, FORGET_HOLD, 4, R.string.library_hold_forget)
+        }
+        menu.menu.add(0, DELETE, 5, R.string.library_delete)
         menu.setOnMenuItemClickListener { chosen ->
             when (val id = chosen.itemId) {
                 MOVE_OUT -> moveTo(item, "")
                 NEW_FOLDER -> askForFolder(item)
+                HOLD -> holdHere(item)
+                FORGET_HOLD -> forgetHold(item)
                 DELETE -> confirmDelete(item)
                 else -> if (id >= FOLDER_BASE) {
                     val names = folders.filter { it != item.folder }
@@ -1499,6 +1592,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         const val MOVE_OUT = 1
         const val NEW_FOLDER = 2
         const val DELETE = 3
+
+        /** Start this one where it is now, and take that back. */
+        const val HOLD = 4
+        const val FORGET_HOLD = 5
 
         /** How long the controls stay up after being asked for. */
         const val CONTROLS_MS = 3_000

@@ -46,6 +46,11 @@
     <string name="library_empty_music">받은 음악이 없습니다. 음악만 저장하면 여기에 모입니다.</string>
     <string name="library_move">폴더로 옮기기</string>
     <string name="library_move_out">폴더에서 빼기</string>
+    <string name="library_hold">재생 위치 저장</string>
+    <string name="library_hold_forget">저장한 위치 지우기</string>
+    <string name="library_hold_saved">%1$s 부터 다시 재생합니다</string>
+    <string name="library_hold_cleared">처음부터 재생합니다</string>
+    <string name="library_hold_needs_playing">재생 중일 때 저장할 수 있습니다</string>
     <string name="library_delete">삭제</string>
     <string name="library_delete_ask">%1$s 을(를) 삭제할까요? 되돌릴 수 없습니다.</string>
     <string name="library_deleted">삭제했습니다</string>

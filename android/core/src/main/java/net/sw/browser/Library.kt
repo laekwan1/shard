@@ -210,6 +210,61 @@ object Library {
 
     // ---- where it is kept --------------------------------------------------
 
+    /**
+     * Where somebody asked a file to start from, in milliseconds.
+     *
+     * Only what was asked for. Remembering where everything was left, always,
+     * means nothing ever plays from the beginning again and there is no saying
+     * why a film opens where it does — so this is set by hand and cleared by
+     * hand, and everything else starts at nought.
+     */
+    fun holdAt(context: Context, item: Item): Long =
+        prefs(context).getLong(holdKey(item), 0L)
+
+    fun setHold(context: Context, item: Item, at: Long) {
+        prefs(context).edit().putLong(holdKey(item), at.coerceAtLeast(0L)).apply()
+    }
+
+    fun clearHold(context: Context, item: Item) {
+        prefs(context).edit().remove(holdKey(item)).apply()
+    }
+
+    /** By the file's own name, which outlives the numbers a run hands out. */
+    private fun holdKey(item: Item) = "hold:" + item.name
+
+    /**
+     * The order a shelf was last arranged in, by file name.
+     *
+     * Newest first is the right answer until somebody says otherwise; after that
+     * their arrangement is. Anything they have not placed — something saved
+     * since — keeps its place at the top rather than falling to the end of a
+     * list arranged before it existed.
+     */
+    fun order(context: Context, kind: Kind): List<String> =
+        prefs(context).getString(orderKey(kind), "")
+            .orEmpty()
+            .split('\n')
+            .filter { it.isNotBlank() }
+
+    fun setOrder(context: Context, kind: Kind, names: List<String>) {
+        prefs(context).edit().putString(orderKey(kind), names.joinToString("\n")).apply()
+    }
+
+    /** A shelf's items in the order it was arranged in. */
+    fun arranged(context: Context, shelf: List<Item>, kind: Kind): List<Item> {
+        val placed = order(context, kind)
+        if (placed.isEmpty()) return shelf
+        val at = placed.withIndex().associate { (index, name) -> name to index }
+        // Placed files keep the order they were put in; anything not placed —
+        // saved since the arranging — stays where it was, at the top.
+        return shelf.sortedWith(
+            compareBy({ if (at.containsKey(it.name)) 1 else 0 }, { at[it.name] ?: 0 }),
+        )
+    }
+
+    private fun orderKey(kind: Kind) =
+        if (kind == Kind.MUSIC) "order-music" else "order-video"
+
     private const val PREFS = "shard-library"
     private const val EMPTY_FOLDERS = "empty-folders"
     private const val EMPTY_FOLDERS_MUSIC = "empty-folders-music"
