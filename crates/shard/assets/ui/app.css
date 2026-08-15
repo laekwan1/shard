@@ -320,8 +320,8 @@ button svg { display: block; }
   gap: 3px;
   flex: none;
   align-self: flex-start;
-  /* The same gap from the left as from the strip above it. */
-  margin: 4px 0 0 4px;
+  /* Across the middle of the list it opens onto, a little clear of the strip. */
+  margin: 4px auto 0;
   padding: 3px;
   background: var(--surface);
   border-radius: 12px 12px 0 0;
@@ -356,10 +356,10 @@ button svg { display: block; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-width: 82px;
+  gap: 7px;
+  min-width: 108px;
   height: 27px;
-  padding: 0 12px;
+  padding: 0 16px;
   font-size: 11.5px;
   color: var(--muted);
   background: transparent;
@@ -395,7 +395,7 @@ button svg { display: block; }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
    above is drawn with, so one row does not answer differently from the other. */
 .folder {
-  padding: 4px 11px;
+  padding: 5px 15px;
   font-size: 11.5px;
   color: var(--muted);
   background: transparent;
@@ -547,6 +547,13 @@ button svg { display: block; }
    be sure of itself. */
 .settings-bar .reset.sure { color: #fff; background: #7f1d1d; border-color: #7f1d1d; }
 .setting.tall { align-items: flex-start; }
+/*
+    A setting with more than a couple of answers stands them under its own name
+    rather than beside it. Across, six of them wrapped into three ragged rows
+    and squeezed the name into a column too narrow to read.
+*/
+.setting.wide { flex-direction: column; align-items: stretch; gap: 8px; }
+.setting.wide .choice { justify-content: flex-start; }
 .what { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .what span { font-size: 13.5px; }
 .what small { font-size: 11px; color: var(--muted); line-height: 1.5; }

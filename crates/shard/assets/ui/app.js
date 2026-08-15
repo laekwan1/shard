@@ -999,7 +999,10 @@ function paintSettings(message) {
 
     for (const item of group.items) {
       const row = document.createElement("div");
-      row.className = "setting" + (item.kind === "lines" ? " tall" : "");
+      // A handful of answers fits beside the name; more than that goes under it.
+      const wide = item.kind === "choice" && (item.options || []).length > 3;
+      row.className =
+        "setting" + (item.kind === "lines" ? " tall" : "") + (wide ? " wide" : "");
 
       const label = document.createElement("div");
       label.className = "what";

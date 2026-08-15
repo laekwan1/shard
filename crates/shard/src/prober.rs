@@ -220,10 +220,29 @@ fn resolve(shared: &Shared, host: &str) -> anyhow::Result<Resolution> {
     let doh_cfg = shared.config.read().doh.clone();
     let encrypted = crate::doh::resolve_encrypted(&doh_cfg, host);
 
-    let chosen = encrypted
-        .or(system)
-        .ok_or_else(|| anyhow::anyhow!("어느 리졸버에서도 주소를 얻지 못했습니다"))?;
+    // Nothing is somewhere. A resolver that will not answer for a name often
+    // says `0.0.0.0` rather than saying nothing, and a connection to that is
+    // refused before it leaves the machine — which arrived here as thirteen
+    // strategies failing in no time at all, reading exactly like a site blocked
+    // by every means at once.
+    let chosen = usable(encrypted).or(usable(system)).ok_or_else(|| {
+        match (encrypted, system) {
+            (Some(_), _) | (_, Some(_)) => anyhow::anyhow!(
+                "리졸버가 주소 대신 {} 를 돌려줬습니다 — 이름 자체가 막혀 있다는 뜻입니다.",
+                encrypted.or(system).map(|a| a.to_string()).unwrap_or_default()
+            ),
+            _ => anyhow::anyhow!("어느 리졸버에서도 주소를 얻지 못했습니다"),
+        }
+    })?;
     Ok(Resolution { addr: SocketAddr::new(chosen, 443), system, encrypted })
+}
+
+/// An address worth opening a connection to.
+///
+/// The unspecified address is a refusal written as a number; the loopback one
+/// would be this machine answering itself.
+fn usable(addr: Option<IpAddr>) -> Option<IpAddr> {
+    addr.filter(|a| !a.is_unspecified() && !a.is_loopback() && !a.is_multicast())
 }
 
 /// A rung passes only if every trial succeeds.
@@ -370,6 +389,17 @@ mod tests {
             .user_agent("Mozilla/5.0")
             .build();
         assert!(client.is_ok(), "{:?}", client.err());
+    }
+
+    #[test]
+    fn an_address_that_is_a_refusal_is_not_an_address() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        assert_eq!(usable(Some(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)))), Some(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4))));
+        // What a resolver returns for a name it will not answer for.
+        assert_eq!(usable(Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED))), None);
+        assert_eq!(usable(Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED))), None);
+        assert_eq!(usable(Some(IpAddr::V4(Ipv4Addr::LOCALHOST))), None);
+        assert_eq!(usable(None), None);
     }
 
     #[test]

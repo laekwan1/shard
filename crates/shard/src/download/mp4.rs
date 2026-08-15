@@ -69,21 +69,32 @@ impl Sample {
 /// `moov/udta/meta/ilst/covr/data`. Long-winded, but it is where every player
 /// looks, so a song carries its own cover rather than a second file beside it.
 pub fn cover(file: &[u8]) -> Option<(Vec<u8>, &'static str)> {
-    let (udta, udta_end) = find(file, &[b"moov", b"udta"])?;
-    let (meta, meta_end) = within(file, udta, udta_end, b"meta")?;
-    // `meta` is a full box: four bytes of version and flags before its children.
-    let (ilst, ilst_end) = within(file, meta + 4, meta_end, b"ilst")?;
-    let (covr, covr_end) = within(file, ilst, ilst_end, b"covr")?;
-    let (data, data_end) = within(file, covr, covr_end, b"data")?;
-    if data + 8 > data_end {
-        return None;
+    let (moov, moov_end) = find(file, &[b"moov"])?;
+    // Every one of them at each step, not the first.
+    //
+    // A file can arrive with a `udta` of its own — an empty one, holding
+    // nothing this looks for — and a picture added beside it then sat in the
+    // second. Reading only the first found nothing, and the row showed an empty
+    // frame. Files written that way are still on disk; this reads them.
+    for (udta, udta_end) in every(file, moov, moov_end, b"udta") {
+        for (meta, meta_end) in every(file, udta, udta_end, b"meta") {
+            // `meta` is a full box: four bytes of version and flags first.
+            for (ilst, ilst_end) in every(file, meta + 4, meta_end, b"ilst") {
+                for (covr, covr_end) in every(file, ilst, ilst_end, b"covr") {
+                    let Some((data, data_end)) = within(file, covr, covr_end, b"data") else {
+                        continue;
+                    };
+                    if data + 8 > data_end {
+                        continue;
+                    }
+                    // The low byte of the flags says what the picture is.
+                    let kind = if file[data + 3] == 14 { "png" } else { "jpg" };
+                    return Some((file[data + 8..data_end].to_vec(), kind));
+                }
+            }
+        }
     }
-    // The low byte of the flags says what the picture is.
-    let kind = match file[data + 3] {
-        14 => "png",
-        _ => "jpg",
-    };
-    Some((file[data + 8..data_end].to_vec(), kind))
+    None
 }
 
 /// Whether there is one, without reading the whole file.
@@ -117,26 +128,96 @@ pub fn with_cover(file: &[u8], picture: &[u8], kind: &str) -> Option<Vec<u8>> {
     // Version zero; the flags say what the picture is: 13 a JPEG, 14 a PNG.
     data[3] = if kind == "png" { 14 } else { 13 };
     data.extend_from_slice(picture);
+    let covr = boxed(b"covr", &boxed(b"data", &data));
 
-    let mut hdlr = vec![0u8; 8];
-    hdlr.extend_from_slice(b"mdirappl");
-    hdlr.extend_from_slice(&[0u8; 13]);
+    // Into whatever is already there, at every level.
+    //
+    // A header holds one `udta`. Putting a second beside the file's own — which
+    // is what this did — leaves a header no reader is obliged to make sense of,
+    // and the picture in the one nobody looks at.
+    let moov = match within(file, body, end, b"udta") {
+        None => joined(&file[body..end], &fresh_udta(&covr)),
+        Some((udta, udta_end)) => {
+            let udta_start = header_of(file, udta, b"udta")?;
+            let inner = match within(file, udta, udta_end, b"meta") {
+                None => joined(&file[udta..udta_end], &fresh_meta(&covr)),
+                Some((meta, meta_end)) => {
+                    let meta_start = header_of(file, meta, b"meta")?;
+                    let held = match within(file, meta + 4, meta_end, b"ilst") {
+                        None => joined(&file[meta..meta_end], &boxed(b"ilst", &covr)),
+                        Some((ilst, ilst_end)) => {
+                            let ilst_start = header_of(file, ilst, b"ilst")?;
+                            let grown = boxed(b"ilst", &joined(&file[ilst..ilst_end], &covr));
+                            swapped(file, meta, meta_end, ilst_start, ilst_end, &grown)
+                        }
+                    };
+                    swapped(file, udta, udta_end, meta_start, meta_end, &boxed(b"meta", &held))
+                }
+            };
+            swapped(file, body, end, udta_start, udta_end, &boxed(b"udta", &inner))
+        }
+    };
 
-    let ilst = boxed(b"covr", &boxed(b"data", &data));
-    let mut meta = vec![0u8; 4];
-    meta.extend_from_slice(&boxed(b"hdlr", &hdlr));
-    meta.extend_from_slice(&boxed(b"ilst", &ilst));
-    let udta = boxed(b"udta", &boxed(b"meta", &meta));
-
-    let mut moov = Vec::with_capacity(end - start + udta.len());
-    moov.extend_from_slice(&file[body..end]);
-    moov.extend_from_slice(&udta);
-
-    let mut out = Vec::with_capacity(file.len() + udta.len() + 16);
+    let mut out = Vec::with_capacity(file.len() + picture.len() + 128);
     out.extend_from_slice(&file[..start]);
     out.extend_from_slice(&boxed(b"moov", &moov));
     out.extend_from_slice(&file[end..]);
     Some(out)
+}
+
+/// A `udta` holding nothing but the picture, for a header with none of its own.
+fn fresh_udta(covr: &[u8]) -> Vec<u8> {
+    boxed(b"udta", &fresh_meta(covr))
+}
+
+fn fresh_meta(covr: &[u8]) -> Vec<u8> {
+    let mut hdlr = vec![0u8; 8];
+    hdlr.extend_from_slice(b"mdirappl");
+    hdlr.extend_from_slice(&[0u8; 13]);
+    let mut meta = vec![0u8; 4];
+    meta.extend_from_slice(&boxed(b"hdlr", &hdlr));
+    meta.extend_from_slice(&boxed(b"ilst", covr));
+    boxed(b"meta", &meta)
+}
+
+fn joined(first: &[u8], second: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(first.len() + second.len());
+    out.extend_from_slice(first);
+    out.extend_from_slice(second);
+    out
+}
+
+/// A container's body with one of its children put back a different size.
+fn swapped(
+    file: &[u8],
+    body: usize,
+    end: usize,
+    child: usize,
+    child_end: usize,
+    with: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(end - body + with.len());
+    out.extend_from_slice(&file[body..child]);
+    out.extend_from_slice(with);
+    out.extend_from_slice(&file[child_end..end]);
+    out
+}
+
+/// Where an element's header starts, for the ordinary eight-byte form.
+fn header_of(file: &[u8], body: usize, kind: &[u8; 4]) -> Option<usize> {
+    let start = body.checked_sub(8)?;
+    (&file[start + 4..start + 8] == kind).then_some(start)
+}
+
+/// Every named box among the children of a range.
+fn every(file: &[u8], from: usize, to: usize, want: &[u8; 4]) -> Vec<(usize, usize)> {
+    let mut all = Vec::new();
+    boxes(file, from, to, |kind, body, end| {
+        if kind == want {
+            all.push((body, end));
+        }
+    });
+    all
 }
 
 /// A length, a name, and the body between them.
@@ -156,6 +237,15 @@ fn within(file: &[u8], from: usize, to: usize, want: &[u8; 4]) -> Option<(usize,
         }
     });
     found
+}
+
+/// A small file of the shape this reads, for tests in other modules.
+#[cfg(test)]
+pub fn tests_fixture() -> Vec<u8> {
+    let mut file = tests::av1_init();
+    file.extend_from_slice(&boxed(b"moof", &[0u8; 8]));
+    file.extend_from_slice(&boxed(b"mdat", &[7u8; 16]));
+    file
 }
 
 /// Walk the boxes at one level, calling `visit` for each.
@@ -538,7 +628,7 @@ mod tests {
     }
 
     /// A setup segment for an AV1 track at 640x360, 1000 ticks a second.
-    fn av1_init() -> Vec<u8> {
+    pub fn av1_init() -> Vec<u8> {
         let mut mdhd = vec![0u8; 20];
         mdhd[12..16].copy_from_slice(&1_000u32.to_be_bytes());
 
@@ -579,6 +669,32 @@ mod tests {
         assert_eq!(&with[with.len() - 16..], &[7u8; 16]);
         // And it is not put in twice.
         assert!(with_cover(&with, &picture, "jpg").is_none());
+    }
+
+    #[test]
+    fn a_header_that_already_has_notes_of_its_own_keeps_them() {
+        // What arrives from YouTube: a `udta` already there, holding an empty
+        // list. A second one beside it is not a header any reader has to make
+        // sense of, and the picture in it went unseen.
+        let mut meta = vec![0u8; 4];
+        meta.extend_from_slice(&boxed(b"ilst", &[]));
+        let theirs = boxed(b"udta", &boxed(b"meta", &meta));
+
+        let base = tests_fixture();
+        let (moov, moov_end) = find(&base, &[b"moov"]).unwrap();
+        let start = moov - 8;
+        let mut file = base[..start].to_vec();
+        file.extend_from_slice(&boxed(b"moov", &joined(&base[moov..moov_end], &theirs)));
+        file.extend_from_slice(&base[moov_end..]);
+
+        let picture = vec![0xff, 0xd8, 0xff, 5, 6];
+        let with = with_cover(&file, &picture, "jpg").expect("a header to put it in");
+        assert_eq!(cover(&with), Some((picture, "jpg")));
+
+        // One `udta`, not two, and the track is untouched.
+        let (moov, moov_end) = find(&with, &[b"moov"]).unwrap();
+        assert_eq!(every(&with, moov, moov_end, b"udta").len(), 1);
+        assert_eq!(stream(&with).unwrap(), stream(&file).unwrap());
     }
 
     #[test]

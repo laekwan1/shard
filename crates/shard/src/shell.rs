@@ -2153,6 +2153,30 @@ mod tests {
     }
 
     #[test]
+    fn a_picture_inside_a_file_can_be_asked_for_on_its_own() {
+        // The whole way through: a file with a cover in it, registered the way
+        // the library registers one, and asked for down the address the page
+        // uses. A row showed an empty frame when any step of this was wrong,
+        // and nothing on screen said which.
+        let dir = std::env::temp_dir().join("shard-cover-route");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("song.m4a");
+
+        let mut fake = crate::download::mp4::tests_fixture();
+        let picture = vec![0xff, 0xd8, 0xff, 0xe0, 9, 9, 9];
+        fake = crate::download::mp4::with_cover(&fake, &picture, "jpg").expect("a header");
+        std::fs::write(&file, &fake).expect("write");
+
+        let id = register_media(&file);
+        let answer = respond(&format!("shard://shard.localhost/cover/{id}"), None);
+        assert_eq!(answer.status(), 200);
+        assert_eq!(answer.headers()["Content-Type"], "image/jpeg");
+        assert_eq!(answer.body().as_ref(), picture.as_slice());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_files_lasting_name_is_the_same_one_next_time() {
         // Kept beside the files it names now, so the shelf's own order and the
         // page's resume positions are written under one name.

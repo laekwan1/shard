@@ -716,7 +716,7 @@ pub const CONTROL: &str = r#"
     m.textContent = text;
     style(m, { padding: '14px', color: '#8a92a2', fontSize: '12px', lineHeight: '1.5' });
     p.appendChild(m);
-    p.appendChild(row('그래도 다시 받기', '', function () {
+    p.appendChild(row('다시 받기', '', function () {
       window.ipc.postMessage(JSON.stringify({ choose: itag, force: 1 }));
     }));
     p.appendChild(row('닫기', '', window.__shardClose));
