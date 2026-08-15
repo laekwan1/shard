@@ -131,8 +131,14 @@
     <div id="player" hidden>
       <div id="stage">
         <video id="video" playsinline></video>
+        <!-- Drawn to even weights: one stroke for the stem and the beam, two
+             heads of the same radius sitting on the ends of it. -->
         <div id="art" hidden>
-          <svg viewBox="0 0 24 24"><path d="M9 17V5.2l10-2V15" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6.6" cy="17.4" r="2.6" fill="currentColor"/><circle cx="16.6" cy="15.4" r="2.6" fill="currentColor"/></svg>
+          <svg viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M12.4 21.5V7.9l12-2.4v13.6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="8.6" cy="21.9" r="3.9" fill="currentColor"/>
+            <circle cx="20.6" cy="19.5" r="3.9" fill="currentColor"/>
+          </svg>
         </div>
       </div>
 
@@ -149,11 +155,13 @@
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" title="소리">
           <button id="rate" title="재생 속도">1×</button>
           <button id="full" title="전체화면">⛶</button>
-          <button id="shut" title="닫기">✕</button>
         </div>
         <p id="now"></p>
       </div>
     </div>
+
+    <!-- The speeds, on a right-click of the rate button. -->
+    <div id="rates" hidden></div>
 
     <!-- What a right-click offers, on a file or on a folder. -->
     <div id="menu" hidden>

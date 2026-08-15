@@ -68,6 +68,17 @@ pub fn items(kind: Kind) -> Vec<Item> {
     sweep(&root, "", kind, &mut found);
     // Newest first: what was just saved is what is being looked for.
     found.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+
+    // Then whatever arrangement the user has made of it. Anything they have not
+    // placed — a download that landed since — keeps its place at the top rather
+    // than falling to the end of a list they arranged before it existed.
+    let arranged = order(kind);
+    if !arranged.is_empty() {
+        found.sort_by_key(|item| match arranged.iter().position(|k| *k == key(&item.path)) {
+            Some(at) => (1, at),
+            None => (0, 0),
+        });
+    }
     found
 }
 
@@ -136,6 +147,49 @@ pub fn add_folder(kind: Kind, name: &str) -> bool {
         return false;
     }
     std::fs::create_dir_all(kind.folder().join(clean)).is_ok()
+}
+
+/// A name for a file that means the same file next time the program runs.
+///
+/// FNV-1a over its path: a few lines, no dependency, and far better spread than
+/// a sum for what is only a lookup key.
+pub fn key(path: &Path) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in path.to_string_lossy().as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x1000_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Where a shelf's hand-made order is written down.
+///
+/// Beside the config rather than among the media: the user's Videos folder is
+/// theirs, and a file of ours in it is something they would have to wonder
+/// about. Losing it costs the arrangement, not the files.
+fn order_file(kind: Kind) -> PathBuf {
+    let name = match kind {
+        Kind::Video => "order-video.txt",
+        Kind::Music => "order-music.txt",
+    };
+    uikit::config::app_dir(crate::config::APP_NAME).join(name)
+}
+
+/// The order the shelf was last arranged in, oldest arrangement first.
+pub fn order(kind: Kind) -> Vec<String> {
+    std::fs::read_to_string(order_file(kind))
+        .map(|text| text.lines().map(|line| line.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+/// Write down an arrangement, by the keys of the files in it.
+pub fn set_order(kind: Kind, keys: &[String]) -> anyhow::Result<()> {
+    let path = order_file(kind);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, keys.join("\n"))?;
+    Ok(())
 }
 
 /// Take a folder off a shelf, keeping everything that was in it.

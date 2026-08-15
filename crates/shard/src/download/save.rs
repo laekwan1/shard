@@ -172,10 +172,16 @@ pub fn join(video: &Path, audio: &Path, output: &Path) -> Result<()> {
     if frames.is_empty() {
         bail!("합칠 프레임이 없습니다");
     }
-    // Matroska wants frames in time order across tracks, and the two were read
-    // one after the other. A stable sort keeps each track's own order intact
-    // where two frames share a moment.
-    frames.sort_by_key(|frame| frame.time_ms);
+    // In the order a decoder has to receive them, not the order they are shown
+    // in. Matroska carries no decoding times: a reader feeds blocks to the
+    // decoder in the order it finds them, and each block says only when its
+    // frame appears. Sorting by the showing time put reordered video into the
+    // decoder backwards — every frame that refers to a later one arrived before
+    // the frame it refers to, which is a picture that breaks up and drifts.
+    //
+    // A stable sort, so two frames decoded in the same millisecond keep the
+    // order their own track had them in.
+    frames.sort_by_key(|frame| frame.decode_ms);
 
     let file = File::create(output).context("저장 파일을 만들 수 없습니다")?;
     let mut writer = mkv::Writer::new(file, &[video_stream.spec(), audio_stream.spec()])?;
@@ -259,7 +265,8 @@ fn collect(bytes: &[u8], stream: &Stream, track: u64, out: &mut Vec<mkv::Frame>)
                     .ok_or_else(|| anyhow!("조각이 파일 밖을 가리킵니다"))?;
                 out.push(mkv::Frame {
                     track,
-                    time_ms: sample.time_ms(described.timescale),
+                    time_ms: sample.show_ms(described.timescale),
+                    decode_ms: sample.time_ms(described.timescale),
                     keyframe: sample.keyframe,
                     data: bytes[at..end].to_vec(),
                 });
@@ -274,6 +281,9 @@ fn collect(bytes: &[u8], stream: &Stream, track: u64, out: &mut Vec<mkv::Frame>)
                 out.push(mkv::Frame {
                     track,
                     time_ms: block.time_ms,
+                    // WebM states one time per block and forbids reordering, so
+                    // the two are the same thing there.
+                    decode_ms: block.time_ms,
                     keyframe: block.keyframe,
                     data: bytes[block.at..end].to_vec(),
                 });

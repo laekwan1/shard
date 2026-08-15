@@ -239,6 +239,8 @@ pub enum Ask {
     LibraryDelete(u64),
     LibraryNewFolder { kind: String, name: String },
     LibraryDropFolder { kind: String, name: String },
+    /// The shelf, rearranged by hand: every file's key in its new order.
+    LibraryOrder { kind: String, keys: String },
     /// Something is playing, or has stopped: the window keeps room along the
     /// bottom for the strip that says so.
     Playing(bool),
@@ -295,6 +297,10 @@ pub fn read_ask(body: &str) -> Ask {
         "library.newFolder" => Ask::LibraryNewFolder {
             kind: field(body, "kind").unwrap_or_else(|| "video".into()),
             name: field(body, "name").unwrap_or_default(),
+        },
+        "library.order" => Ask::LibraryOrder {
+            kind: field(body, "kind").unwrap_or_else(|| "video".into()),
+            keys: field(body, "keys").unwrap_or_default(),
         },
         "library.dropFolder" => Ask::LibraryDropFolder {
             kind: field(body, "kind").unwrap_or_else(|| "video".into()),
@@ -928,6 +934,14 @@ pub fn preview() -> Result<()> {
             }
             shell.say_library(shelf);
         }
+        Ask::LibraryOrder { kind, keys } => {
+            let shelf = shelf_of(&kind);
+            let keys: Vec<String> =
+                keys.lines().map(|k| k.trim().to_string()).filter(|k| !k.is_empty()).collect();
+            if let Err(e) = crate::library::set_order(shelf, &keys) {
+                tracing::warn!("could not write the shelf's order: {e:#}");
+            }
+        }
         Ask::Playing(on) => shell.now_playing(on),
         other => tracing::info!("shell ask: {other:?}"),
     })?;
@@ -1432,7 +1446,7 @@ impl Shell {
                     // Something that means the same file next time the program
                     // runs: the number does not, and playback positions kept
                     // against it pointed at whatever took that number later.
-                    durable_key(&item.path),
+                    crate::library::key(&item.path),
                     escape(&item.title),
                     escape(&item.folder),
                     escape(&crate::library::human(item.bytes)),
@@ -1610,23 +1624,6 @@ impl Drop for Shell {
         TABS.with(|cell| cell.borrow_mut().clear());
         SHELL.with(|cell| cell.borrow_mut().take());
     }
-}
-
-/// Something that names the same file the next time the program runs.
-///
-/// The numbers handed to the page are made up per run and handed out in the
-/// order files are listed, so a position remembered against one pointed at a
-/// different file the next day. This is a plain digest of the path, which is
-/// what the page keeps its resume positions under.
-fn durable_key(path: &std::path::Path) -> String {
-    // FNV-1a, 64-bit: a few lines, no dependency, and far better spread than a
-    // sum for what is only a lookup key.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in path.to_string_lossy().as_bytes() {
-        hash ^= *byte as u64;
-        hash = hash.wrapping_mul(0x1000_0000_01b3);
-    }
-    format!("{hash:016x}")
 }
 
 /// A window handle in the shape wry wants.
@@ -2058,9 +2055,12 @@ mod tests {
 
     #[test]
     fn a_files_lasting_name_is_the_same_one_next_time() {
+        // Kept beside the files it names now, so the shelf's own order and the
+        // page's resume positions are written under one name.
+        use crate::library::key;
         let path = std::path::Path::new("C:/Videos/Shard/노래.webm");
-        assert_eq!(durable_key(path), durable_key(path));
-        assert_ne!(durable_key(path), durable_key(std::path::Path::new("C:/Videos/Shard/x.webm")));
+        assert_eq!(key(path), key(path));
+        assert_ne!(key(path), key(std::path::Path::new("C:/Videos/Shard/x.webm")));
     }
 
     #[test]

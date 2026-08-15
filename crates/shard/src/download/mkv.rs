@@ -79,7 +79,16 @@ impl TrackSpec {
 pub struct Frame {
     /// 1-based, matching the order tracks were declared.
     pub track: u64,
+    /// When this frame is shown. This is what the block states: Matroska times
+    /// are presentation times.
     pub time_ms: u64,
+    /// When it is decoded, which is the order frames must be written in.
+    ///
+    /// A codec may hold a frame back and decode it before the ones it is shown
+    /// after. Matroska says nothing about decoding order — a reader hands blocks
+    /// to the decoder in the order it finds them — so the order here is the
+    /// decoder's, and only the stated time is the viewer's.
+    pub decode_ms: u64,
     pub keyframe: bool,
     pub data: Vec<u8>,
 }
@@ -359,7 +368,7 @@ mod tests {
     }
 
     fn frame(track: u64, time_ms: u64, keyframe: bool, data: &[u8]) -> Frame {
-        Frame { track, time_ms, keyframe, data: data.to_vec() }
+        Frame { track, time_ms, decode_ms: time_ms, keyframe, data: data.to_vec() }
     }
 
     fn build(frames: &[Frame]) -> Vec<u8> {
@@ -496,6 +505,40 @@ mod tests {
         // Twenty seconds of keyframes every four, against a five-second target:
         // it splits at the first keyframe past each boundary.
         assert!(clusters >= 3, "expected several clusters, found {clusters}");
+    }
+
+    #[test]
+    fn frames_are_written_in_the_order_they_decode_and_timed_by_when_they_show() {
+        // A run the way a codec that reorders produces one: the frame shown last
+        // is decoded second, because the two after it refer to it.
+        let held = |decode: u64, show: u64| Frame {
+            track: 1,
+            time_ms: show,
+            decode_ms: decode,
+            keyframe: decode == 0,
+            data: vec![decode as u8],
+        };
+        let file = build(&[held(0, 0), held(33, 132), held(66, 66), held(99, 99)]);
+
+        let cluster = find(&file, &[SEGMENT, CLUSTER]).expect("cluster");
+        let base = {
+            let kids = ebml::children(&file, &cluster);
+            let stamp = kids.iter().find(|c| c.id == TIMESTAMP).expect("cluster time");
+            ebml::uint(&file, stamp) as i64
+        };
+        let times: Vec<i64> = ebml::children(&file, &cluster)
+            .into_iter()
+            .filter(|c| c.id == SIMPLE_BLOCK)
+            .map(|b| {
+                let body = &file[b.body..b.end];
+                base + i16::from_be_bytes([body[1], body[2]]) as i64
+            })
+            .collect();
+
+        // Stored in decoding order, each saying when it is shown — so the times
+        // step backwards in the file, which is exactly what a reader needs to
+        // hand the decoder frames in the order it can use them.
+        assert_eq!(times, vec![0, 132, 66, 99]);
     }
 
     #[test]

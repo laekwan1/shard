@@ -315,14 +315,39 @@ button svg { display: block; }
     header, and this is a switch.
 */
 #shelves {
+  position: relative;
   display: flex;
   gap: 3px;
   flex: none;
   align-self: flex-start;
-  margin: 6px 10px 0;
+  margin: 8px 0 0 20px;
   padding: 3px;
-  background: var(--raised);
-  border-radius: 11px;
+  background: var(--surface);
+  border-radius: 12px 12px 0 0;
+}
+/*
+    The base widens into the panel below rather than rounding away from it: the
+    corner is cut out of a square of the panel's colour, so the control's sides
+    run into the list as one shape.
+*/
+#shelves::before,
+#shelves::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  background: var(--surface);
+}
+#shelves::before {
+  left: -12px;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 12px, #000 12.5px);
+  mask-image: radial-gradient(circle at 0 0, transparent 12px, #000 12.5px);
+}
+#shelves::after {
+  right: -12px;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 12px, #000 12.5px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 12px, #000 12.5px);
 }
 .shelf {
   display: flex;
@@ -431,7 +456,20 @@ button svg { display: block; }
 }
 .file:hover { background: #ffffff0d; }
 .file:hover::before, .file:hover + .file::before { background: transparent; }
-.file.held { background: #22d3ee1f; }
+.file.held { opacity: .45; }
+/* Where the row being carried will land. */
+.file.above::after,
+.file.below::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.file.above::after { top: -1px; }
+.file.below::after { bottom: -1px; }
 /* The name gives way first: it is the one thing that can be cut and still read,
    and without this the button at the end was squeezed out of round. */
 /* A frame out of the film itself, taken once and kept: it says which video a
@@ -590,8 +628,32 @@ button svg { display: block; }
 #stage { flex: 1; position: relative; display: grid; place-items: center; overflow: hidden; }
 #video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 /* A song has no picture, so the note stands in for one. */
-#art { position: absolute; display: grid; place-items: center; width: 148px; height: 148px; border-radius: 26px; background: linear-gradient(135deg, #0e6b7a, #22d3ee); }
-#art svg { width: 62px; height: 62px; color: #04252b; }
+/*
+    What stands in for a cover a song does not have. Not a flat square of colour:
+    the light falls from one corner, the edge catches it, and the mark sits on
+    the face rather than being painted into it.
+*/
+#art {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 152px;
+  height: 152px;
+  border-radius: 34px;
+  background:
+    radial-gradient(120% 120% at 28% 12%, #4fe3f5 0%, #22c2dd 38%, #0e7f95 72%, #0a5d70 100%);
+  box-shadow:
+    0 22px 44px #00000073,
+    inset 0 1.5px 0 #ffffff4d,
+    inset 0 -1.5px 0 #00000038;
+}
+#art svg {
+  width: 60px;
+  height: 60px;
+  color: #06323c;
+  opacity: .92;
+  filter: drop-shadow(0 1px 0 #ffffff30);
+}
 
 #controls { background: #0b0b0d; border-top: 1px solid var(--divider); padding: 10px 14px 12px; }
 
@@ -635,7 +697,21 @@ button svg { display: block; }
 #play { color: #fff !important; }
 #clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .spacer { flex: 1; }
-#volume { width: 84px; accent-color: var(--accent); }
+#volume { width: 42px; accent-color: var(--accent); }
+/* The speeds, on a right-click of the button that steps through them. */
+#rates {
+  position: fixed;
+  z-index: 40;
+  padding: 4px;
+  background: var(--raised);
+  border: 1px solid var(--divider);
+  border-radius: 9px;
+  box-shadow: 0 12px 30px #000000a6;
+}
+#rates button { display: block; width: 100%; text-align: left; padding: 5px 12px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+#rates button:hover { background: #ffffff14; color: #fff; }
+#rates button.on { color: var(--accent); }
+
 #now { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* The three ways out of home: 34px marks with 18px between them, pinned to the

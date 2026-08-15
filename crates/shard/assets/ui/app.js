@@ -368,7 +368,29 @@ function paintFiles() {
       e.dataTransfer.effectAllowed = "move";
       row.classList.add("held");
     });
-    row.addEventListener("dragend", () => row.classList.remove("held"));
+    row.addEventListener("dragend", () => {
+      row.classList.remove("held");
+      clearMarks();
+    });
+
+    // Dropped on a folder, a file goes into it; dropped between two rows, it
+    // takes that place in the list. Which of the two it will be is said while
+    // the row is still being carried: the line under the pointer, or the folder
+    // lighting up.
+    row.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      const box = row.getBoundingClientRect();
+      const above = e.clientY < box.top + box.height / 2;
+      clearMarks();
+      row.classList.add(above ? "above" : "below");
+    });
+    row.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const above = row.classList.contains("above");
+      clearMarks();
+      const id = Number(e.dataTransfer.getData("text/plain"));
+      if (id && id !== item.id) rearrange(id, item.id, above);
+    });
 
     // A frame out of the film at the head of its row. Music has no picture of
     // its own here, so only the video shelf carries one.
@@ -402,6 +424,32 @@ function paintFiles() {
     });
     filesEl.appendChild(row);
   }
+}
+
+function clearMarks() {
+  for (const row of filesEl.querySelectorAll(".above, .below")) {
+    row.classList.remove("above", "below");
+  }
+}
+
+// Put one file before or after another, and tell Rust the whole arrangement.
+//
+// The whole shelf, not the part being shown: a list narrowed to one folder is
+// still a slice of one order, and sending only the slice would forget where
+// everything else stood.
+function rearrange(moved, target, above) {
+  const from = shelf.items.findIndex((i) => i.id === moved);
+  if (from < 0) return;
+  const [carried] = shelf.items.splice(from, 1);
+  let to = shelf.items.findIndex((i) => i.id === target);
+  if (to < 0) to = shelf.items.length;
+  else if (!above) to += 1;
+  shelf.items.splice(to, 0, carried);
+  paintFiles();
+  send("library.order", {
+    kind: shelf.kind,
+    keys: shelf.items.map((i) => i.key).join("\n"),
+  });
 }
 
 // ---- a frame out of each film ----------------------------------------------
@@ -663,7 +711,6 @@ function step(by) {
 prevButton.addEventListener("click", () => step(-1));
 nextButton.addEventListener("click", () => step(1));
 
-document.getElementById("shut").addEventListener("click", shutPlayer);
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
@@ -737,10 +784,39 @@ scrub.addEventListener("mousedown", (e) => {
 
 const RATES = [1, 1.25, 1.5, 2, 0.5, 0.75];
 let rateAt = 0;
-rateButton.addEventListener("click", () => {
-  rateAt = (rateAt + 1) % RATES.length;
-  video.playbackRate = RATES[rateAt];
-  rateButton.textContent = RATES[rateAt] + "×";
+
+function setRate(rate) {
+  rateAt = Math.max(0, RATES.indexOf(rate));
+  video.playbackRate = rate;
+  rateButton.textContent = rate + "×";
+}
+
+rateButton.addEventListener("click", () => setRate(RATES[(rateAt + 1) % RATES.length]));
+
+// Every speed at once, for when stepping round to the one wanted is the long
+// way there.
+const ratesMenu = document.getElementById("rates");
+rateButton.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  ratesMenu.textContent = "";
+  for (const rate of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
+    const row = document.createElement("button");
+    row.textContent = rate + "×";
+    if (rate === RATES[rateAt]) row.className = "on";
+    row.addEventListener("click", () => {
+      setRate(rate);
+      ratesMenu.hidden = true;
+    });
+    ratesMenu.appendChild(row);
+  }
+  ratesMenu.hidden = false;
+  const box = ratesMenu.getBoundingClientRect();
+  const at = rateButton.getBoundingClientRect();
+  ratesMenu.style.left = Math.min(at.left, window.innerWidth - box.width - 6) + "px";
+  ratesMenu.style.top = Math.max(6, at.top - box.height - 6) + "px";
+});
+document.addEventListener("click", (e) => {
+  if (!ratesMenu.hidden && !ratesMenu.contains(e.target)) ratesMenu.hidden = true;
 });
 
 muteButton.innerHTML = LOUD;

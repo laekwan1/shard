@@ -34,18 +34,33 @@ pub struct Stream {
 pub struct Sample {
     pub at: u64,
     pub len: usize,
-    /// Presentation time, in the track's own ticks.
+    /// Decoding time, in the track's own ticks. This is the order frames have to
+    /// reach a decoder in: a frame may refer to one that is shown after it, and
+    /// so has to be decoded before it.
     pub time: u64,
+    /// How much later than that it is shown, in the same ticks. Zero for
+    /// everything but reordered video.
+    pub offset: i32,
     pub duration: u32,
     pub keyframe: bool,
 }
 
 impl Sample {
+    /// When this frame is decoded.
     pub fn time_ms(&self, timescale: u32) -> u64 {
         if timescale == 0 {
             return 0;
         }
         self.time * 1_000 / timescale as u64
+    }
+
+    /// When this frame is shown, which is what a container states.
+    pub fn show_ms(&self, timescale: u32) -> u64 {
+        if timescale == 0 {
+            return 0;
+        }
+        let shown = (self.time as i64 + self.offset as i64).max(0) as u64;
+        shown * 1_000 / timescale as u64
     }
 }
 
@@ -384,12 +399,12 @@ fn read_fragment(
             // ordinary video, where the offset is a frame or two; a video that
             // is a handful of stills held for a long time is reordered across
             // whole seconds, and there it is unwatchable.
-            let mut composition = 0i64;
+            let mut composition = 0i32;
             if flags & 0x0800 != 0 && at + 4 <= end {
                 // Signed since version 1 of the box, unsigned before it. Read as
                 // signed either way: a version-0 offset is never large enough to
                 // be mistaken for a negative one.
-                composition = i32::from_be_bytes(buffer[at..at + 4].try_into().unwrap()) as i64;
+                composition = i32::from_be_bytes(buffer[at..at + 4].try_into().unwrap());
                 at += 4;
             }
             if index == 0 {
@@ -402,9 +417,8 @@ fn read_fragment(
             out.push(Sample {
                 at: file_at + offset,
                 len: size as usize,
-                // Shown here; decoded at `*time`, which is what the clock below
-                // carries on from.
-                time: (*time as i64 + composition).max(0) as u64,
+                time: *time,
+                offset: composition as i32,
                 duration,
                 keyframe,
             });
@@ -596,9 +610,10 @@ mod tests {
         // out of step with the sound on video that is reordered at all.
         let found = samples(&reordered(&[0, 200, -20]), 0);
         assert_eq!(found.len(), 3);
-        assert_eq!(found[0].time, 0);
-        assert_eq!(found[1].time, 240);
-        assert_eq!(found[2].time, 60);
+        // Decoded in the order they are stored, shown where the offset says.
+        assert_eq!([found[0].time, found[1].time, found[2].time], [0, 40, 80]);
+        let shown: Vec<u64> = found.iter().map(|s| s.show_ms(1_000)).collect();
+        assert_eq!(shown, vec![0, 240, 60]);
     }
 
     #[test]
@@ -617,7 +632,7 @@ mod tests {
 
     #[test]
     fn times_convert_to_milliseconds_through_the_timescale() {
-        let sample = Sample { at: 0, len: 0, time: 96_000, duration: 0, keyframe: true };
+        let sample = Sample { at: 0, len: 0, time: 96_000, offset: 0, duration: 0, keyframe: true };
         assert_eq!(sample.time_ms(48_000), 2_000);
     }
 
