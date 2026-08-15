@@ -193,6 +193,8 @@ async fn exchange(
 
 async fn forward(client: &reqwest::Client, upstreams: &[String], query: &[u8]) -> Result<Vec<u8>> {
     let mut last: Option<anyhow::Error> = None;
+    // Kept in case every resolver refuses, so something still goes back.
+    let mut refused: Option<Vec<u8>> = None;
     for url in upstreams {
         let attempt = client
             .post(url)
@@ -203,13 +205,54 @@ async fn forward(client: &reqwest::Client, upstreams: &[String], query: &[u8]) -
             .await;
         match attempt {
             Ok(response) if response.status().is_success() => {
-                return Ok(response.bytes().await?.to_vec());
+                let reply = response.bytes().await?.to_vec();
+                // A resolver that will not answer for a name says so with an
+                // address of nothing rather than with an error. That is a
+                // refusal, not an answer, and the next resolver may not share
+                // it — trying it is the whole point of having more than one.
+                if refuses(&reply) {
+                    tracing::info!("{url} answered with nothing; trying the next resolver");
+                    refused = Some(reply);
+                    continue;
+                }
+                return Ok(reply);
             }
             Ok(response) => last = Some(anyhow!("{url} 응답 {}", response.status())),
             Err(e) => last = Some(anyhow!("{url}: {e}")),
         }
     }
+    // Every one of them refused. The answer still goes back: it is what the
+    // network says, and inventing a different one would be worse.
+    if let Some(reply) = refused {
+        return Ok(reply);
+    }
     Err(last.unwrap_or_else(|| anyhow!("사용 가능한 업스트림이 없습니다")))
+}
+
+/// Whether an answer is a refusal written as an address.
+///
+/// `0.0.0.0` and `::` are nowhere. A resolver hands one back for a name it has
+/// been told not to answer for, and a browser given it simply fails to connect
+/// with nothing to say about why.
+fn refuses(reply: &[u8]) -> bool {
+    match crate::dns::answer_addresses(reply) {
+        Some((_, addresses)) if !addresses.is_empty() => addresses.iter().all(nowhere),
+        _ => false,
+    }
+}
+
+/// Whether an address is nowhere at all.
+///
+/// A four-byte answer is kept in the sixteen-byte form with `::ffff:` in front
+/// of it, so "all zeroes" is not the test — the marker in the middle is never
+/// zero.
+fn nowhere(addr: &[u8; 16]) -> bool {
+    let mapped = addr[..10].iter().all(|b| *b == 0) && addr[10] == 0xff && addr[11] == 0xff;
+    if mapped {
+        addr[12..].iter().all(|b| *b == 0)
+    } else {
+        addr.iter().all(|b| *b == 0)
+    }
 }
 
 /// One-shot encrypted lookup.
@@ -228,8 +271,8 @@ pub fn resolve_encrypted(cfg: &Doh, host: &str) -> Option<IpAddr> {
         let (_, addresses) = crate::dns::answer_addresses(&reply)?;
         addresses
             .into_iter()
-            .next()
             .map(|a| IpAddr::from(std::net::Ipv4Addr::new(a[0], a[1], a[2], a[3])))
+            .find(|a| !a.is_unspecified())
     })
 }
 
@@ -342,6 +385,30 @@ mod tests {
             ..Default::default()
         };
         assert!(build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn an_answer_of_nothing_is_a_refusal() {
+        // One A record of 0.0.0.0 is how a resolver says it will not answer for
+        // a name. The next resolver may not agree, so the reply is not taken.
+        let mut reply = crate::dns::build_query("blocked.example", crate::dns::TYPE_A, 1);
+        reply[2] = 0x81; // a response
+        reply[3] = 0x80;
+        reply[7] = 1; // one answer
+        reply.extend_from_slice(&[0xc0, 0x0c]); // the name, pointed at
+        reply.extend_from_slice(&[0, 1, 0, 1]); // A, IN
+        reply.extend_from_slice(&[0, 0, 0, 60]); // time to live
+        reply.extend_from_slice(&[0, 4, 0, 0, 0, 0]); // four bytes of nothing
+        assert!(refuses(&reply));
+
+        let mut real = reply.clone();
+        let at = real.len() - 4;
+        real[at..].copy_from_slice(&[93, 184, 216, 34]);
+        assert!(!refuses(&real));
+
+        // A question with no answer at all is not a refusal; it is a miss.
+        let plain = crate::dns::build_query("nothing.example", crate::dns::TYPE_A, 1);
+        assert!(!refuses(&plain));
     }
 
     #[test]
