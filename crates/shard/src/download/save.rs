@@ -30,6 +30,9 @@ pub struct Job {
     /// Used for the file's name, after being made safe.
     pub title: String,
     pub into: PathBuf,
+    /// A picture for the file, fetched once it is saved. Empty when the page
+    /// named none.
+    pub cover: String,
     /// Keep only the sound.
     ///
     /// The video menu is left out of the request, which does not stop the
@@ -112,12 +115,40 @@ pub fn run(
             std::fs::copy(&audio_path, &output)?;
             return Ok(output);
         }
-        join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))
+        let saved = join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))?;
+        // A picture beside the file, under the same name. A song has no cover of
+        // its own — the sound is all that was kept — so this is the only one it
+        // will ever have, and it is a few tens of kilobytes for a list that
+        // otherwise reads as forty identical rows.
+        if !job.cover.is_empty() {
+            if let Err(e) = keep_cover(&client, &job.cover, &saved) {
+                tracing::warn!("could not save the cover: {e:#}");
+            }
+        }
+        Ok(saved)
     })();
 
     let _ = std::fs::remove_file(&video_path);
     let _ = std::fs::remove_file(&audio_path);
     outcome
+}
+
+/// Fetch a picture for a saved file and write it alongside, as `<name>.jpg`.
+///
+/// Failure is not the download's failure: the file is already saved, and a list
+/// row without a picture is a list row.
+fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Result<()> {
+    let response = client.get(url).send()?;
+    if !response.status().is_success() {
+        bail!("서버가 {} 로 응답했습니다", response.status().as_u16());
+    }
+    let bytes = response.bytes()?;
+    // A cover is tens of kilobytes; anything far larger is not one.
+    if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
+        bail!("그림이 아닙니다 ({} 바이트)", bytes.len());
+    }
+    std::fs::write(saved.with_extension("jpg"), &bytes)?;
+    Ok(())
 }
 
 /// What to call an audio stream, judged by what it turns out to be.

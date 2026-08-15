@@ -93,6 +93,21 @@ pub struct Frame {
     pub data: Vec<u8>,
 }
 
+/// The table of where the other tables are, to a fixed size.
+fn seek_head(info_at: u64, tracks_at: u64, cues_at: u64) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (id, at) in [(INFO, info_at), (TRACKS, tracks_at), (CUES, cues_at)] {
+        let mut entry = Vec::new();
+        // The id as it is written in the file, without its leading zeroes.
+        let bytes = id.to_be_bytes();
+        let first = bytes.iter().position(|b| *b != 0).unwrap_or(3);
+        put_element(&mut entry, SEEK_ID, &bytes[first..]);
+        put_uint_fixed(&mut entry, SEEK_POSITION, at, 8);
+        put_element(&mut body, SEEK, &entry);
+    }
+    body
+}
+
 /// Timestamps are milliseconds, which is what both source containers give and
 /// what a block's 16-bit relative field can express over a long cluster.
 const TIMESTAMP_SCALE_NS: u64 = 1_000_000;
@@ -121,6 +136,8 @@ pub struct Writer<W: Write + Seek> {
     segment_body_at: u64,
     /// Where the duration's placeholder sits.
     duration_at: u64,
+    /// Where the cue table's position is stated at the front of the file.
+    cues_position_at: u64,
     cluster: Cluster,
     cues: Vec<(u64, u64, u64)>,
     last_time_ms: u64,
@@ -185,6 +202,22 @@ impl<W: Write + Seek> Writer<W> {
         file.extend_from_slice(&[0u8; SEGMENT_SIZE_WIDTH - 1]);
         let segment_body_at = file.len() as u64;
 
+        // A table at the front saying where the others are.
+        //
+        // Everything a player needs to seek — the track list and the cue table —
+        // is findable without it, but only by reading through the file until
+        // they turn up, and the cue table is at the very end. Pointed at, they
+        // are two reads. Without this a seek in a long film took seconds while
+        // the player felt its way there.
+        //
+        // Its own size is fixed: three entries, each with a four-byte id and an
+        // eight-byte position, so the positions below can be worked out before
+        // it is written and the cue table's filled in when it is known.
+        let seek_head_len = {
+            let dummy = seek_head(0, 0, 0);
+            element_header_len(SEEK_HEAD, &dummy) + dummy.len() as u64
+        };
+
         let mut info = Vec::new();
         put_uint(&mut info, TIMESTAMP_SCALE, TIMESTAMP_SCALE_NS);
         put_string(&mut info, MUXING_APP, "shard");
@@ -196,9 +229,10 @@ impl<W: Write + Seek> Writer<W> {
         // anything measured against its final length would be wrong.
         let duration_in_body = info.len() as u64;
         info.extend_from_slice(&0f64.to_be_bytes());
-        let duration_at =
-            segment_body_at + element_header_len(INFO, &info) + duration_in_body;
-        put_element(&mut file, INFO, &info);
+        let duration_at = segment_body_at
+            + seek_head_len
+            + element_header_len(INFO, &info)
+            + duration_in_body;
 
         let mut entries = Vec::new();
         let mut video_track = None;
@@ -209,6 +243,19 @@ impl<W: Write + Seek> Writer<W> {
             }
             put_element(&mut entries, TRACK_ENTRY, &track_entry(number, spec));
         }
+
+        // Where each of them will land, measured from the start of the segment's
+        // body, which is what a seek entry states.
+        let info_at = seek_head_len;
+        let tracks_at = info_at + element_header_len(INFO, &info) + info.len() as u64;
+
+        let head = seek_head(info_at, tracks_at, 0);
+        // The cue table's position is the last eight bytes of the last entry.
+        let cues_position_at = segment_body_at + element_header_len(SEEK_HEAD, &head)
+            + head.len() as u64
+            - 8;
+        put_element(&mut file, SEEK_HEAD, &head);
+        put_element(&mut file, INFO, &info);
         put_element(&mut file, TRACKS, &entries);
 
         out.write_all(&file)?;
@@ -217,6 +264,7 @@ impl<W: Write + Seek> Writer<W> {
             segment_size_at,
             segment_body_at,
             duration_at,
+            cues_position_at,
             cluster: Cluster::default(),
             cues: Vec::new(),
             last_time_ms: 0,
@@ -272,9 +320,16 @@ impl<W: Write + Seek> Writer<W> {
             put_element(&mut cues, CUE_POINT, &point);
         }
         if !cues.is_empty() {
+            let at = self.position()? - self.segment_body_at;
             let mut block = Vec::new();
             put_element(&mut block, CUES, &cues);
             self.out.write_all(&block)?;
+            // Said at the front, now that it is known: the whole point of the
+            // table there is that a player finds this one without looking.
+            let end = self.position()?;
+            self.out.seek(SeekFrom::Start(self.cues_position_at))?;
+            self.out.write_all(&at.to_be_bytes())?;
+            self.out.seek(SeekFrom::Start(end))?;
         }
 
         let end = self.position()?;
@@ -505,6 +560,32 @@ mod tests {
         // Twenty seconds of keyframes every four, against a five-second target:
         // it splits at the first keyframe past each boundary.
         assert!(clusters >= 3, "expected several clusters, found {clusters}");
+    }
+
+    #[test]
+    fn the_front_of_the_file_says_where_the_other_tables_are() {
+        let file = build(&[frame(1, 0, true, b"key"), frame(1, 6_000, true, b"another")]);
+        let segment = find(&file, &[SEGMENT]).expect("segment");
+        let head = find(&file, &[SEGMENT, SEEK_HEAD]).expect("seek head");
+
+        let mut said = Vec::new();
+        for seek in ebml::children(&file, &head).into_iter().filter(|c| c.id == SEEK) {
+            let kids = ebml::children(&file, &seek);
+            let id = kids.iter().find(|c| c.id == SEEK_ID).expect("id");
+            let at = kids.iter().find(|c| c.id == SEEK_POSITION).expect("position");
+            let mut wide = 0u64;
+            for byte in &file[id.body..id.end] {
+                wide = (wide << 8) | *byte as u64;
+            }
+            said.push((wide as Id, ebml::uint(&file, at)));
+        }
+        assert_eq!(said.len(), 3);
+
+        // Each stated place holds the element it claims to.
+        for (id, at) in said {
+            let element = ebml::read(&file, segment.body + at as usize).expect("element");
+            assert_eq!(element.id, id, "the table at {at} is not the one named");
+        }
     }
 
     #[test]

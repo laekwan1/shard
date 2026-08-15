@@ -56,6 +56,8 @@ pub struct Item {
     /// When it was saved, as seconds since the epoch.
     pub saved_at: u64,
     pub kind: Kind,
+    /// A picture kept beside it under the same name, if the download found one.
+    pub cover: Option<PathBuf>,
 }
 
 /// Everything on a shelf, newest first.
@@ -106,6 +108,12 @@ fn sweep(dir: &Path, folder: &str, kind: Kind, out: &mut Vec<Item>) {
         if title.is_empty() {
             continue;
         }
+        // The picture is not a row of its own.
+        if path.extension().map(|e| e.eq_ignore_ascii_case("jpg")).unwrap_or(false) {
+            continue;
+        }
+        let cover = path.with_extension("jpg");
+        let cover = cover.is_file().then_some(cover);
         out.push(Item {
             path,
             title,
@@ -118,6 +126,7 @@ fn sweep(dir: &Path, folder: &str, kind: Kind, out: &mut Vec<Item>) {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             kind,
+            cover,
         });
     }
 }
@@ -267,11 +276,22 @@ pub fn move_to(item: &Item, folder: &str) -> bool {
         }
     }
     let Some(name) = item.path.file_name() else { return false };
-    std::fs::rename(&item.path, target.join(name)).is_ok()
+    let moved = std::fs::rename(&item.path, target.join(name)).is_ok();
+    if moved {
+        if let Some(cover) = &item.cover {
+            if let Some(name) = cover.file_name() {
+                let _ = std::fs::rename(cover, target.join(name));
+            }
+        }
+    }
+    moved
 }
 
-/// Delete a saved file for good.
+/// Delete a saved file for good, and the picture kept with it.
 pub fn delete(item: &Item) -> bool {
+    if let Some(cover) = &item.cover {
+        let _ = std::fs::remove_file(cover);
+    }
     std::fs::remove_file(&item.path).is_ok()
 }
 
@@ -292,7 +312,13 @@ pub fn rename(item: &Item, title: &str) -> bool {
     if target.exists() {
         return false;
     }
-    std::fs::rename(&item.path, target).is_ok()
+    let renamed = std::fs::rename(&item.path, &target).is_ok();
+    if renamed {
+        if let Some(cover) = &item.cover {
+            let _ = std::fs::rename(cover, target.with_extension("jpg"));
+        }
+    }
+    renamed
 }
 
 /// A folder name the file system will take.

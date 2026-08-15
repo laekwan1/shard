@@ -41,7 +41,12 @@ for (const button of document.querySelectorAll("#frame-buttons button")) {
 const GRIP = 6;
 const EDGES = ["t", "b", "l", "r", "tl", "tr", "bl", "br"];
 
+// Set by Rust: a window filling the screen has no edge outside it, and offering
+// to pull one is offering something that cannot happen.
+let zoomed = false;
+
 function edgeAt(e) {
+  if (zoomed) return "";
   // With a site in front this page is only the strip at the top, so its own
   // bottom is not the window's — unless something is playing, which gives it
   // the whole window again. Reading it as the window's bottom would have made
@@ -394,12 +399,11 @@ function paintFiles() {
 
     // A frame out of the film at the head of its row. Music has no picture of
     // its own here, so only the video shelf carries one.
-    let shot = null;
-    if (shelf.kind === "video") {
-      shot = document.createElement("span");
-      shot.className = "shot";
-      wantShot(item, shot);
-    }
+    const shot = document.createElement("span");
+    shot.className = "shot";
+    if (item.cover) shot.style.backgroundImage = "url(/media/" + item.cover + ")";
+    else if (shelf.kind === "video") wantShot(item, shot);
+    else shot.classList.add("none");
 
     const title = document.createElement("span");
     title.className = "title";
@@ -415,7 +419,7 @@ function paintFiles() {
     go.innerHTML = '<svg viewBox="0 0 12 12"><path d="M3 2v8l7-4z" fill="currentColor"/></svg>';
     go.addEventListener("click", () => play(item));
 
-    if (shot) row.append(shot);
+    row.append(shot);
     row.append(title, facts, go);
     row.addEventListener("dblclick", () => play(item));
     row.addEventListener("contextmenu", (e) => {
@@ -661,6 +665,9 @@ function play(item) {
   player.hidden = false;
   const music = shelf.kind === "music";
   art.hidden = !music;
+  // The picture the song was listed under, when the download kept one.
+  art.style.backgroundImage = item.cover ? "url(/media/" + item.cover + ")" : "";
+  art.classList.toggle("covered", !!item.cover);
   video.style.visibility = music ? "hidden" : "visible";
   nowLine.textContent = item.title;
   titleLine.textContent = item.title;
@@ -849,6 +856,11 @@ document.addEventListener("keydown", (e) => {
       break;
     case "ArrowLeft":
       video.currentTime -= e.shiftKey ? 30 : 3;
+      break;
+    case "Home":
+      e.preventDefault();
+      video.currentTime = 0;
+      video.play().catch(() => {});
       break;
     case "PageUp":
       e.preventDefault();
@@ -1051,6 +1063,12 @@ window.__shard = {
         break;
       case "settings":
         paintSettings(message);
+        break;
+      case "frame":
+        zoomed = !!message.zoomed;
+        if (zoomed) {
+          for (const edge of EDGES) document.documentElement.classList.remove("grip-" + edge);
+        }
         break;
       case "saved":
         // Something new landed on a shelf. Read it again if the library is

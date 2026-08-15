@@ -65,6 +65,9 @@ pub fn watch() -> TrayEvents {
 pub fn build(tooltip: &str, icon: &Rgba, menu: Menu) -> Result<TrayIcon> {
     Ok(TrayIconBuilder::new()
         .with_menu(Box::new(menu))
+        // The menu belongs to the right button. Left, it was appearing under a
+        // click meant for the window, and the window never came.
+        .with_menu_on_left_click(false)
         .with_tooltip(tooltip)
         .with_icon(icon.to_tray_icon()?)
         .build()?)

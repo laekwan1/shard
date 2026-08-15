@@ -279,6 +279,7 @@ impl Downloads {
             // Music of its own goes to a Music folder, not among the videos, so
             // a folder of songs is a folder of songs.
             into: if audio_only { music_folder() } else { videos_folder() },
+            cover: offer.thumb.clone(),
             audio_only,
         };
         let expected = job.video.bytes + job.audio.bytes;

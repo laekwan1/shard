@@ -47,15 +47,19 @@ const TICK_TIMER: usize = 1;
 /// when it is not, and messages are pouring in from the pointer.
 const BEAT: std::time::Duration = std::time::Duration::from_millis(120);
 
-/// How much of the frame is kept clear of the web view, in pixels.
+/// How much of the frame is kept clear of a browsed page, in pixels.
 ///
-/// None. A child window takes the pointer wherever it reaches, so the frame
-/// could not hear a drag on its own edge — and the strip left for it was a line
-/// of a colour that was not the page's, between the window and its contents. The
-/// page reports the edges itself now (see `Ask::WindowResize`), and every site
-/// being browsed does the same through the hooks in it, so there is nothing left
-/// for this to be for.
-const RESIZE_EDGE: i32 = 0;
+/// A child window takes the pointer wherever it reaches, so the frame cannot
+/// hear a drag on its own edge. Our own screens answer that themselves — the
+/// page reports the edge it was pressed on (see `Ask::WindowResize`) — so they
+/// are laid out flush to the frame.
+///
+/// A site cannot. Its scrollbar is drawn by the browser rather than by the page,
+/// and a press on one is not something any script is told about, so along the
+/// right-hand edge of anything that scrolls there was no way to take hold of the
+/// window at all. This much of the frame is kept back from a site for the window
+/// itself to hear.
+const RESIZE_EDGE: i32 = 4;
 
 /// How tall the title strip is — a Windows caption's own height, since that is
 /// what it stands in for. The page draws it; this is what the layout code has to
@@ -128,9 +132,11 @@ thread_local! {
 fn relayout(hwnd: HWND) {
     let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     unsafe { GetClientRect(hwnd, &mut rect) };
+    // Nothing is kept back from the window while it fills the screen: there is
+    // no edge to take hold of.
     let edge = if unsafe { IsZoomed(hwnd) } != 0 { 0 } else { RESIZE_EDGE };
-    let width = (rect.right - rect.left - edge * 2).max(0) as u32;
-    let height = (rect.bottom - rect.top - edge * 2).max(0) as u32;
+    let width = (rect.right - rect.left).max(0) as u32;
+    let height = (rect.bottom - rect.top).max(0) as u32;
     let showing = SHOWING.with(|cell| cell.get());
     let chrome = chrome_height(hwnd);
     // Room kept along the bottom for the strip that says what is playing. The
@@ -156,7 +162,7 @@ fn relayout(hwnd: HWND) {
     SHELL.with(|cell| {
         if let Some(view) = cell.borrow().as_ref() {
             let _ = view.set_bounds(wry::Rect {
-                position: wry::dpi::PhysicalPosition::new(edge, edge).into(),
+                position: wry::dpi::PhysicalPosition::new(0, 0).into(),
                 size: wry::dpi::PhysicalSize::new(width, ours).into(),
             });
         }
@@ -170,10 +176,10 @@ fn relayout(hwnd: HWND) {
             let _ = view.set_visible(front);
             if front {
                 let _ = view.set_bounds(wry::Rect {
-                    position: wry::dpi::PhysicalPosition::new(edge, edge + chrome).into(),
+                    position: wry::dpi::PhysicalPosition::new(edge, chrome).into(),
                     size: wry::dpi::PhysicalSize::new(
-                        width,
-                        height.saturating_sub((chrome + bar) as u32),
+                        width.saturating_sub((edge * 2) as u32),
+                        height.saturating_sub((chrome + bar + edge) as u32),
                     )
                     .into(),
                 });
@@ -710,6 +716,7 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         answer: RefCell::new(Some(Box::new(on_ask))),
         beat: std::cell::Cell::new(std::time::Instant::now()),
         next_tab: std::cell::Cell::new(1),
+        said_zoomed: std::cell::Cell::new(false),
         said_downloads: RefCell::new(String::new()),
     };
     shell.lay_out();
@@ -1112,6 +1119,10 @@ pub struct Shell {
     /// When the periodic work last ran, so it runs on a beat rather than once
     /// per window message. See `run`.
     beat: std::cell::Cell<std::time::Instant>,
+    /// Whether the window was filling the screen last time the page was told.
+    /// A window with no edge outside it has no edge to take hold of, and the
+    /// page has no way of knowing that by itself.
+    said_zoomed: std::cell::Cell<bool>,
     /// The number the next tab opened will carry. See [`Tab::id`].
     next_tab: std::cell::Cell<u64>,
     /// The last thing the download list was told, so an unchanged list is not
@@ -1174,6 +1185,16 @@ impl Shell {
 
     /// Deal with whatever the pages have said since last time.
     pub fn pump(&self) {
+        // Whether the window still has an edge, when that changes. Read here
+        // rather than announced from the places that maximise it: the system
+        // does it too — a double click on the strip, a snap to the side of the
+        // screen — and this is the one place that hears about all of them.
+        let zoomed = unsafe { IsZoomed(self.hwnd) } != 0;
+        if zoomed != self.said_zoomed.get() {
+            self.said_zoomed.set(zoomed);
+            self.tell(&format!(r#"{{"t":"frame","zoomed":{zoomed}}}"#));
+        }
+
         // What the sites being browsed had to say first: an address that moved,
         // and the answers the download hooks send back.
         for event in self.page_events() {
@@ -1239,13 +1260,6 @@ impl Shell {
             // these as the front tab's meant a page loading in the background
             // rewrote the label of the tab being looked at — the name flickering
             // between two sites.
-            // A press on the window's own edge, over a page. The site fills the
-            // window down to its corners, so this is the only way the frame ever
-            // hears about one.
-            if frame == "resize" {
-                self.resize_from(&text, false);
-                return;
-            }
             let said_by = field(payload, "tab").and_then(|id| id.parse::<u64>().ok());
             let Some(said_by) = said_by else { return };
             let changed = {
@@ -1441,7 +1455,7 @@ impl Shell {
             .iter()
             .map(|item| {
                 format!(
-                    r#"{{"id":{},"key":"{}","title":"{}","folder":"{}","size":"{}","age":"{}"}}"#,
+                    r#"{{"id":{},"key":"{}","title":"{}","folder":"{}","size":"{}","age":"{}","cover":{}}}"#,
                     register_media(&item.path),
                     // Something that means the same file next time the program
                     // runs: the number does not, and playback positions kept
@@ -1451,6 +1465,12 @@ impl Shell {
                     escape(&item.folder),
                     escape(&crate::library::human(item.bytes)),
                     escape(&crate::library::age(item.saved_at)),
+                    // The picture is served the same way the file is: a number
+                    // the page can ask for, never a path.
+                    match &item.cover {
+                        Some(cover) => register_media(cover).to_string(),
+                        None => "0".to_string(),
+                    },
                 )
             })
             .collect();

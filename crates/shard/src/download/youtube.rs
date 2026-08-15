@@ -125,6 +125,9 @@ pub struct Offer {
     pub template_url: String,
     #[serde(default, rename = "templateBody")]
     pub template_body: String,
+    /// The picture the video is listed under, if the page named one.
+    #[serde(default)]
+    pub thumb: String,
     /// Says which step failed when there is nothing to offer.
     #[serde(default)]
     pub reason: String,
@@ -361,6 +364,21 @@ pub const ASK: &str = r#"
 
   function send(payload) { window.ipc.postMessage(JSON.stringify(payload)); }
 
+  // The largest of the pictures the page lists for this video: a song has no
+  // cover of its own, and this is what stands in for one.
+  function thumb(data) {
+    try {
+      var all = data.videoDetails.thumbnail.thumbnails || [];
+      var best = null;
+      for (var i = 0; i < all.length; i++) {
+        if (!best || (all[i].width || 0) > (best.width || 0)) best = all[i];
+      }
+      return best && best.url ? String(best.url) : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   var data = response();
   if (!data || !data.streamingData) {
     send({ formats: [], reason: player() ? 'no-streams' : 'no-player' });
@@ -392,6 +410,7 @@ pub const ASK: &str = r#"
   send({
     formats: out,
     title: (data.videoDetails || {}).title || '',
+    thumb: thumb(data),
     templateUrl: captured ? captured.url : '',
     templateBody: captured ? captured.body : '',
     reason: captured ? '' : 'not-played'

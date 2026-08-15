@@ -135,9 +135,12 @@
              heads of the same radius sitting on the ends of it. -->
         <div id="art" hidden>
           <svg viewBox="0 0 32 32" aria-hidden="true">
-            <path d="M12.4 21.5V7.9l12-2.4v13.6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
-            <circle cx="8.6" cy="21.9" r="3.9" fill="currentColor"/>
-            <circle cx="20.6" cy="19.5" r="3.9" fill="currentColor"/>
+            <!-- The stems end inside the heads rather than against them, and the
+                 heads are laid over at the angle a written note has, so the two
+                 meet as one shape instead of a line stopping at a circle. -->
+            <path d="M12.9 22.6V8.1l11.6-2.3v14.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            <ellipse cx="9.4" cy="22.7" rx="4.3" ry="3.4" transform="rotate(-20 9.4 22.7)" fill="currentColor"/>
+            <ellipse cx="21" cy="20.4" rx="4.3" ry="3.4" transform="rotate(-20 21 20.4)" fill="currentColor"/>
           </svg>
         </div>
       </div>

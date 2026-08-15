@@ -482,6 +482,8 @@ button svg { display: block; }
   background: #0b0d11 center/cover no-repeat;
   border: 1px solid #ffffff0f;
 }
+/* Nothing to show: a plain well rather than an empty frame. */
+.file .shot.none { background: #0e1015; }
 .file .title { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file .facts { flex: 0 1 auto; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .file .go {
@@ -647,6 +649,9 @@ button svg { display: block; }
     inset 0 1.5px 0 #ffffff4d,
     inset 0 -1.5px 0 #00000038;
 }
+/* With a picture on it the drawn note would only be in the way. */
+#art.covered { background-size: cover; background-position: center; }
+#art.covered svg { display: none; }
 #art svg {
   width: 60px;
   height: 60px;
@@ -697,7 +702,19 @@ button svg { display: block; }
 #play { color: #fff !important; }
 #clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .spacer { flex: 1; }
-#volume { width: 42px; accent-color: var(--accent); }
+/* Drawn rather than left to the browser: its own slider is built for a form,
+   and beside controls this size the bar and its handle were the heaviest things
+   on the row. */
+#volume { width: 42px; height: 10px; appearance: none; -webkit-appearance: none; background: transparent; }
+#volume::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: var(--field); }
+#volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 7px;
+  height: 7px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 /* The speeds, on a right-click of the button that steps through them. */
 #rates {
   position: fixed;

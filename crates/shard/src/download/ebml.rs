@@ -56,6 +56,12 @@ pub const BLOCK: Id = 0xA1;
 pub const BLOCK_DURATION: Id = 0x9B;
 
 pub const CUES: Id = 0x1C53_BB6B;
+
+/// The table at the front saying where the other tables are.
+pub const SEEK_HEAD: Id = 0x114D_9B74;
+pub const SEEK: Id = 0x4DBB;
+pub const SEEK_ID: Id = 0x53AB;
+pub const SEEK_POSITION: Id = 0x53AC;
 pub const CUE_POINT: Id = 0xBB;
 pub const CUE_TIME: Id = 0xB3;
 pub const CUE_TRACK_POSITIONS: Id = 0xB7;
@@ -102,6 +108,13 @@ pub fn put_element(out: &mut Vec<u8>, id: Id, body: &[u8]) {
 }
 
 /// An unsigned integer element, in as few bytes as carry it.
+/// A number written to a stated width, so it can be filled in later without
+/// anything after it having to move.
+pub fn put_uint_fixed(out: &mut Vec<u8>, id: Id, value: u64, width: usize) {
+    let bytes = value.to_be_bytes();
+    put_element(out, id, &bytes[8 - width..]);
+}
+
 pub fn put_uint(out: &mut Vec<u8>, id: Id, value: u64) {
     let bytes = value.to_be_bytes();
     let first = bytes.iter().position(|b| *b != 0).unwrap_or(7);

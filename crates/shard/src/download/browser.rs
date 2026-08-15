@@ -129,41 +129,6 @@ pub(crate) const PAGE_HOOKS: &str = r#"
   // The page is no longer asked to dismiss anything: the address is a row of
   // the window rather than something resting on the page, so a click here means
   // only what it means to the page.
-  // The window's own edges, which the page is sitting on top of.
-  //
-  // A site fills the window down to its corners, and a child window takes the
-  // pointer, so a press meant for the frame never reaches it. Within a few
-  // pixels of an edge the press is reported instead of being given to the page,
-  // and the window carries on with the resize the way the system would have.
-  var GRIP = 4;
-  function edgeAt(e) {
-    var s = '';
-    if (e.clientY <= GRIP) s += 't';
-    else if (e.clientY >= window.innerHeight - GRIP) s += 'b';
-    if (e.clientX <= GRIP) s += 'l';
-    else if (e.clientX >= window.innerWidth - GRIP) s += 'r';
-    return s;
-  }
-  var CURSOR = {
-    t: 'ns-resize', b: 'ns-resize', l: 'ew-resize', r: 'ew-resize',
-    tl: 'nwse-resize', br: 'nwse-resize', tr: 'nesw-resize', bl: 'nesw-resize'
-  };
-  window.addEventListener('mousemove', function (e) {
-    var at = edgeAt(e);
-    var root = document.documentElement;
-    if (!root) return;
-    if (at) root.style.setProperty('cursor', CURSOR[at], 'important');
-    else root.style.removeProperty('cursor');
-  }, true);
-  window.addEventListener('mousedown', function (e) {
-    if (e.button !== 0) return;
-    var at = edgeAt(e);
-    if (!at) return;
-    e.preventDefault();
-    e.stopPropagation();
-    say({ frame: 'resize', text: at });
-  }, true);
-
   function title() { say({ frame: 'title', text: document.title || location.host }); }
   // The page's own background, so the tab above it can be the same colour.
   function colour() {
