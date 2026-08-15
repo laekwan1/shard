@@ -1041,7 +1041,8 @@ function probeBlock() {
   title.textContent = "차단 검사";
   const what = document.createElement("small");
   what.className = "what-for";
-  what.textContent = "여기 넣은 곳이 실제로 막히는지 확인하고, 통하는 전략을 찾아 저장합니다. 접속은 브라우저에서 평소처럼 하세요.";
+  what.textContent =
+    "평소 접속만 해도 자동 학습이 같은 일을 합니다. 여기는 직접 확인하고 싶을 때 — 막히는 게 이름인지, 손잡기인지, 주소인지까지 말해 줍니다.";
 
   const ask = document.createElement("div");
   ask.className = "ask";

@@ -311,8 +311,8 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 },
                 Item {
                     key: "doh.set_system_dns",
-                    label: "시스템 DNS로 지정",
-                    help: "이 프로그램이 켜져 있는 동안 기기의 DNS를 여기로 돌립니다.",
+                    label: "PC 전체 적용",
+                    help: "켜면 브라우저뿐 아니라 이 PC의 모든 프로그램이 암호화 DNS를 씁니다. 끄면 Shard 안에서만 쓰입니다.",
                     kind: Kind::Toggle(cfg.doh.set_system_dns),
                 },
                 Item {

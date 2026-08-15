@@ -267,7 +267,13 @@ pub fn resolve_encrypted(cfg: &Doh, host: &str) -> Option<IpAddr> {
     runtime.block_on(async {
         let client = build_client(cfg).ok()?;
         let query = crate::dns::build_query(host, crate::dns::TYPE_A, 0x5344);
-        let reply = forward(&client, &cfg.upstreams, &query).await.ok()?;
+        let reply = match forward(&client, &cfg.upstreams, &query).await {
+            Ok(reply) => reply,
+            Err(e) => {
+                tracing::info!("encrypted lookup for {host} failed: {e}");
+                return None;
+            }
+        };
         let (_, addresses) = crate::dns::answer_addresses(&reply)?;
         addresses
             .into_iter()

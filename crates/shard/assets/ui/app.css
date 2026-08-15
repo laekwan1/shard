@@ -319,9 +319,9 @@ button svg { display: block; }
   display: flex;
   gap: 3px;
   flex: none;
-  align-self: flex-start;
-  /* Across the middle of the list it opens onto, a little clear of the strip. */
-  margin: 4px auto 0;
+  align-self: stretch;
+  /* The width of the list it opens onto, less the same hair on every side. */
+  margin: 4px 4px 0;
   padding: 3px;
   background: var(--surface);
   border-radius: 12px 12px 0 0;
@@ -353,11 +353,13 @@ button svg { display: block; }
   mask-image: radial-gradient(circle at 100% 0, transparent 5px, #000 5.5px);
 }
 .shelf {
+  /* Half each of whatever the row is. */
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-width: 160px;
+  min-width: 0;
   height: 27px;
   padding: 0 16px;
   font-size: 11.5px;
