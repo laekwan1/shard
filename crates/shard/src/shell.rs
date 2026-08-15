@@ -47,15 +47,15 @@ const TICK_TIMER: usize = 1;
 /// when it is not, and messages are pouring in from the pointer.
 const BEAT: std::time::Duration = std::time::Duration::from_millis(120);
 
-/// How wide the invisible grip around the window is, in pixels.
+/// How much of the frame is kept clear of the web view, in pixels.
 ///
-/// One, not four. A child window takes the pointer wherever it reaches, so this
-/// much of the frame is kept clear of the web view for the window to hear a drag
-/// on its own edge — and every pixel of it is a line of a colour that is not the
-/// page's, between the window and its contents. The page reports the edges
-/// itself now (see `Ask::WindowResize`), so this is only what is left for when
-/// a page is too busy to answer.
-const RESIZE_EDGE: i32 = 1;
+/// None. A child window takes the pointer wherever it reaches, so the frame
+/// could not hear a drag on its own edge — and the strip left for it was a line
+/// of a colour that was not the page's, between the window and its contents. The
+/// page reports the edges itself now (see `Ask::WindowResize`), and every site
+/// being browsed does the same through the hooks in it, so there is nothing left
+/// for this to be for.
+const RESIZE_EDGE: i32 = 0;
 
 /// How tall the title strip is — a Windows caption's own height, since that is
 /// what it stands in for. The page draws it; this is what the layout code has to
@@ -255,6 +255,8 @@ pub enum Ask {
     SettingsRead,
     /// Put every setting back to what it was on the first launch.
     SettingsReset,
+    /// Open the folder the log is written into.
+    LogsOpen,
     SettingsSet { key: String, value: String },
     /// The window itself: what a page cannot do to the frame around it.
     WindowDrag,
@@ -310,6 +312,7 @@ pub fn read_ask(body: &str) -> Ask {
         "chose" => Ask::Chose(number(body, "itag").unwrap_or(0)),
         "settings.read" => Ask::SettingsRead,
         "settings.reset" => Ask::SettingsReset,
+        "logs.open" => Ask::LogsOpen,
         "settings.set" => Ask::SettingsSet {
             key: field(body, "key").unwrap_or_default(),
             value: field(body, "value").unwrap_or_default(),
@@ -869,6 +872,13 @@ pub fn preview() -> Result<()> {
             shell.say_engine(&engine.borrow());
         }
 
+        Ask::LogsOpen => {
+            let logs = uikit::config::app_dir(crate::config::APP_NAME).join("logs");
+            // The folder, not the file: a log being written to is held open, and
+            // what opens it matters less than being able to find it.
+            crate::library::reveal(&logs);
+        }
+
         Ask::LibraryList(kind) => shell.say_library(shelf_of(&kind)),
         Ask::LibraryFolder { id, folder } => {
             with_item(id, |item| {
@@ -929,7 +939,10 @@ pub fn preview() -> Result<()> {
         // The tray, first: it is how the window comes back once it has been put
         // away, so it has to be answered even while nothing else is happening.
         while let Ok(event) = tray.events.tray.try_recv() {
-            if uikit::tray::is_activation(&event) {
+            // A double click, not a single one: one click on a tray icon is
+            // how a menu is reached, and a window jumping up for it is a window
+            // that appears when nothing was asked for.
+            if uikit::tray::is_double_click(&event) {
                 shell.show();
             }
         }
@@ -948,6 +961,14 @@ pub fn preview() -> Result<()> {
 
         let drained = saving.borrow_mut().drain();
         for (note, failed) in &drained.finished {
+            // Written down either way. A download that failed says so on the
+            // page it was started from and then is gone; without this there was
+            // nothing left anywhere to say what had gone wrong.
+            if *failed {
+                tracing::warn!("download failed: {note}");
+            } else {
+                tracing::info!("download saved: {note}");
+            }
             shell.tell_page(&if *failed {
                 crate::download::youtube::say_script(note, true)
             } else {

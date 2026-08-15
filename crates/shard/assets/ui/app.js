@@ -236,6 +236,7 @@ function paintDownloads(list) {
     track.appendChild(fill);
 
     const percent = document.createElement("span");
+    percent.className = "percent";
     percent.textContent = Math.round((item.fraction || 0) * 100) + "%";
 
     const stop = document.createElement("button");
@@ -316,7 +317,8 @@ function paintFolders() {
 
   const add = document.createElement("button");
   add.className = "folder add";
-  add.textContent = "＋";
+  add.innerHTML =
+    '<svg viewBox="0 0 12 12"><path d="M6 2.4v7.2M2.4 6h7.2" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
   add.title = "새 폴더";
   add.addEventListener("click", askFolderName);
   foldersEl.appendChild(add);
@@ -368,6 +370,15 @@ function paintFiles() {
     });
     row.addEventListener("dragend", () => row.classList.remove("held"));
 
+    // A frame out of the film at the head of its row. Music has no picture of
+    // its own here, so only the video shelf carries one.
+    let shot = null;
+    if (shelf.kind === "video") {
+      shot = document.createElement("span");
+      shot.className = "shot";
+      wantShot(item, shot);
+    }
+
     const title = document.createElement("span");
     title.className = "title";
     title.textContent = item.title;
@@ -382,6 +393,7 @@ function paintFiles() {
     go.innerHTML = '<svg viewBox="0 0 12 12"><path d="M3 2v8l7-4z" fill="currentColor"/></svg>';
     go.addEventListener("click", () => play(item));
 
+    if (shot) row.append(shot);
     row.append(title, facts, go);
     row.addEventListener("dblclick", () => play(item));
     row.addEventListener("contextmenu", (e) => {
@@ -390,6 +402,81 @@ function paintFiles() {
     });
     filesEl.appendChild(row);
   }
+}
+
+// ---- a frame out of each film ----------------------------------------------
+//
+// Taken by playing the file itself and drawing one frame onto a canvas: there is
+// no picture stored beside a video, and asking for one would mean shipping a
+// decoder when the window already has the platform's. Kept afterwards under the
+// file's own name, so it is done once however often the shelf is opened.
+//
+// One at a time. Each still costs a seek and a decode, and a shelf of forty
+// videos all doing that at once is forty files being read at the same moment.
+
+const wanted = [];
+let taking = false;
+
+function wantShot(item, box) {
+  const kept = localStorage.getItem("shot:" + item.key);
+  if (kept) {
+    box.style.backgroundImage = "url(" + kept + ")";
+    return;
+  }
+  wanted.push({ item, box });
+  takeShots();
+}
+
+function takeShots() {
+  if (taking || !wanted.length) return;
+  taking = true;
+  const { item, box } = wanted.shift();
+  const reader = document.createElement("video");
+  reader.muted = true;
+  reader.preload = "auto";
+
+  let settled = false;
+  const done = (picture) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(watchdog);
+    reader.removeAttribute("src");
+    reader.load();
+    if (picture) {
+      // The store is small and a still is a couple of kilobytes; when it is
+      // full, the picture is simply not kept and the row goes without.
+      try {
+        localStorage.setItem("shot:" + item.key, picture);
+      } catch (e) {}
+      if (box.isConnected) box.style.backgroundImage = "url(" + picture + ")";
+    }
+    taking = false;
+    takeShots();
+  };
+
+  const draw = () => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 88;
+      canvas.height = 50;
+      canvas.getContext("2d").drawImage(reader, 0, 0, canvas.width, canvas.height);
+      done(canvas.toDataURL("image/jpeg", 0.62));
+    } catch (e) {
+      done(null);
+    }
+  };
+
+  // A few seconds in, not the first frame: films open on black.
+  reader.addEventListener("loadeddata", () => {
+    const at = Math.min(3, (reader.duration || 9) / 3);
+    if (at > 0.2) reader.currentTime = at;
+    else draw();
+  });
+  reader.addEventListener("seeked", draw);
+  reader.addEventListener("error", () => done(null));
+  // Nothing about this is worth hanging the queue for.
+  const watchdog = setTimeout(() => done(null), 8000);
+  reader.src = "/media/" + item.id;
 }
 
 // ---- what a right-click offers ---------------------------------------------
@@ -722,6 +809,7 @@ const settingsEl = document.getElementById("settings");
 
 function paintSettings(message) {
   settingsEl.textContent = "";
+  settingsEl.appendChild(settingsBar());
   for (const group of message.groups || []) {
     const section = document.createElement("section");
     section.className = "group";
@@ -747,15 +835,39 @@ function paintSettings(message) {
     }
     settingsEl.appendChild(section);
   }
-  settingsEl.appendChild(resetRow());
+}
+
+// What to do with the screen rather than with any one setting: read the log,
+// put everything back, or say that this is done with.
+//
+// Settings are written the moment they are changed, so nothing is waiting on the
+// last of these — it is there because a screen with no way out of it leaves the
+// question of whether anything was actually saved.
+function settingsBar() {
+  const bar = document.createElement("div");
+  bar.className = "settings-bar";
+
+  const logs = document.createElement("button");
+  logs.textContent = "로그 보기";
+  logs.addEventListener("click", () => send("logs.open"));
+
+  const done = document.createElement("button");
+  done.className = "ok";
+  done.textContent = "확인";
+  done.addEventListener("click", () => {
+    done.classList.add("done");
+    done.textContent = "저장됨";
+    setTimeout(() => show("home"), 260);
+  });
+
+  bar.append(logs, resetButton(), done);
+  return bar;
 }
 
 // The way back, for a setting changed by mistake. Asked twice rather than
 // through a dialog: the second press is the confirmation, and it forgets it was
 // asked if nothing follows.
-function resetRow() {
-  const section = document.createElement("section");
-  section.className = "group";
+function resetButton() {
   const button = document.createElement("button");
   button.className = "reset";
   button.textContent = "설정 초기화";
@@ -779,8 +891,7 @@ function resetRow() {
       button.textContent = "설정 초기화";
     }, 4000);
   });
-  section.appendChild(button);
-  return section;
+  return button;
 }
 
 function control(item) {

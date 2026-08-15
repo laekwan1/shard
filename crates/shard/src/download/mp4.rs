@@ -374,8 +374,23 @@ fn read_fragment(
                 sample_flags = u32::from_be_bytes(buffer[at..at + 4].try_into().unwrap());
                 at += 4;
             }
-            if flags & 0x0800 != 0 {
-                at += 4; // composition offset, which the muxer does not use
+            // How far this frame's showing time is from its decoding time.
+            //
+            // An encoder may hold a frame back and decode it before the ones it
+            // is shown after; the offset is the difference. Matroska states when
+            // a frame is *shown*, so throwing this away — which is what used to
+            // happen here — wrote every reordered frame at the wrong moment, and
+            // the picture drifted away from the sound. It goes unnoticed on
+            // ordinary video, where the offset is a frame or two; a video that
+            // is a handful of stills held for a long time is reordered across
+            // whole seconds, and there it is unwatchable.
+            let mut composition = 0i64;
+            if flags & 0x0800 != 0 && at + 4 <= end {
+                // Signed since version 1 of the box, unsigned before it. Read as
+                // signed either way: a version-0 offset is never large enough to
+                // be mistaken for a negative one.
+                composition = i32::from_be_bytes(buffer[at..at + 4].try_into().unwrap()) as i64;
+                at += 4;
             }
             if index == 0 {
                 if let Some(first) = first_flags {
@@ -387,7 +402,9 @@ fn read_fragment(
             out.push(Sample {
                 at: file_at + offset,
                 len: size as usize,
-                time: *time,
+                // Shown here; decoded at `*time`, which is what the clock below
+                // carries on from.
+                time: (*time as i64 + composition).max(0) as u64,
                 duration,
                 keyframe,
             });
@@ -538,6 +555,50 @@ mod tests {
         assert_eq!(found[1].time, 40);
         assert!(found[0].keyframe);
         assert!(!found[1].keyframe);
+    }
+
+    /// The same fragment, with each sample carrying a showing-time offset.
+    fn reordered(offsets: &[i32]) -> Vec<u8> {
+        let mut tfhd = vec![0u8; 4];
+        tfhd[3] = 0x20;
+        tfhd.extend_from_slice(&1u32.to_be_bytes());
+        tfhd.extend_from_slice(&0u32.to_be_bytes());
+
+        let mut tfdt = vec![1u8, 0, 0, 0];
+        tfdt.extend_from_slice(&0u64.to_be_bytes());
+
+        // duration, size, flags and composition offset present, plus the offset.
+        let mut trun = vec![0u8, 0x00, 0x0f, 0x01];
+        trun.extend_from_slice(&(offsets.len() as u32).to_be_bytes());
+        trun.extend_from_slice(&0i32.to_be_bytes());
+        for offset in offsets {
+            trun.extend_from_slice(&40u32.to_be_bytes()); // duration
+            trun.extend_from_slice(&10u32.to_be_bytes()); // size
+            trun.extend_from_slice(&0u32.to_be_bytes()); // flags: keyframe
+            trun.extend_from_slice(&offset.to_be_bytes());
+        }
+
+        let traf = nest(b"traf", &[boxed(b"tfhd", &tfhd), boxed(b"tfdt", &tfdt), boxed(b"trun", &trun)]);
+        let moof = nest(b"moof", &[traf]);
+        let mdat = boxed(b"mdat", &vec![0u8; offsets.len() * 10]);
+        let mut file = moof;
+        let at = (file.len() + 8) as i32;
+        let trun_at = file.len() - (offsets.len() * 16) - 4;
+        file[trun_at..trun_at + 4].copy_from_slice(&at.to_be_bytes());
+        file.extend_from_slice(&mdat);
+        file
+    }
+
+    #[test]
+    fn a_frame_is_timed_by_when_it_is_shown_not_when_it_is_decoded() {
+        // Decoded at 0, 40, 80; held back by 0, 200 and -20 ticks. Dropping
+        // these — which is what this code used to do — is what put the picture
+        // out of step with the sound on video that is reordered at all.
+        let found = samples(&reordered(&[0, 200, -20]), 0);
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].time, 0);
+        assert_eq!(found[1].time, 240);
+        assert_eq!(found[2].time, 60);
     }
 
     #[test]

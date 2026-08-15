@@ -78,6 +78,10 @@ html, body {
 }
 
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: default; }
+/* A drawing, not a letter. Left inline it stands on the text baseline and keeps
+   the room a descender would need under it, which put every mark a little above
+   the middle of the box drawn around it. */
+button svg { display: block; }
 
 /* ---- the window's own bar ------------------------------------------------ */
 
@@ -96,7 +100,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 0 12px 0 10px;
+  padding: 0 20px 0 10px;
   flex: none;
   color: var(--on-surface);
   transition: color .13s;
@@ -156,6 +160,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #newtab {
   width: 20px;
   height: 20px;
+  display: grid;
+  place-items: center;
   flex: none;
   color: var(--muted);
   font-size: 12px;
@@ -163,6 +169,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   margin: 0 0 4px 5px;
   border-radius: 6px;
 }
+#newtab svg { width: 11px; height: 11px; }
 #newtab:hover { color: var(--on-surface); background: #ffffff14; }
 
 /* ---- the address row ------------------------------------------------------ */
@@ -197,6 +204,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #frame-buttons button {
   width: 24px;
   height: 24px;
+  display: grid;
+  place-items: center;
   border-radius: 5px;
   color: var(--on-surface);
   transition: background .12s, color .12s;
@@ -275,7 +284,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #downloads { margin-top: 20px; width: 340px; display: flex; flex-direction: column; gap: 8px; }
 .download { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--muted); }
 .download .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.download .track { width: 96px; height: 4px; border-radius: 99px; background: var(--field); overflow: hidden; }
+/* Fixed, and the reading beside it given room for three digits in figures of
+   one width: without both, the bar grew and shrank as the number changed. */
+.download .track { flex: none; width: 96px; height: 4px; border-radius: 99px; background: var(--field); overflow: hidden; }
+.download .percent { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* Told to be a block. A span is inline, and a width set on an inline box is
    ignored — which is why the track was there and the colour in it never was. */
 .download .fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .2s; }
@@ -307,7 +319,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   gap: 3px;
   flex: none;
   align-self: flex-start;
-  margin: 5px 9px 5px;
+  margin: 6px 10px 0;
   padding: 3px;
   background: var(--raised);
   border-radius: 11px;
@@ -350,7 +362,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   flex-wrap: wrap;
   flex: none;
   background: var(--surface);
-  border-top: 1px solid var(--divider);
+  border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
    above is drawn with, so one row does not answer differently from the other. */
@@ -360,7 +372,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   color: var(--muted);
   background: transparent;
   border: 1px solid #ffffff1c;
-  border-radius: 99px;
+  border-radius: 8px;
   transition: color .12s, background .12s, border-color .12s;
 }
 .folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
@@ -380,6 +392,7 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   border-color: transparent;
   border-radius: 6px;
 }
+.folder.add svg { width: 11px; height: 11px; }
 .folder.add:hover { background: #ffffff14; color: #fff; border-color: transparent; }
 
 /*
@@ -421,6 +434,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .file.held { background: #22d3ee1f; }
 /* The name gives way first: it is the one thing that can be cut and still read,
    and without this the button at the end was squeezed out of round. */
+/* A frame out of the film itself, taken once and kept: it says which video a
+   row is faster than its name does. */
+.file .shot {
+  flex: none;
+  width: 44px;
+  height: 26px;
+  border-radius: 5px;
+  background: #0b0d11 center/cover no-repeat;
+  border: 1px solid #ffffff0f;
+}
 .file .title { flex: 1 1 auto; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file .facts { flex: 0 1 auto; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; }
 .file .go {
@@ -460,19 +483,26 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   border-bottom: 1px solid var(--divider);
 }
 
-/* The way back from a setting changed by mistake. Quiet until it is asked to
-   be sure of itself. */
-.reset {
-  width: 100%;
-  padding: 11px 0;
-  border-radius: 9px;
-  font-size: 12.5px;
+/* The row across the top of the settings: what to do with the screen, sized to
+   what each one says rather than stretched across it. */
+.settings-bar { display: flex; justify-content: flex-end; gap: 6px; max-width: 720px; margin: 0 auto 16px; }
+.settings-bar button {
+  padding: 7px 13px;
+  border-radius: 8px;
+  font-size: 12px;
   color: var(--muted);
   border: 1px solid var(--divider);
   transition: color .13s, background .13s, border-color .13s;
 }
-.reset:hover { color: var(--on-surface); background: #ffffff0a; }
-.reset.sure { color: #fff; background: #7f1d1d; border-color: #7f1d1d; }
+.settings-bar button:hover { color: var(--on-surface); background: #ffffff0a; }
+/* The one that says the screen is done with. */
+.settings-bar .ok { color: var(--on-surface); border-color: #ffffff45; }
+.settings-bar .ok:hover { color: #04252b; background: var(--accent); border-color: var(--accent); }
+.settings-bar .ok.done { color: #04252b; background: var(--good); border-color: var(--good); }
+
+/* The way back from a setting changed by mistake. Quiet until it is asked to
+   be sure of itself. */
+.settings-bar .reset.sure { color: #fff; background: #7f1d1d; border-color: #7f1d1d; }
 .setting.tall { align-items: flex-start; }
 .what { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .what span { font-size: 13.5px; }

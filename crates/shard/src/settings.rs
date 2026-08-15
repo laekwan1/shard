@@ -122,6 +122,28 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
             ],
         ),
         (
+            "영상 받기",
+            vec![
+                Item {
+                    key: "download.audio",
+                    label: "음질",
+                    help: "화질은 받을 때 고르고, 음질만 여기서 정해 둡니다.",
+                    kind: choice(
+                        cfg.download.audio,
+                        AudioQuality::ALL,
+                        audio_name,
+                        AudioQuality::label,
+                    ),
+                },
+                Item {
+                    key: "download.audio_language",
+                    label: "음성 언어",
+                    help: "비워 두면 영상의 기본 언어를 씁니다. 예: ko, en",
+                    kind: Kind::Text(cfg.download.audio_language.clone()),
+                },
+            ],
+        ),
+        (
             "적용 범위",
             vec![
                 Item {
@@ -310,28 +332,6 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     label: "부트스트랩",
                     help: "위 목록과 같은 순서로 짝지어집니다. \"dns.google=8.8.8.8\"처럼도 됩니다.",
                     kind: Kind::Lines(cfg.doh.bootstrap.clone()),
-                },
-            ],
-        ),
-        (
-            "영상 받기",
-            vec![
-                Item {
-                    key: "download.audio",
-                    label: "음질",
-                    help: "화질은 받을 때 고르고, 음질만 여기서 정해 둡니다.",
-                    kind: choice(
-                        cfg.download.audio,
-                        AudioQuality::ALL,
-                        audio_name,
-                        AudioQuality::label,
-                    ),
-                },
-                Item {
-                    key: "download.audio_language",
-                    label: "음성 언어",
-                    help: "비워 두면 영상의 기본 언어를 씁니다. 예: ko, en",
-                    kind: Kind::Text(cfg.download.audio_language.clone()),
                 },
             ],
         ),

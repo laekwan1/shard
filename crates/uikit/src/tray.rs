@@ -97,6 +97,18 @@ pub fn is_activation(event: &TrayIconEvent) -> bool {
     )
 }
 
+/// True when the event is a double click on the icon body.
+///
+/// One window opens on a double click rather than on a single one: a single
+/// click on a tray icon is how its menu is reached on Windows, and a window that
+/// jumps up for that is a window that appears when nothing was asked for.
+pub fn is_double_click(event: &TrayIconEvent) -> bool {
+    matches!(
+        event,
+        TrayIconEvent::DoubleClick { button: tray_icon::MouseButton::Left, .. }
+    )
+}
+
 pub fn show_window(ctx: &egui::Context) {
     ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
     ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
