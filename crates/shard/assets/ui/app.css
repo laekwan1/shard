@@ -697,6 +697,12 @@ button svg { display: block; }
 #row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 /* Around the play button, in the order they are reached for. */
 #prev, #next { color: var(--on-surface); }
+/* The two that say how the shelf plays through, lit while they are in force. */
+#onward.on, #shuffle.on { color: var(--accent); }
+/* Not on the strip: it is the width of the window minus everything else, and
+   these are set where the listening is done. */
+#player.mini #onward,
+#player.mini #shuffle { display: none; }
 #row button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); font-size: 13px; transition: color .12s, background .12s; }
 #row button:hover { color: #fff; background: #ffffff14; }
 #play { color: #fff !important; }

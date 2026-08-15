@@ -718,6 +718,40 @@ function step(by) {
 prevButton.addEventListener("click", () => step(-1));
 nextButton.addEventListener("click", () => step(1));
 
+// ---- how the shelf plays through -------------------------------------------
+//
+// Kept between runs: which way somebody listens is not something to set again
+// every time the program is opened.
+
+const onwardButton = document.getElementById("onward");
+const shuffleButton = document.getElementById("shuffle");
+let onward = localStorage.getItem("play:onward") !== "off";
+let shuffling = localStorage.getItem("play:shuffle") === "on";
+
+function markModes() {
+  onwardButton.classList.toggle("on", onward);
+  shuffleButton.classList.toggle("on", shuffling);
+}
+
+onwardButton.addEventListener("click", () => {
+  onward = !onward;
+  localStorage.setItem("play:onward", onward ? "on" : "off");
+  markModes();
+});
+shuffleButton.addEventListener("click", () => {
+  shuffling = !shuffling;
+  localStorage.setItem("play:shuffle", shuffling ? "on" : "off");
+  markModes();
+});
+markModes();
+
+// One of the others on the shelf, never the one just heard.
+function another() {
+  const list = shown().filter((i) => !playing || i.id !== playing.id);
+  if (!list.length) return null;
+  return list[Math.floor(Math.random() * list.length)];
+}
+
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
@@ -725,6 +759,20 @@ video.addEventListener("pause", () => (playButton.innerHTML = PLAY));
 video.addEventListener("ended", () => {
   if (playing) localStorage.removeItem("at:" + playing.key);
   playButton.innerHTML = PLAY;
+  if (!playing) return;
+  // On to the next by itself, unless that was asked not to happen. Out of order
+  // if that was asked for; otherwise down the list, stopping at the end rather
+  // than going round — a list that never stops is a list nobody asked to hear
+  // twice.
+  if (shuffling) {
+    const next = another();
+    if (next) play(next);
+    return;
+  }
+  if (!onward) return;
+  const list = shown();
+  const at = list.findIndex((i) => i.id === playing.id);
+  if (at >= 0 && at + 1 < list.length) play(list[at + 1]);
 });
 
 video.addEventListener("timeupdate", () => {

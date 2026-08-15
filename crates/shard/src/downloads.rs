@@ -69,6 +69,17 @@ pub fn chosen(payload: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
+/// Whether a file of this name is already on the shelf, wherever it has been
+/// filed since.
+///
+/// By the name it would be saved under, not by the address it came from: what
+/// the user recognises is the title, and a video re-uploaded under a new address
+/// is the same thing arriving twice.
+fn already_saved(kind: crate::library::Kind, title: &str) -> bool {
+    let name = save::safe_name(title);
+    crate::library::items(kind).iter().any(|item| item.title == name)
+}
+
 /// Bytes, as a person reads them.
 pub fn human(bytes: u64) -> String {
     const GB: u64 = 1 << 30;
@@ -166,11 +177,14 @@ pub struct Downloads {
     offer: Option<Offer>,
     pub list: Vec<Job>,
     next_id: u64,
+    /// What was last warned about as already being in the library, so pressing
+    /// the same row again means "yes, again".
+    asked_again: Option<String>,
 }
 
 impl Downloads {
     pub fn new(shared: Arc<Shared>) -> Self {
-        Self { shared, offer: None, list: Vec::new(), next_id: 1 }
+        Self { shared, offer: None, list: Vec::new(), next_id: 1, asked_again: None }
     }
 
     /// What the settings say about sound, in the form the chooser wants.
@@ -297,6 +311,19 @@ impl Downloads {
         {
             return youtube::say_script("이미 받고 있습니다.", true);
         }
+
+        // Already on the shelf, from some other day. Said rather than refused:
+        // a file may be worth having again — the first one was cut short, or
+        // was saved before something in here was fixed — so the second press of
+        // the same row is the answer to the question.
+        if self.asked_again.as_deref() != Some(key.as_str())
+            && already_saved(if audio_only { crate::library::Kind::Music } else { crate::library::Kind::Video }, &title)
+        {
+            self.asked_again = Some(key);
+            return youtube::say_script("이미 보관함에 있습니다.
+다시 받으려면 한 번 더 누르세요.", true);
+        }
+        self.asked_again = None;
 
         let (tx, rx) = std::sync::mpsc::channel::<Step>();
         let cancel = Arc::new(AtomicBool::new(false));
