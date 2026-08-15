@@ -782,8 +782,8 @@ pub const CONTROL: &str = r#"
 /// Ask the page to say something, with a row that goes ahead anyway.
 pub fn again_script(text: &str, itag: u32) -> String {
     format!(
-        "window.__shardAgain && window.__shardAgain(\"{}\", {itag});",
-        crate::shell::escape(text)
+        "window.__shardAgain && window.__shardAgain('{}', {itag});",
+        escape(text)
     )
 }
 

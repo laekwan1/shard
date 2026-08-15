@@ -18,6 +18,8 @@
     <string name="menu_forward">앞으로</string>
     <string name="hint_long_press">영상을 길게 누르면 저장할 수 있습니다</string>
     <string name="close">닫기</string>
+    <string name="download_already_saved">이미 보관함에 있습니다. 다시 받을까요?</string>
+    <string name="download_again">다시 받기</string>
     <string name="downloading">내려받는 중…</string>
     <string name="downloading_count">%1$d개 내려받는 중</string>
     <string name="channel_downloads">다운로드 및 엔진</string>

@@ -981,6 +981,32 @@ abstract class BrowserActivity : AppCompatActivity() {
      * going through — alive.
      */
     private fun startDownload(media: Media, expectedBytes: Long) {
+        // Already on a shelf, from some other day. Asked rather than refused —
+        // a file may be worth having again, cut short the first time or saved
+        // before something in here was fixed — and asked every time, because a
+        // warning that stops warning is one nobody can rely on.
+        val title = Storage.sanitise(media.title.trim()).trimEnd('.')
+        if (title.isNotBlank()) {
+            lifecycleScope.launch {
+                val saved = withContext(Dispatchers.IO) {
+                    Library.items(applicationContext).any { it.title == title }
+                }
+                if (saved) askToDownloadAgain(media, expectedBytes) else hand(media, expectedBytes)
+            }
+            return
+        }
+        hand(media, expectedBytes)
+    }
+
+    private fun askToDownloadAgain(media: Media, expectedBytes: Long) {
+        MaterialAlertDialogBuilder(this)
+            .setMessage(getString(R.string.download_already_saved))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.download_again) { _, _ -> hand(media, expectedBytes) }
+            .show()
+    }
+
+    private fun hand(media: Media, expectedBytes: Long) {
         DownloadService.enqueue(applicationContext, media, expectedBytes)
         showPanel()
         toast(getString(R.string.downloading))
