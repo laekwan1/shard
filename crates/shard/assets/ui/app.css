@@ -320,11 +320,15 @@ button svg { display: block; }
   gap: 3px;
   flex: none;
   align-self: stretch;
-  /* The width of the list it opens onto, less the same hair on every side. */
-  margin: 4px;
+  /* The width of the list it opens onto, less the same hair on either side.
+     Nothing under it, so the well sits straight on the panel and the rule
+     between them is the only thing dividing the two — see `#folders`. */
+  margin: 4px 4px 0;
   padding: 3px;
   background: var(--surface);
-  border-radius: 12px;
+  /* Square where it meets the panel. Rounded, the two bottom corners would show
+     the chrome colour behind them as a pair of bright wedges on the rule. */
+  border-radius: 12px 12px 0 0;
 }
 .shelf {
   /* Half each of whatever the row is. */
@@ -371,8 +375,14 @@ button svg { display: block; }
   /* A line above as well: the switch is a control, the panel below is a place,
      and without it the two read as one block. Light rather than the usual
      divider — that one is darker than the panel it would sit on, and a dark line
-     on a dark ground is not a line. */
-  border-top: 1px solid #ffffff1f;
+     on a dark ground is not a line.
+
+     It was invisible before, and not because of the colour. The switch had a
+     4px margin under it, so the rule was drawn on a band of the chrome colour —
+     rgb(44,46,50) — and came out rgb(46,48,52). Two levels apart. A line has to
+     be measured against what is actually behind it, not against the panel it
+     is declared on. The margin is gone now, so it lies on the dark and reads. */
+  border-top: 1px solid #ffffff2e;
   border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
