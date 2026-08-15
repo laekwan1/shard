@@ -362,10 +362,15 @@ button svg { display: block; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 12px;
+  /* The same air on every side of the row, and the folders starting where the
+     panel does rather than a step in from it. */
+  padding: 8px;
   flex-wrap: wrap;
   flex: none;
   background: var(--surface);
+  /* A line above as well: the switch is a control, the panel below is a place,
+     and without it the two read as one block. */
+  border-top: 1px solid var(--divider);
   border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
