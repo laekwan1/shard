@@ -188,7 +188,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         },
     )
     private val thumbCache = android.util.LruCache<android.net.Uri, android.graphics.Bitmap>(48)
-    private val tileCorner = 11f * activity.resources.displayMetrics.density
+    /** A soft rectangle, not a circle: what is in it is a picture, not a face. */
+    private val tileCorner = 7f * activity.resources.displayMetrics.density
     private val tilePad = (14 * activity.resources.displayMetrics.density).toInt()
     private val mutedTint =
         android.content.res.ColorStateList.valueOf(activity.getColor(R.color.muted))
@@ -457,6 +458,21 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     }
 
     init {
+        // Below the status bar, not under it.
+        //
+        // The browser pads itself for the bars; this screen lies over the top of
+        // it and was never told, so its title was drawn through the clock. Asked
+        // for rather than measured: full screen hides the bars, and then the
+        // inset is nought and the picture reaches the edges by itself.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+
         // The surface comes and goes with the window. The player does not, so
         // it is handed the new one each time rather than being rebuilt.
         // ExoPlayer is handed the surface view itself and looks after attaching
@@ -568,6 +584,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         onOpen?.invoke()
         root.visibility = View.VISIBLE
         root.bringToFront()
+        // Asked for again on the way in: the window handed the bars out before
+        // this screen existed, and a listener added afterwards hears nothing
+        // until something asks. Without it the title sat under the clock.
+        androidx.core.view.ViewCompat.requestApplyInsets(root)
         reload()
         watch()
         // Something left playing when the library was last closed is still going,
