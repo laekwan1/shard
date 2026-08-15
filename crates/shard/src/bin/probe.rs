@@ -182,7 +182,7 @@ fn main() -> anyhow::Result<()> {
                 label,
                 if ok { "성공" } else { "실패" }
             )),
-            Progress::Finished { winner: w } => winner = Some(w),
+            Progress::Finished { winner: w, .. } => winner = Some(w),
             Progress::Error(e) => report.say(format!("오류: {e}")),
         }
     }

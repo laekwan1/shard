@@ -25,7 +25,10 @@ pub enum Progress {
     Dns { system: Option<String>, encrypted: Option<String>, tampered: bool },
     Baseline { reachable: bool, addr: SocketAddr },
     Attempt { index: usize, label: String, ok: bool, elapsed_ms: u64 },
-    Finished { winner: Option<String> },
+    /// `silent` when every attempt ran out of time rather than being refused:
+    /// the difference between a machine reading the handshake and an address
+    /// that answers nothing at all.
+    Finished { winner: Option<String>, silent: bool },
     Error(String),
 }
 
@@ -85,13 +88,23 @@ pub fn say(progress: Progress) -> Vec<(String, Option<bool>)> {
             vec![(format!("{host} — {rungs}개 전략 시도"), None)]
         }
         Progress::Dns { system, encrypted, tampered } => {
-            let describe = |a: Option<String>| a.unwrap_or_else(|| "실패".to_string());
+            let describe = |a: &Option<String>| a.clone().unwrap_or_else(|| "실패".to_string());
+            // A tick only when both answered and they agree. Encrypted DNS
+            // failing takes half the ground from under everything below, and it
+            // was being marked as though the line had passed.
+            let well = !tampered && system.is_some() && encrypted.is_some();
             let mut lines = vec![(
-                format!("DNS — 시스템 {} / 암호화 {}", describe(system), describe(encrypted)),
-                Some(!tampered),
+                format!("DNS — 시스템 {} / 암호화 {}", describe(&system), describe(&encrypted)),
+                Some(well),
             )];
             if tampered {
                 lines.push(("두 응답이 다릅니다. DNS가 조작되고 있습니다.".to_string(), Some(false)));
+            } else if encrypted.is_none() {
+                lines.push((
+                    "암호화 DNS가 이 이름에 답하지 않았습니다 — 상위 서버가 막고 있거나, 그 서버까지 닿지 못하고 있습니다."
+                        .to_string(),
+                    Some(false),
+                ));
             }
             lines
         }
@@ -109,10 +122,19 @@ pub fn say(progress: Progress) -> Vec<(String, Option<bool>)> {
         Progress::Attempt { index, label, ok, elapsed_ms } => {
             vec![(format!("{}. {label} ({elapsed_ms}ms)", index + 1), Some(ok))]
         }
-        Progress::Finished { winner } => vec![match winner {
+        // How the attempts failed says which kind of block it is. Answered and
+        // then cut off is a machine reading the handshake; never answered at all
+        // is the address itself being unreachable, and no way of splitting a
+        // packet changes where it is addressed to.
+        Progress::Finished { winner, silent } => vec![match winner {
             Some(label) => (format!("성공: {label} — 저장됨"), Some(true)),
+            None if silent => (
+                "모든 시도가 응답 없이 끝났습니다 — 주소 자체가 막혀 있다는 뜻이며, ClientHello를 어떻게 나눠도 달라지지 않습니다. 이 경우 Veil이 답입니다."
+                    .to_string(),
+                Some(false),
+            ),
             None => (
-                "통하는 전략을 찾지 못했습니다. DNS 줄이 정상이었다면 SNI 분할로는                  뚫리지 않는 차단(재조립형 DPI 또는 IP 차단)이며, 이 경우 Veil이 답입니다."
+                "통하는 전략을 찾지 못했습니다. 연결은 닿았다가 끊겼으니 검사 장비가 조각을 다시 맞추고 있을 수 있습니다. 이 경우도 Veil이 답입니다."
                     .to_string(),
                 Some(false),
             ),
@@ -164,32 +186,33 @@ fn execute(shared: &Arc<Shared>, host: &str, report: &dyn Fn(Progress)) -> Outco
     };
     report(Progress::Baseline { reachable: baseline, addr });
     if baseline {
-        report(Progress::Finished { winner: None });
+        report(Progress::Finished { winner: None, silent: false });
         // Reaching the site at the encrypted answer's address while the system
         // resolver points somewhere else means the block was in DNS all along.
         return if tampered { Outcome::DnsTampered } else { Outcome::AlreadyWorks };
     }
 
+    // Whether every attempt simply ran out of time. One that is refused comes
+    // back in a fraction of a second; one that is never answered takes the whole
+    // wait, and those are two different kinds of block.
+    let mut all_silent = true;
     for (index, (label, strategy)) in ladder.into_iter().enumerate() {
         let started = Instant::now();
         let ok = {
             let _guard = Override::install(shared, host, strategy.clone());
             trial(addr, host)
         };
-        report(Progress::Attempt {
-            index,
-            label: label.to_string(),
-            ok,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-        });
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        all_silent &= elapsed_ms >= (CONNECT_TIMEOUT + READ_TIMEOUT).as_millis() as u64;
+        report(Progress::Attempt { index, label: label.to_string(), ok, elapsed_ms });
 
         if ok {
             commit(shared, host, strategy);
-            report(Progress::Finished { winner: Some(label.to_string()) });
+            report(Progress::Finished { winner: Some(label.to_string()), silent: false });
             return Outcome::Learned(label.to_string());
         }
     }
-    report(Progress::Finished { winner: None });
+    report(Progress::Finished { winner: None, silent: all_silent });
     Outcome::NoStrategy
 }
 
