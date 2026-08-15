@@ -118,14 +118,15 @@ pub fn run(
             join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))?
         };
 
-        // A picture beside the file, under the same name.
+        // A picture for a song, put inside the song.
         //
-        // After both ways of saving, not just one: a song is the case this is
-        // for — it has no picture of its own, and the music path used to return
-        // before ever reaching here.
-        if !job.cover.is_empty() {
+        // Only for music, and never beside it: a video already shows what it is
+        // — the list takes a frame out of the film itself — and a second file
+        // for every download is a folder nobody wants to look at. Failure here
+        // is not the download's failure; the sound is saved either way.
+        if job.audio_only && !job.cover.is_empty() {
             if let Err(e) = keep_cover(&client, &job.cover, &saved) {
-                tracing::warn!("could not save the cover: {e:#}");
+                tracing::warn!("could not put the cover in: {e:#}");
             }
         }
         Ok(saved)
@@ -136,10 +137,10 @@ pub fn run(
     outcome
 }
 
-/// Fetch a picture for a saved file and write it alongside, as `<name>.jpg`.
+/// Fetch a picture and put it into the saved file's own header.
 ///
-/// Failure is not the download's failure: the file is already saved, and a list
-/// row without a picture is a list row.
+/// Inside rather than beside: a music player, Explorer and this program all look
+/// in the same place for a cover, and one file is one file.
 fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Result<()> {
     let response = client.get(url).send()?;
     if !response.status().is_success() {
@@ -150,10 +151,16 @@ fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Re
     if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
         bail!("그림이 아닙니다 ({} 바이트)", bytes.len());
     }
-    let Some(extension) = picture_kind(&bytes) else {
+    let Some(kind) = picture_kind(&bytes) else {
         bail!("그림이 아닙니다");
     };
-    std::fs::write(saved.with_extension(extension), &bytes)?;
+    let file = std::fs::read(saved)?;
+    let Some(with) = mp4::with_cover(&file, &bytes, kind) else {
+        // Opus in WebM, say. Nothing is written rather than a file rewritten
+        // into something a player might not open.
+        bail!("이 형식에는 그림을 넣을 수 없습니다");
+    };
+    std::fs::write(saved, with)?;
     Ok(())
 }
 

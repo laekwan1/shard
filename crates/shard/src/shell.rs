@@ -267,6 +267,8 @@ pub enum Ask {
     SettingsReset,
     /// Open the folder the log is written into.
     LogsOpen,
+    /// Find out whether a site is blocked, and what gets through to it.
+    ProbeStart(String),
     SettingsSet { key: String, value: String },
     /// The window itself: what a page cannot do to the frame around it.
     WindowDrag,
@@ -327,6 +329,7 @@ pub fn read_ask(body: &str) -> Ask {
         "settings.read" => Ask::SettingsRead,
         "settings.reset" => Ask::SettingsReset,
         "logs.open" => Ask::LogsOpen,
+        "probe.start" => Ask::ProbeStart(field(body, "host").unwrap_or_default()),
         "settings.set" => Ask::SettingsSet {
             key: field(body, "key").unwrap_or_default(),
             value: field(body, "value").unwrap_or_default(),
@@ -613,6 +616,30 @@ pub fn respond(uri: &str, range: Option<&str>) -> http::Response<std::borrow::Co
     let path = path_of(uri);
     let build = http::Response::builder();
 
+    // The picture out of a file, for a row and for the screen a song plays on.
+    //
+    // Read from the front of the file rather than all of it: the header is where
+    // this lives, and a song is megabytes of sound after it.
+    if let Some(rest) = path.strip_prefix("/cover/") {
+        let id = rest.split('/').next().unwrap_or("").parse::<u64>().unwrap_or(0);
+        let Some(file) = media_path(id) else { return not_found() };
+        let Ok(mut handle) = std::fs::File::open(&file) else { return not_found() };
+        use std::io::Read;
+        let mut head = vec![0u8; 2 * 1024 * 1024];
+        let Ok(read) = handle.read(&mut head) else { return not_found() };
+        head.truncate(read);
+        let Some((picture, kind)) = crate::download::mp4::cover(&head) else {
+            return not_found();
+        };
+        return build
+            .status(200)
+            .header("Content-Type", if kind == "png" { "image/png" } else { "image/jpeg" })
+            .header("Content-Length", picture.len().to_string())
+            .header("Cache-Control", "no-store")
+            .body(std::borrow::Cow::Owned(picture))
+            .unwrap_or_else(|_| not_found());
+    }
+
     if let Some(rest) = path.strip_prefix("/media/") {
         let id = rest.split('/').next().unwrap_or("").parse::<u64>().unwrap_or(0);
         let Some(file) = media_path(id) else { return not_found() };
@@ -679,7 +706,8 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
             // The shell's own files are a handful of kilobytes already in the
             // executable: answering on the spot is faster than handing them to
             // a thread.
-            if !path_of(&uri).starts_with("/media/") {
+            let path = path_of(&uri);
+            if !path.starts_with("/media/") && !path.starts_with("/cover/") {
                 responder.respond(respond(&uri, range.as_deref()));
                 return;
             }
@@ -791,8 +819,15 @@ pub fn preview() -> Result<()> {
     let tray = Tray::build()?;
     tray.follow(&core.borrow());
 
+    // A probe in flight, if one has been started. Beside the downloads for the
+    // same reason: it reports from a thread of its own, and the beat is what
+    // carries anything said off-thread to the page.
+    let probing: Rc<RefCell<Option<crossbeam_channel::Receiver<crate::prober::Progress>>>> =
+        Rc::new(RefCell::new(None));
+
     let engine = core.clone();
     let jobs = saving.clone();
+    let started = probing.clone();
     let shell = open("Shard", move |shell, ask| match ask {
         Ask::Ready => {
             // A page that has just loaded knows nothing, whatever was last sent
@@ -887,6 +922,20 @@ pub fn preview() -> Result<()> {
             shell.say_engine(&engine.borrow());
         }
 
+        Ask::ProbeStart(host) => {
+            let core = engine.borrow();
+            if !core.running() {
+                shell.tell(r#"{"t":"probe","add":[{"text":"엔진이 꺼져 있으면 탐색할 수 없습니다.","ok":false}],"running":false}"#);
+                return;
+            }
+            // Accept a pasted address, not only a bare hostname.
+            let host = crate::config::normalise_host(&host);
+            if host.is_empty() {
+                return;
+            }
+            *started.borrow_mut() = Some(crate::prober::spawn(core.shared.clone(), host));
+            shell.tell(r#"{"t":"probe","add":[],"running":true,"clear":true}"#);
+        }
         Ask::LogsOpen => {
             let logs = uikit::config::app_dir(crate::config::APP_NAME).join("logs");
             // The folder, not the file: a log being written to is held open, and
@@ -1000,6 +1049,36 @@ pub fn preview() -> Result<()> {
         }
         // Every beat, and sent only when it reads differently from last time.
         shell.say_downloads(&saving.borrow());
+
+        // What the probe has to say since last time.
+        let mut lines = Vec::new();
+        let mut ended = false;
+        if let Some(rx) = probing.borrow().as_ref() {
+            while let Ok(progress) = rx.try_recv() {
+                ended |= crate::prober::is_last(&progress);
+                for (text, ok) in crate::prober::say(progress) {
+                    lines.push(format!(
+                        r#"{{"text":"{}","ok":{}}}"#,
+                        crate::shell::escape(&text),
+                        match ok {
+                            Some(true) => "true",
+                            Some(false) => "false",
+                            None => "null",
+                        }
+                    ));
+                }
+            }
+        }
+        if !lines.is_empty() || ended {
+            shell.tell(&format!(
+                r#"{{"t":"probe","add":[{}],"running":{}}}"#,
+                lines.join(","),
+                !ended
+            ));
+        }
+        if ended {
+            *probing.borrow_mut() = None;
+        }
         if drained.saved {
             // A new file is on a shelf: if the library is being looked at, it
             // shows up without anything being pressed.
@@ -1467,12 +1546,10 @@ impl Shell {
                     escape(&item.folder),
                     escape(&crate::library::human(item.bytes)),
                     escape(&crate::library::age(item.saved_at)),
-                    // The picture is served the same way the file is: a number
-                    // the page can ask for, never a path.
-                    match &item.cover {
-                        Some(cover) => register_media(cover).to_string(),
-                        None => "0".to_string(),
-                    },
+                    // The picture is inside the file, so it is the same number
+                    // the file is asked for — under `/cover/` rather than
+                    // `/media/`, which is what says to take it out.
+                    if item.cover { register_media(&item.path) } else { 0 },
                 )
             })
             .collect();

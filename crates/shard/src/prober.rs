@@ -74,6 +74,55 @@ pub fn spawn(shared: Arc<Shared>, host: String) -> Receiver<Progress> {
     rx
 }
 
+/// One step of a probe, as a line to put on screen: what happened, and whether
+/// it went well (`None` where that does not apply).
+///
+/// Here rather than in a window, because both windows show the same run and two
+/// wordings of the same step would be two accounts of it.
+pub fn say(progress: Progress) -> Vec<(String, Option<bool>)> {
+    match progress {
+        Progress::Started { host, rungs } => {
+            vec![(format!("{host} — {rungs}개 전략 시도"), None)]
+        }
+        Progress::Dns { system, encrypted, tampered } => {
+            let describe = |a: Option<String>| a.unwrap_or_else(|| "실패".to_string());
+            let mut lines = vec![(
+                format!("DNS — 시스템 {} / 암호화 {}", describe(system), describe(encrypted)),
+                Some(!tampered),
+            )];
+            if tampered {
+                lines.push(("두 응답이 다릅니다. DNS가 조작되고 있습니다.".to_string(), Some(false)));
+            }
+            lines
+        }
+        Progress::Baseline { reachable } => vec![(
+            if reachable {
+                "기준 연결 성공 — 우회가 필요 없습니다".to_string()
+            } else {
+                "기준 연결 차단됨 — 전략 탐색 시작".to_string()
+            },
+            Some(reachable),
+        )],
+        Progress::Attempt { index, label, ok, elapsed_ms } => {
+            vec![(format!("{}. {label} ({elapsed_ms}ms)", index + 1), Some(ok))]
+        }
+        Progress::Finished { winner } => vec![match winner {
+            Some(label) => (format!("성공: {label} — 저장됨"), Some(true)),
+            None => (
+                "통하는 전략을 찾지 못했습니다. DNS 줄이 정상이었다면 SNI 분할로는                  뚫리지 않는 차단(재조립형 DPI 또는 IP 차단)이며, 이 경우 Veil이 답입니다."
+                    .to_string(),
+                Some(false),
+            ),
+        }],
+        Progress::Error(e) => vec![(e, Some(false))],
+    }
+}
+
+/// Whether a step means the run is over.
+pub fn is_last(progress: &Progress) -> bool {
+    matches!(progress, Progress::Finished { .. } | Progress::Error(_))
+}
+
 /// Run a probe on the calling thread, discarding progress. Used by the
 /// automatic learner, which reports through the engine's event log instead.
 pub fn probe_blocking(shared: &Arc<Shared>, host: &str) -> Outcome {

@@ -320,7 +320,8 @@ button svg { display: block; }
   gap: 3px;
   flex: none;
   align-self: flex-start;
-  margin: 8px 0 0 20px;
+  /* The same gap from the left as from the strip above it. */
+  margin: 8px 0 0 8px;
   padding: 3px;
   background: var(--surface);
   border-radius: 12px 12px 0 0;
@@ -337,19 +338,19 @@ button svg { display: block; }
   bottom: 0;
   /* A short turn rather than a long sweep: the joint should read as a corner
      easing off, not as the control melting into the list. */
-  width: 6px;
-  height: 6px;
+  width: 3px;
+  height: 3px;
   background: var(--surface);
 }
 #shelves::before {
-  left: -6px;
-  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 6px, #000 6.5px);
-  mask-image: radial-gradient(circle at 0 0, transparent 6px, #000 6.5px);
+  left: -3px;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 3px, #000 3.5px);
+  mask-image: radial-gradient(circle at 0 0, transparent 3px, #000 3.5px);
 }
 #shelves::after {
-  right: -6px;
-  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 6px, #000 6.5px);
-  mask-image: radial-gradient(circle at 100% 0, transparent 6px, #000 6.5px);
+  right: -3px;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 3px, #000 3.5px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 3px, #000 3.5px);
 }
 .shelf {
   display: flex;
@@ -619,6 +620,35 @@ button svg { display: block; }
 #menu button.danger:hover { background: #7f1d1d; color: #fff; }
 #menu hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
 
+/* ---- the probe ------------------------------------------------------------ */
+
+#probe { max-width: 720px; margin: 0 auto 26px; }
+#probe .what-for { display: block; margin-top: 4px; font-size: 11px; line-height: 1.6; color: var(--muted); }
+#probe .ask { display: flex; gap: 6px; margin: 8px 0 0; }
+#probe input {
+  flex: 1;
+  height: 32px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--on-surface);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  outline: none;
+  user-select: text;
+}
+#probe input:focus { border-color: var(--accent); }
+#probe .go { padding: 0 16px; height: 32px; border-radius: 8px; font-size: 12px; color: var(--on-surface); border: 1px solid #ffffff45; }
+#probe .go:hover { color: #04252b; background: var(--accent); border-color: var(--accent); }
+#probe .go[disabled] { color: var(--dim); border-color: var(--divider); background: none; }
+/* What the run has said so far, oldest first. */
+#probe .lines { margin-top: 10px; max-height: 210px; overflow: auto; font-size: 11.5px; line-height: 1.7; color: var(--muted); }
+#probe .lines div { display: flex; gap: 7px; }
+#probe .lines .mark { flex: none; width: 10px; text-align: center; }
+#probe .lines .good .mark { color: var(--good); }
+#probe .lines .bad .mark { color: var(--bad); }
+
 /* ---- the player ----------------------------------------------------------- */
 
 #player {
@@ -668,7 +698,7 @@ button svg { display: block; }
 #scrub { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
 #scrub::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: 99px; background: var(--field); }
 #played { position: absolute; left: 0; height: 4px; width: 0; border-radius: 99px; background: var(--accent); }
-#knob { position: absolute; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
+#knob { position: absolute; width: 12px; height: 12px; margin-left: -3px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
 #scrub:hover #knob { opacity: 1; }
 
 /*
@@ -692,6 +722,11 @@ button svg { display: block; }
 #player.mini #now { display: none; }
 #player.mini #row { margin-top: 3px; }
 #player.mini #full { display: none; }
+/* Only on the strip. Full height the way out is the screen behind it or Esc;
+   on the strip there is no screen behind, so there has to be one here. */
+#shut { display: none; }
+#shut svg { width: 11px; height: 11px; }
+#player.mini #shut { display: grid; }
 /* The name goes on the strip's own line, where the note was. */
 #player.mini #title { display: block; }
 #title { display: none; font-size: 11.5px; color: var(--muted); max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

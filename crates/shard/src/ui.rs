@@ -963,51 +963,8 @@ impl ShardApp {
     fn pump_probe(&mut self) {
         let Some(probe) = self.probe.as_mut() else { return };
         while let Ok(progress) = probe.rx.try_recv() {
-            match progress {
-                Progress::Started { host, rungs } => {
-                    probe.lines.push((format!("{host} — {rungs}개 전략 시도"), None));
-                }
-                Progress::Dns { system, encrypted, tampered } => {
-                    let describe = |a: Option<String>| a.unwrap_or_else(|| "실패".to_string());
-                    probe.lines.push((
-                        format!("DNS — 시스템 {} / 암호화 {}", describe(system), describe(encrypted)),
-                        Some(!tampered),
-                    ));
-                    if tampered {
-                        probe.lines.push((
-                            "두 응답이 다릅니다. DNS가 조작되고 있습니다.".to_string(),
-                            Some(false),
-                        ));
-                    }
-                }
-                Progress::Baseline { reachable } => probe.lines.push((
-                    if reachable {
-                        "기준 연결 성공 — 우회가 필요 없습니다".to_string()
-                    } else {
-                        "기준 연결 차단됨 — 전략 탐색 시작".to_string()
-                    },
-                    Some(reachable),
-                )),
-                Progress::Attempt { index, label, ok, elapsed_ms } => probe
-                    .lines
-                    .push((format!("{}. {label} ({elapsed_ms}ms)", index + 1), Some(ok))),
-                Progress::Finished { winner } => {
-                    probe.finished = true;
-                    probe.lines.push(match winner {
-                        Some(label) => (format!("성공: {label} — 저장됨"), Some(true)),
-                        None => (
-                            "통하는 전략을 찾지 못했습니다. DNS 줄이 정상이었다면 SNI 분할로는 \
-                             뚫리지 않는 차단(재조립형 DPI 또는 IP 차단)이며, 이 경우 Veil이 답입니다."
-                                .to_string(),
-                            Some(false),
-                        ),
-                    });
-                }
-                Progress::Error(e) => {
-                    probe.finished = true;
-                    probe.lines.push((e, Some(false)));
-                }
-            }
+            probe.finished |= prober::is_last(&progress);
+            probe.lines.extend(prober::say(progress));
         }
     }
 }

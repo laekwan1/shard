@@ -56,8 +56,8 @@ pub struct Item {
     /// When it was saved, as seconds since the epoch.
     pub saved_at: u64,
     pub kind: Kind,
-    /// A picture kept beside it under the same name, if the download found one.
-    pub cover: Option<PathBuf>,
+    /// Whether the file carries a picture of its own inside it.
+    pub cover: bool,
 }
 
 /// Everything on a shelf, newest first.
@@ -108,14 +108,12 @@ fn sweep(dir: &Path, folder: &str, kind: Kind, out: &mut Vec<Item>) {
         if title.is_empty() {
             continue;
         }
-        // The picture is not a row of its own.
+        // The picture is not a row of its own. Left from when covers were kept
+        // beside files rather than inside them.
         if is_picture(&path) {
             continue;
         }
-        let cover = COVER_KINDS
-            .iter()
-            .map(|kind| path.with_extension(kind))
-            .find(|beside| beside.is_file());
+        let cover = carries_cover(&path);
         out.push(Item {
             path,
             title,
@@ -160,9 +158,23 @@ pub fn add_folder(kind: Kind, name: &str) -> bool {
     std::fs::create_dir_all(kind.folder().join(clean)).is_ok()
 }
 
-/// What a saved picture may be called. The address a cover comes from ends in
-/// `.jpg` whatever is actually sent, so the file is named for its own bytes.
+/// What a picture beside a file may be called, from when they were kept that
+/// way. Nothing writes these now; they are only skipped when a shelf is read.
 const COVER_KINDS: [&str; 3] = ["jpg", "webp", "png"];
+
+/// Whether a file has a picture inside it.
+///
+/// The header is at the front of everything saved here, so this reads the front
+/// of the file rather than the whole of it — a shelf of forty songs is forty of
+/// these every time it is opened.
+fn carries_cover(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    let mut head = vec![0u8; 256 * 1024];
+    let Ok(read) = file.read(&mut head) else { return false };
+    head.truncate(read);
+    crate::download::mp4::has_cover(&head)
+}
 
 fn is_picture(path: &Path) -> bool {
     path.extension()
@@ -289,22 +301,11 @@ pub fn move_to(item: &Item, folder: &str) -> bool {
         }
     }
     let Some(name) = item.path.file_name() else { return false };
-    let moved = std::fs::rename(&item.path, target.join(name)).is_ok();
-    if moved {
-        if let Some(cover) = &item.cover {
-            if let Some(name) = cover.file_name() {
-                let _ = std::fs::rename(cover, target.join(name));
-            }
-        }
-    }
-    moved
+    std::fs::rename(&item.path, target.join(name)).is_ok()
 }
 
-/// Delete a saved file for good, and the picture kept with it.
+/// Delete a saved file for good.
 pub fn delete(item: &Item) -> bool {
-    if let Some(cover) = &item.cover {
-        let _ = std::fs::remove_file(cover);
-    }
     std::fs::remove_file(&item.path).is_ok()
 }
 
@@ -325,14 +326,7 @@ pub fn rename(item: &Item, title: &str) -> bool {
     if target.exists() {
         return false;
     }
-    let renamed = std::fs::rename(&item.path, &target).is_ok();
-    if renamed {
-        if let Some(cover) = &item.cover {
-            let kind = cover.extension().and_then(|e| e.to_str()).unwrap_or("jpg");
-            let _ = std::fs::rename(cover, target.with_extension(kind));
-        }
-    }
-    renamed
+    std::fs::rename(&item.path, target).is_ok()
 }
 
 /// A folder name the file system will take.

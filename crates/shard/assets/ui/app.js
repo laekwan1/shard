@@ -207,8 +207,12 @@ power.addEventListener("click", () => {
 
 const note = document.getElementById("note");
 
+let engineOn = false;
+
 function paintEngine(state) {
   const on = !!state.running;
+  engineOn = on;
+  if (typeof markProbe === "function") markProbe();
   power.setAttribute("aria-pressed", String(on));
   power.classList.remove("busy");
   headline.textContent = state.headline;
@@ -399,9 +403,11 @@ function paintFiles() {
 
     // A frame out of the film at the head of its row. Music has no picture of
     // its own here, so only the video shelf carries one.
+    // The picture out of the file when it carries one, a frame out of the film
+    // when it does not. Nothing is kept beside the file either way.
     const shot = document.createElement("span");
     shot.className = "shot";
-    if (item.cover) shot.style.backgroundImage = "url(/media/" + item.cover + ")";
+    if (item.cover) shot.style.backgroundImage = "url(/cover/" + item.cover + ")";
     else if (shelf.kind === "video") wantShot(item, shot);
     else shot.classList.add("none");
 
@@ -680,7 +686,7 @@ function play(item) {
   const music = shelf.kind === "music";
   art.hidden = !music;
   // The picture the song was listed under, when the download kept one.
-  art.style.backgroundImage = item.cover ? "url(/media/" + item.cover + ")" : "";
+  art.style.backgroundImage = item.cover ? "url(/cover/" + item.cover + ")" : "";
   art.classList.toggle("covered", !!item.cover);
   video.style.visibility = music ? "hidden" : "visible";
   nowLine.textContent = item.title;
@@ -767,6 +773,7 @@ function another() {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+document.getElementById("shut").addEventListener("click", shutPlayer);
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
@@ -998,6 +1005,85 @@ function paintSettings(message) {
     }
     settingsEl.appendChild(section);
   }
+  settingsEl.appendChild(probeBlock());
+}
+
+// ---- finding out what is blocked -------------------------------------------
+//
+// Not a way of connecting: a way of asking. It tries the strategies in turn
+// against one name and keeps the one that gets through, which is what the
+// automatic learning does by itself for sites visited often enough — this is for
+// the one that is not.
+
+const probeLines = [];
+let probeRunning = false;
+let probeBox = null;
+let probeGo = null;
+
+function probeBlock() {
+  const block = document.createElement("section");
+  block.className = "group";
+  block.id = "probe";
+
+  const title = document.createElement("h2");
+  title.textContent = "차단 검사";
+  const what = document.createElement("small");
+  what.className = "what-for";
+  what.textContent = "여기 넣은 곳이 실제로 막히는지 확인하고, 통하는 전략을 찾아 저장합니다. 접속은 브라우저에서 평소처럼 하세요.";
+
+  const ask = document.createElement("div");
+  ask.className = "ask";
+  probeBox = document.createElement("input");
+  probeBox.spellcheck = false;
+  probeBox.placeholder = "example.com";
+  probeGo = document.createElement("button");
+  probeGo.className = "go";
+  probeGo.textContent = "탐색 시작";
+
+  const start = () => {
+    const host = probeBox.value.trim();
+    if (!host || probeRunning || !engineOn) return;
+    probeLines.length = 0;
+    probeRunning = true;
+    paintProbe();
+    send("probe.start", { host });
+  };
+  probeGo.addEventListener("click", start);
+  probeBox.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") start();
+  });
+
+  ask.append(probeBox, probeGo);
+  const lines = document.createElement("div");
+  lines.className = "lines";
+  block.append(title, what, ask, lines);
+  setTimeout(markProbe, 0);
+  return block;
+}
+
+function markProbe() {
+  if (!probeGo) return;
+  probeGo.disabled = probeRunning || !engineOn;
+  probeGo.textContent = probeRunning ? "탐색 중…" : engineOn ? "탐색 시작" : "엔진을 켜세요";
+}
+
+function paintProbe() {
+  const box = document.querySelector("#probe .lines");
+  if (!box) return;
+  box.textContent = "";
+  for (const line of probeLines) {
+    const row = document.createElement("div");
+    row.className = line.ok === true ? "good" : line.ok === false ? "bad" : "";
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.textContent = line.ok === true ? "✓" : line.ok === false ? "✕" : "·";
+    const text = document.createElement("span");
+    text.textContent = line.text;
+    row.append(mark, text);
+    box.appendChild(row);
+  }
+  box.scrollTop = box.scrollHeight;
+  markProbe();
 }
 
 // What to do with the screen rather than with any one setting: read the log,
@@ -1138,6 +1224,12 @@ window.__shard = {
         break;
       case "settings":
         paintSettings(message);
+        break;
+      case "probe":
+        if (message.clear) probeLines.length = 0;
+        for (const line of message.add || []) probeLines.push(line);
+        probeRunning = !!message.running;
+        paintProbe();
         break;
       case "frame":
         zoomed = !!message.zoomed;

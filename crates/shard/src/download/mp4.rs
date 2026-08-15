@@ -64,6 +64,100 @@ impl Sample {
     }
 }
 
+/// The picture kept inside a file, iTunes-style, and what kind it is.
+///
+/// `moov/udta/meta/ilst/covr/data`. Long-winded, but it is where every player
+/// looks, so a song carries its own cover rather than a second file beside it.
+pub fn cover(file: &[u8]) -> Option<(Vec<u8>, &'static str)> {
+    let (udta, udta_end) = find(file, &[b"moov", b"udta"])?;
+    let (meta, meta_end) = within(file, udta, udta_end, b"meta")?;
+    // `meta` is a full box: four bytes of version and flags before its children.
+    let (ilst, ilst_end) = within(file, meta + 4, meta_end, b"ilst")?;
+    let (covr, covr_end) = within(file, ilst, ilst_end, b"covr")?;
+    let (data, data_end) = within(file, covr, covr_end, b"data")?;
+    if data + 8 > data_end {
+        return None;
+    }
+    // The low byte of the flags says what the picture is.
+    let kind = match file[data + 3] {
+        14 => "png",
+        _ => "jpg",
+    };
+    Some((file[data + 8..data_end].to_vec(), kind))
+}
+
+/// Whether there is one, without reading the whole file.
+///
+/// The header sits at the front of everything this saves, so a short read
+/// settles it — and this is asked once per row when a shelf is opened.
+pub fn has_cover(head: &[u8]) -> bool {
+    head.windows(4).any(|four| four == b"covr")
+}
+
+/// The same file with a picture put into its header.
+///
+/// Only for a file made of fragments, which is what a stream downloaded in
+/// pieces is: in a plain MP4 the sample positions are counted from the start of
+/// the file, and making the header longer would move every one of them. In a
+/// fragmented one they are counted from each fragment, so the header can grow
+/// without anything else having to be told.
+pub fn with_cover(file: &[u8], picture: &[u8], kind: &str) -> Option<Vec<u8>> {
+    if find(file, &[b"moof"]).is_none() || cover(file).is_some() {
+        return None;
+    }
+    // Where the header starts and ends, headers included.
+    let (body, end) = find(file, &[b"moov"])?;
+    let start = body.checked_sub(8)?;
+    if &file[start + 4..start + 8] != b"moov" {
+        // A 64-bit length, which this does not rebuild.
+        return None;
+    }
+
+    let mut data = vec![0u8; 8];
+    // Version zero; the flags say what the picture is: 13 a JPEG, 14 a PNG.
+    data[3] = if kind == "png" { 14 } else { 13 };
+    data.extend_from_slice(picture);
+
+    let mut hdlr = vec![0u8; 8];
+    hdlr.extend_from_slice(b"mdirappl");
+    hdlr.extend_from_slice(&[0u8; 13]);
+
+    let ilst = boxed(b"covr", &boxed(b"data", &data));
+    let mut meta = vec![0u8; 4];
+    meta.extend_from_slice(&boxed(b"hdlr", &hdlr));
+    meta.extend_from_slice(&boxed(b"ilst", &ilst));
+    let udta = boxed(b"udta", &boxed(b"meta", &meta));
+
+    let mut moov = Vec::with_capacity(end - start + udta.len());
+    moov.extend_from_slice(&file[body..end]);
+    moov.extend_from_slice(&udta);
+
+    let mut out = Vec::with_capacity(file.len() + udta.len() + 16);
+    out.extend_from_slice(&file[..start]);
+    out.extend_from_slice(&boxed(b"moov", &moov));
+    out.extend_from_slice(&file[end..]);
+    Some(out)
+}
+
+/// A length, a name, and the body between them.
+fn boxed(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut out = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+    out.extend_from_slice(kind);
+    out.extend_from_slice(body);
+    out
+}
+
+/// One named box among the children of a range.
+fn within(file: &[u8], from: usize, to: usize, want: &[u8; 4]) -> Option<(usize, usize)> {
+    let mut found = None;
+    boxes(file, from, to, |kind, body, end| {
+        if found.is_none() && kind == want {
+            found = Some((body, end));
+        }
+    });
+    found
+}
+
 /// Walk the boxes at one level, calling `visit` for each.
 ///
 /// A box is a length, a four-character kind, and a body — so the whole format
@@ -464,6 +558,27 @@ mod tests {
                 )],
             )],
         )
+    }
+
+    #[test]
+    fn a_picture_goes_into_the_header_and_comes_back_out() {
+        // A file made of fragments, which is the only kind this touches.
+        let mut file = av1_init();
+        file.extend_from_slice(&boxed(b"moof", &[0u8; 8]));
+        file.extend_from_slice(&boxed(b"mdat", &[7u8; 16]));
+        assert!(cover(&file).is_none());
+
+        let picture = vec![0xff, 0xd8, 0xff, 1, 2, 3];
+        let with = with_cover(&file, &picture, "jpg").expect("a header to put it in");
+        assert!(has_cover(&with));
+        assert_eq!(cover(&with), Some((picture.clone(), "jpg")));
+
+        // What was already there is still there, and where it was: the sound is
+        // counted from its own fragment, not from the start of the file.
+        assert_eq!(stream(&with).unwrap(), stream(&file).unwrap());
+        assert_eq!(&with[with.len() - 16..], &[7u8; 16]);
+        // And it is not put in twice.
+        assert!(with_cover(&with, &picture, "jpg").is_none());
     }
 
     #[test]

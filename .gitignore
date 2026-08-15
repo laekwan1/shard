@@ -44,5 +44,8 @@ android/**/jniLibs/
 # Tor's own data files, shipped with it rather than written by us.
 /release/PC/Veil/tor/
 
+# WebView2's own store, made beside whichever executable ran last.
+/release/**/*.WebView2/
+
 # Machine-local editor settings, which are one person's and not the project's.
 .claude/settings.local.json
