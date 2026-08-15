@@ -702,6 +702,26 @@ pub const CONTROL: &str = r#"
     p.appendChild(row('닫기', '', window.__shardClose));
   };
 
+  // Something already true, with the way past it on the panel.
+  //
+  // Said every time rather than once and then let through: a warning that stops
+  // warning is one nobody can rely on. The way past it is a row, so it takes one
+  // press rather than pressing the same thing again somewhere else.
+  window.__shardAgain = function (text, itag) {
+    button().style.display = 'none';
+    var p = panel();
+    p.textContent = '';
+    p.appendChild(heading('영상 받기'));
+    var m = document.createElement('div');
+    m.textContent = text;
+    style(m, { padding: '14px', color: '#8a92a2', fontSize: '12px', lineHeight: '1.5' });
+    p.appendChild(m);
+    p.appendChild(row('그래도 다시 받기', '', function () {
+      window.ipc.postMessage(JSON.stringify({ choose: itag, force: 1 }));
+    }));
+    p.appendChild(row('닫기', '', window.__shardClose));
+  };
+
   window.__shardSay = function (text, closable) {
     button().style.display = 'none';
     var p = panel();
@@ -758,6 +778,14 @@ pub const CONTROL: &str = r#"
   window.addEventListener('scroll', soon, { passive: true });
 })();
 "#;
+
+/// Ask the page to say something, with a row that goes ahead anyway.
+pub fn again_script(text: &str, itag: u32) -> String {
+    format!(
+        "window.__shardAgain && window.__shardAgain(\"{}\", {itag});",
+        crate::shell::escape(text)
+    )
+}
 
 /// Ask the page to show a list of qualities.
 pub fn list_script(rows: &[(u32, String, String)]) -> String {

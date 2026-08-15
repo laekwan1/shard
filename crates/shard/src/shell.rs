@@ -256,7 +256,9 @@ pub enum Ask {
     TabShut(usize),
     Steer { what: String, url: String },
     /// A page answered the download panel — which quality was chosen.
-    Chose(u64),
+    /// A row on the quality list. `anyway` is set when it was pressed past a
+    /// warning that the file is already saved.
+    Chose { itag: u64, anyway: bool },
     /// What a page can give, for the list to be built from.
     PageOffer(String),
     /// The settings: read them, or put one back.
@@ -321,7 +323,7 @@ pub fn read_ask(body: &str) -> Ask {
             what: field(body, "what").unwrap_or_else(|| "go".into()),
             url: field(body, "url").unwrap_or_default(),
         },
-        "chose" => Ask::Chose(number(body, "itag").unwrap_or(0)),
+        "chose" => Ask::Chose { itag: number(body, "itag").unwrap_or(0), anyway: false },
         "settings.read" => Ask::SettingsRead,
         "settings.reset" => Ask::SettingsReset,
         "logs.open" => Ask::LogsOpen,
@@ -832,8 +834,8 @@ pub fn preview() -> Result<()> {
             let script = jobs.borrow_mut().qualities(&payload);
             shell.tell_page(&script);
         }
-        Ask::Chose(itag) => {
-            let script = jobs.borrow_mut().begin(itag as u32);
+        Ask::Chose { itag, anyway } => {
+            let script = jobs.borrow_mut().begin(itag as u32, anyway);
             shell.tell_page(&script);
             shell.say_downloads(&jobs.borrow());
         }
@@ -1289,7 +1291,7 @@ impl Shell {
         if payload.contains("\"ask\"") {
             self.tell_page(crate::download::youtube::ASK);
         } else if let Some(itag) = crate::downloads::chosen(payload) {
-            self.answer(Ask::Chose(itag as u64));
+            self.answer(Ask::Chose { itag: itag as u64, anyway: crate::downloads::forced(payload) });
         } else {
             self.answer(Ask::PageOffer(payload.to_string()));
         }

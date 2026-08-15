@@ -106,20 +106,23 @@ pub fn run(
         }
         whole("음성", done.audio, job.audio.bytes)?;
 
-        if job.audio_only {
+        let saved = if job.audio_only {
             // The stream is already a container a player will open, so it is
             // moved rather than rebuilt — nothing is re-encoded and nothing is
             // repackaged.
             let extension = audio_extension(&std::fs::read(&audio_path)?);
             let output = job.into.join(format!("{}.{extension}", safe_name(&job.title)));
             std::fs::copy(&audio_path, &output)?;
-            return Ok(output);
-        }
-        let saved = join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))?;
-        // A picture beside the file, under the same name. A song has no cover of
-        // its own — the sound is all that was kept — so this is the only one it
-        // will ever have, and it is a few tens of kilobytes for a list that
-        // otherwise reads as forty identical rows.
+            output
+        } else {
+            join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))?
+        };
+
+        // A picture beside the file, under the same name.
+        //
+        // After both ways of saving, not just one: a song is the case this is
+        // for — it has no picture of its own, and the music path used to return
+        // before ever reaching here.
         if !job.cover.is_empty() {
             if let Err(e) = keep_cover(&client, &job.cover, &saved) {
                 tracing::warn!("could not save the cover: {e:#}");

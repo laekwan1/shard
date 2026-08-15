@@ -57,6 +57,11 @@ impl Job {
 /// from a click on a real video row. No real format uses it.
 pub const MUSIC_ITAG: u32 = u32::MAX;
 
+/// Whether the page said to go ahead despite the warning.
+pub fn forced(payload: &str) -> bool {
+    payload.contains("\"force\"")
+}
+
 /// The itag in `{"choose":401}`, without pulling in a parser for one number.
 pub fn chosen(payload: &str) -> Option<u32> {
     let at = payload.find("\"choose\"")?;
@@ -177,14 +182,11 @@ pub struct Downloads {
     offer: Option<Offer>,
     pub list: Vec<Job>,
     next_id: u64,
-    /// What was last warned about as already being in the library, so pressing
-    /// the same row again means "yes, again".
-    asked_again: Option<String>,
 }
 
 impl Downloads {
     pub fn new(shared: Arc<Shared>) -> Self {
-        Self { shared, offer: None, list: Vec::new(), next_id: 1, asked_again: None }
+        Self { shared, offer: None, list: Vec::new(), next_id: 1 }
     }
 
     /// What the settings say about sound, in the form the chooser wants.
@@ -254,7 +256,7 @@ impl Downloads {
     /// Returns the line to put on the page. It says so and goes: the download
     /// runs on, and how far along it is belongs in the Shard window rather than
     /// on top of what is being watched.
-    pub fn begin(&mut self, itag: u32) -> String {
+    pub fn begin(&mut self, itag: u32, anyway: bool) -> String {
         let Some(offer) = self.offer.clone() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
         };
@@ -312,18 +314,15 @@ impl Downloads {
             return youtube::say_script("이미 받고 있습니다.", true);
         }
 
-        // Already on the shelf, from some other day. Said rather than refused:
-        // a file may be worth having again — the first one was cut short, or
-        // was saved before something in here was fixed — so the second press of
-        // the same row is the answer to the question.
-        if self.asked_again.as_deref() != Some(key.as_str())
-            && already_saved(if audio_only { crate::library::Kind::Music } else { crate::library::Kind::Video }, &title)
-        {
-            self.asked_again = Some(key);
-            return youtube::say_script("이미 보관함에 있습니다.
-다시 받으려면 한 번 더 누르세요.", true);
+        // Already on the shelf, from some other day. Said rather than refused —
+        // a file may be worth having again, cut short the first time or saved
+        // before something in here was fixed — and the way past it is on the
+        // panel, so it is one press rather than finding the row again.
+        let shelf =
+            if audio_only { crate::library::Kind::Music } else { crate::library::Kind::Video };
+        if !anyway && already_saved(shelf, &title) {
+            return youtube::again_script("이미 보관함에 있습니다.", itag);
         }
-        self.asked_again = None;
 
         let (tx, rx) = std::sync::mpsc::channel::<Step>();
         let cancel = Arc::new(AtomicBool::new(false));

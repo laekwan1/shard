@@ -538,14 +538,14 @@ let menuFor = null;
 let menuRow = null;
 let menuFolder = null;
 
-// One menu, two things it can be about: the file under the pointer, or the
-// folder tab under it. What belongs to the other is put away rather than a
-// second menu being built beside this one.
+// One menu, three things it can be about: the file under the pointer, the folder
+// tab under it, or the place in what is playing. What belongs to the others is
+// put away rather than a second menu being built beside this one.
 function openMenu(x, y, on) {
   menuFor = on.file || null;
   menuRow = on.row || null;
   menuFolder = on.folder || null;
-  const about = menuFolder ? "folder" : "file";
+  const about = on.spot ? "spot" : menuFolder ? "folder" : "file";
   for (const el of menu.querySelectorAll("[data-on]")) {
     el.hidden = el.dataset.on !== about;
   }
@@ -579,6 +579,17 @@ for (const button of menu.querySelectorAll("button")) {
     const row = menuRow;
     const folder = menuFolder;
     closeMenu();
+    if (button.dataset.do === "hold" || button.dataset.do === "forget") {
+      if (!playing) return;
+      if (button.dataset.do === "hold") {
+        localStorage.setItem("at:" + playing.key, String(video.currentTime || 0));
+        flash("여기서부터 다시 재생합니다");
+      } else {
+        localStorage.removeItem("at:" + playing.key);
+        flash("처음부터 재생합니다");
+      }
+      return;
+    }
     if (button.dataset.do === "dropFolder") {
       if (folder) send("library.dropFolder", { kind: shelf.kind, name: folder });
       return;
@@ -652,12 +663,15 @@ const nextButton = document.getElementById("next");
 
 let playing = null;
 
-// Positions written under the old key, which was the address's own number and
-// meant a different file every run. They cannot be matched to anything now, and
-// left there they go on starting videos in the wrong place.
-for (let i = localStorage.length - 1; i >= 0; i--) {
-  const key = localStorage.key(i);
-  if (key && /^at:\d+$/.test(key)) localStorage.removeItem(key);
+// Every place the old rule wrote down by itself. None of them were asked for,
+// and they are why files opened in the middle; the ones put down by hand from
+// here on are kept.
+if (localStorage.getItem("at:byhand") !== "1") {
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith("at:")) localStorage.removeItem(key);
+  }
+  localStorage.setItem("at:byhand", "1");
 }
 
 function play(item) {
@@ -673,14 +687,14 @@ function play(item) {
   titleLine.textContent = item.title;
   video.src = "/media/" + item.id;
   video.play().catch(() => {});
-  // Where it left off, remembered per file so a long video is not started over.
+  // From the beginning, unless a place was put down by hand on this file.
   //
-  // Under the file's own name, not the number the address uses: that number is
-  // handed out fresh each run and means a different file the next time, so what
-  // came back was some other video's position — which is why films started in
-  // the middle of nowhere.
+  // It used to remember where everything was left, always, and start there —
+  // which meant nothing ever played from the start again and there was no
+  // saying why a film opened where it did. Now it is asked for: right-click,
+  // save the place, and only that file comes back to it.
   const at = Number(localStorage.getItem("at:" + item.key) || 0);
-  if (at > 5) video.currentTime = at;
+  if (at > 1) video.currentTime = at;
   syncPlayer();
 }
 
@@ -725,24 +739,25 @@ nextButton.addEventListener("click", () => step(1));
 
 const onwardButton = document.getElementById("onward");
 const shuffleButton = document.getElementById("shuffle");
-let onward = localStorage.getItem("play:onward") !== "off";
-let shuffling = localStorage.getItem("play:shuffle") === "on";
+
+// One of three things, not two switches that can both be on: in order, out of
+// order, or neither — and neither means this file and then nothing.
+let mode = localStorage.getItem("play:mode");
+if (mode !== "order" && mode !== "shuffle") mode = "order";
 
 function markModes() {
-  onwardButton.classList.toggle("on", onward);
-  shuffleButton.classList.toggle("on", shuffling);
+  onwardButton.classList.toggle("on", mode === "order");
+  shuffleButton.classList.toggle("on", mode === "shuffle");
 }
 
-onwardButton.addEventListener("click", () => {
-  onward = !onward;
-  localStorage.setItem("play:onward", onward ? "on" : "off");
+function setMode(want) {
+  mode = mode === want ? "" : want;
+  localStorage.setItem("play:mode", mode);
   markModes();
-});
-shuffleButton.addEventListener("click", () => {
-  shuffling = !shuffling;
-  localStorage.setItem("play:shuffle", shuffling ? "on" : "off");
-  markModes();
-});
+}
+
+onwardButton.addEventListener("click", () => setMode("order"));
+shuffleButton.addEventListener("click", () => setMode("shuffle"));
 markModes();
 
 // One of the others on the shelf, never the one just heard.
@@ -757,19 +772,16 @@ video.addEventListener("click", () => (video.paused ? video.play() : video.pause
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
 video.addEventListener("pause", () => (playButton.innerHTML = PLAY));
 video.addEventListener("ended", () => {
-  if (playing) localStorage.removeItem("at:" + playing.key);
   playButton.innerHTML = PLAY;
-  if (!playing) return;
-  // On to the next by itself, unless that was asked not to happen. Out of order
-  // if that was asked for; otherwise down the list, stopping at the end rather
-  // than going round — a list that never stops is a list nobody asked to hear
-  // twice.
-  if (shuffling) {
+  if (!playing || !mode) return;
+  // Out of order if that is what is set; otherwise down the list, stopping at
+  // the end rather than going round — a list that never stops is a list nobody
+  // asked to hear twice.
+  if (mode === "shuffle") {
     const next = another();
     if (next) play(next);
     return;
   }
-  if (!onward) return;
   const list = shown();
   const at = list.findIndex((i) => i.id === playing.id);
   if (at >= 0 && at + 1 < list.length) play(list[at + 1]);
@@ -784,7 +796,6 @@ video.addEventListener("timeupdate", () => {
   const at = video.currentTime || 0;
   markScrub(length ? at / length : 0);
   clock.textContent = say(at) + " / " + say(length);
-  if (playing && at > 5) localStorage.setItem("at:" + playing.key, String(at));
 });
 
 function say(seconds) {
@@ -883,6 +894,22 @@ volume.addEventListener("input", () => {
   video.volume = Number(volume.value);
   video.muted = false;
   muteButton.innerHTML = video.volume ? LOUD : QUIET;
+});
+
+// A word on the picture, said and gone.
+function flash(text) {
+  nowLine.textContent = text;
+  clearTimeout(flash.timer);
+  flash.timer = setTimeout(() => {
+    nowLine.textContent = playing ? playing.title : "";
+  }, 1600);
+}
+
+// Where a place is put down, and taken back.
+document.getElementById("stage").addEventListener("contextmenu", (e) => {
+  if (!playing) return;
+  e.preventDefault();
+  openMenu(e.clientX, e.clientY, { spot: true });
 });
 
 document.getElementById("full").addEventListener("click", () => {
