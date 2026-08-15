@@ -153,6 +153,26 @@ object Library {
     }
 
     /** Remove a saved file for good. */
+    /**
+     * Give a saved file another name, keeping the extension it has.
+     *
+     * The extension is not the user's to type: it says what the file is, and a
+     * title typed over it would leave a video nothing will open.
+     */
+    fun rename(context: Context, item: Item, title: String): Boolean {
+        val clean = clean(title)
+        if (clean.isBlank()) return false
+        val extension = item.name.substringAfterLast('.', "")
+        val whole = if (extension.isBlank()) clean else "$clean.$extension"
+        if (whole == item.name) return false
+        return runCatching {
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, whole)
+            }
+            context.contentResolver.update(item.uri, values, null, null) > 0
+        }.getOrDefault(false)
+    }
+
     fun delete(context: Context, item: Item): Boolean =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching { context.contentResolver.delete(item.uri, null, null) > 0 }

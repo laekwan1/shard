@@ -237,6 +237,27 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         }
     }
 
+    /** Rename where the name is, which is the only place it means anything. */
+    private fun askForName(item: Library.Item) {
+        val box = android.widget.EditText(activity).apply {
+            setText(item.title)
+            setSelection(text.length)
+            setSingleLine()
+        }
+        MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.library_rename)
+            .setView(box)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val wanted = box.text.toString()
+                work.execute {
+                    val done = Library.rename(activity, item, wanted)
+                    ui.post { if (done) reload() else toast(activity.getString(R.string.library_rename_failed)) }
+                }
+            }
+            .show()
+    }
+
     /**
      * Put one file before or after another and remember the whole shelf.
      *
@@ -457,6 +478,24 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     }
 
     init {
+        // Held down on what is playing: where it should start from next time.
+        //
+        // On the picture rather than in the row's menu — it is about this moment
+        // in this file, and the moment is on screen while the finger is on it.
+        stage.setOnLongClickListener {
+            val item = playing ?: return@setOnLongClickListener false
+            MaterialAlertDialogBuilder(activity)
+                .setTitle(item.title)
+                .setItems(
+                    arrayOf(
+                        activity.getString(R.string.library_hold),
+                        activity.getString(R.string.library_hold_forget),
+                    ),
+                ) { _, which -> if (which == 0) holdHere(item) else forgetHold(item) }
+                .show()
+            true
+        }
+
         // Below the status bar, not under it.
         //
         // The browser pads itself for the bars; this screen lies over the top of
@@ -1367,32 +1406,19 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     // ---- what can be done to one --------------------------------------------
 
     private fun showMenu(anchor: View, item: Library.Item) {
+        // Two things, and both are about the file itself.
+        //
+        // Filing it somewhere is done by carrying it there — the gesture says
+        // where it is going, which a list of folder names cannot — and where it
+        // should start from is set on the picture while it plays. What is left
+        // here is what has nowhere else to be.
         val menu = PopupMenu(activity, anchor)
-        if (item.folder.isNotBlank()) {
-            menu.menu.add(0, MOVE_OUT, 0, R.string.library_move_out)
-        }
-        folders.filter { it != item.folder }.forEachIndexed { at, name ->
-            menu.menu.add(1, FOLDER_BASE + at, 1, name)
-        }
-        menu.menu.add(0, NEW_FOLDER, 2, R.string.library_new_folder)
-        // Where this one should start from. Offered on the file that is playing,
-        // and the way back offered on any file that has been given one.
-        if (playing?.id == item.id) menu.menu.add(0, HOLD, 3, R.string.library_hold)
-        if (Library.holdAt(activity, item) > 0) {
-            menu.menu.add(0, FORGET_HOLD, 4, R.string.library_hold_forget)
-        }
-        menu.menu.add(0, DELETE, 5, R.string.library_delete)
+        menu.menu.add(0, RENAME, 0, R.string.library_rename)
+        menu.menu.add(0, DELETE, 1, R.string.library_delete)
         menu.setOnMenuItemClickListener { chosen ->
-            when (val id = chosen.itemId) {
-                MOVE_OUT -> moveTo(item, "")
-                NEW_FOLDER -> askForFolder(item)
-                HOLD -> holdHere(item)
-                FORGET_HOLD -> forgetHold(item)
+            when (chosen.itemId) {
+                RENAME -> askForName(item)
                 DELETE -> confirmDelete(item)
-                else -> if (id >= FOLDER_BASE) {
-                    val names = folders.filter { it != item.folder }
-                    names.getOrNull(id - FOLDER_BASE)?.let { moveTo(item, it) }
-                }
             }
             true
         }
@@ -1612,9 +1638,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         const val NEW_FOLDER = 2
         const val DELETE = 3
 
-        /** Start this one where it is now, and take that back. */
-        const val HOLD = 4
-        const val FORGET_HOLD = 5
+        /** The name, changed where it is written. */
+        const val RENAME = 6
 
         /** How long the controls stay up after being asked for. */
         const val CONTROLS_MS = 3_000

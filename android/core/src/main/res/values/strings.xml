@@ -51,6 +51,8 @@
     <string name="library_hold_saved">%1$s 부터 다시 재생합니다</string>
     <string name="library_hold_cleared">처음부터 재생합니다</string>
     <string name="library_hold_needs_playing">재생 중일 때 저장할 수 있습니다</string>
+    <string name="library_rename">이름 바꾸기</string>
+    <string name="library_rename_failed">이름을 바꾸지 못했습니다</string>
     <string name="library_delete">삭제</string>
     <string name="library_delete_ask">%1$s 을(를) 삭제할까요? 되돌릴 수 없습니다.</string>
     <string name="library_deleted">삭제했습니다</string>
