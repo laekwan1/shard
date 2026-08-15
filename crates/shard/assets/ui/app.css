@@ -369,8 +369,10 @@ button svg { display: block; }
   flex: none;
   background: var(--surface);
   /* A line above as well: the switch is a control, the panel below is a place,
-     and without it the two read as one block. */
-  border-top: 1px solid var(--divider);
+     and without it the two read as one block. Light rather than the usual
+     divider — that one is darker than the panel it would sit on, and a dark line
+     on a dark ground is not a line. */
+  border-top: 1px solid #ffffff1f;
   border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
