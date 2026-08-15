@@ -188,8 +188,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         },
     )
     private val thumbCache = android.util.LruCache<android.net.Uri, android.graphics.Bitmap>(48)
-    /** A soft rectangle, not a circle: what is in it is a picture, not a face. */
-    private val tileCorner = 7f * activity.resources.displayMetrics.density
+    private val tileCorner = 11f * activity.resources.displayMetrics.density
     private val tilePad = (14 * activity.resources.displayMetrics.density).toInt()
     private val mutedTint =
         android.content.res.ColorStateList.valueOf(activity.getColor(R.color.muted))

@@ -321,36 +321,10 @@ button svg { display: block; }
   flex: none;
   align-self: stretch;
   /* The width of the list it opens onto, less the same hair on every side. */
-  margin: 4px 4px 0;
+  margin: 4px;
   padding: 3px;
   background: var(--surface);
-  border-radius: 12px 12px 0 0;
-}
-/*
-    The base widens into the panel below rather than rounding away from it: the
-    corner is cut out of a square of the panel's colour, so the control's sides
-    run into the list as one shape.
-*/
-#shelves::before,
-#shelves::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  /* A short turn rather than a long sweep: the joint should read as a corner
-     easing off, not as the control melting into the list. */
-  width: 5px;
-  height: 5px;
-  background: var(--surface);
-}
-#shelves::before {
-  left: -5px;
-  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 5px, #000 5.5px);
-  mask-image: radial-gradient(circle at 0 0, transparent 5px, #000 5.5px);
-}
-#shelves::after {
-  right: -5px;
-  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 5px, #000 5.5px);
-  mask-image: radial-gradient(circle at 100% 0, transparent 5px, #000 5.5px);
+  border-radius: 12px;
 }
 .shelf {
   /* Half each of whatever the row is. */
