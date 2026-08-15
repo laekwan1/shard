@@ -23,7 +23,7 @@ const TRIALS: usize = 2;
 pub enum Progress {
     Started { host: String, rungs: usize },
     Dns { system: Option<String>, encrypted: Option<String>, tampered: bool },
-    Baseline { reachable: bool },
+    Baseline { reachable: bool, addr: SocketAddr },
     Attempt { index: usize, label: String, ok: bool, elapsed_ms: u64 },
     Finished { winner: Option<String> },
     Error(String),
@@ -95,11 +95,14 @@ pub fn say(progress: Progress) -> Vec<(String, Option<bool>)> {
             }
             lines
         }
-        Progress::Baseline { reachable } => vec![(
+        // The address every rung below is tried against. Named, because a run
+        // where everything fails at once is nearly always a run aimed at the
+        // wrong place — and nothing else on screen would say so.
+        Progress::Baseline { reachable, addr } => vec![(
             if reachable {
-                "기준 연결 성공 — 우회가 필요 없습니다".to_string()
+                format!("기준 연결 성공 ({}) — 우회가 필요 없습니다", addr.ip())
             } else {
-                "기준 연결 차단됨 — 전략 탐색 시작".to_string()
+                format!("기준 연결 차단됨 ({}) — 전략 탐색 시작", addr.ip())
             },
             Some(reachable),
         )],
@@ -159,7 +162,7 @@ fn execute(shared: &Arc<Shared>, host: &str, report: &dyn Fn(Progress)) -> Outco
         let _guard = Override::install(shared, host, Strategy::passthrough());
         trial(addr, host)
     };
-    report(Progress::Baseline { reachable: baseline });
+    report(Progress::Baseline { reachable: baseline, addr });
     if baseline {
         report(Progress::Finished { winner: None });
         // Reaching the site at the encrypted answer's address while the system
@@ -248,8 +251,16 @@ pub fn reachable(shared: &Arc<Shared>, host: &str) -> bool {
 /// strategy the browser cannot actually use — which is exactly what a probe is
 /// supposed to rule out.
 fn request_completes(addr: SocketAddr, host: &str) -> bool {
-    let Ok(runtime) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
-        return false;
+    // Said out loud when it goes wrong. Everything below answers with a plain
+    // yes or no, and a run where every rung failed in no time at all is a run
+    // that never reached the network — which reads the same as "all blocked"
+    // unless the reason is written down somewhere.
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            tracing::warn!("probe could not start a runtime: {e}");
+            return false;
+        }
     };
     runtime.block_on(async {
         let client = reqwest::Client::builder()
@@ -261,8 +272,20 @@ fn request_completes(addr: SocketAddr, host: &str) -> bool {
             .pool_max_idle_per_host(0)
             .user_agent("Mozilla/5.0")
             .build();
-        let Ok(client) = client else { return false };
-        client.get(format!("https://{host}/")).send().await.is_ok()
+        let client = match client {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::warn!("probe could not build a client: {e}");
+                return false;
+            }
+        };
+        match client.get(format!("https://{host}/")).send().await {
+            Ok(_) => true,
+            Err(e) => {
+                tracing::info!("probe request to {host} at {addr} failed: {e}");
+                false
+            }
+        }
     })
 }
 
@@ -334,6 +357,20 @@ mod tests {
     use crate::config::{Config, Scope};
     use crate::desync;
     use crate::strategy::Desync;
+
+    #[test]
+    fn the_probe_can_build_the_client_it_tests_with() {
+        // Nothing here touches the network. It is the step before that: if the
+        // client cannot be built at all, every rung fails in no time and the
+        // screen reads as though the whole internet were blocked.
+        let client = reqwest::Client::builder()
+            .timeout(READ_TIMEOUT + CONNECT_TIMEOUT)
+            .resolve("example.com", "93.184.216.34:443".parse().unwrap())
+            .pool_max_idle_per_host(0)
+            .user_agent("Mozilla/5.0")
+            .build();
+        assert!(client.is_ok(), "{:?}", client.err());
+    }
 
     #[test]
     fn exact_keys_outrank_suffix_patterns() {

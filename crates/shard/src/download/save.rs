@@ -142,18 +142,57 @@ pub fn run(
 /// Inside rather than beside: a music player, Explorer and this program all look
 /// in the same place for a cover, and one file is one file.
 fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Result<()> {
-    let response = client.get(url).send()?;
-    if !response.status().is_success() {
-        bail!("서버가 {} 로 응답했습니다", response.status().as_u16());
+    // The addresses to try, largest first. The biggest is not always there —
+    // a song uploaded as a still often has no full-size picture — and what
+    // comes back is not always the format the address promises.
+    let mut tried = Vec::new();
+    for url in also_try(url) {
+        match fetch_picture(client, &url) {
+            Ok(found) => {
+                tried.clear();
+                return put_in(found, saved);
+            }
+            Err(e) => tried.push(format!("{url}: {e}")),
+        }
     }
-    let bytes = response.bytes()?;
+    bail!("{}", tried.join(" / "));
+}
+
+/// The same picture at smaller sizes, for when the largest is missing.
+fn also_try(url: &str) -> Vec<String> {
+    let mut all = vec![url.to_string()];
+    if let Some((base, name)) = url.rsplit_once('/') {
+        for other in ["hqdefault.jpg", "mqdefault.jpg"] {
+            if name != other {
+                all.push(format!("{base}/{other}"));
+            }
+        }
+    }
+    all
+}
+
+fn fetch_picture(client: &reqwest::blocking::Client, url: &str) -> Result<(Vec<u8>, &'static str)> {
+    // Asked for as a photograph. Without this the answer to an address ending
+    // in `.jpg` is as likely to be AVIF, which no music player would know what
+    // to do with once it was inside the file.
+    let response = client.get(url).header("Accept", "image/jpeg,image/png;q=0.9").send()?;
+    if !response.status().is_success() {
+        bail!("{}", response.status().as_u16());
+    }
+    let bytes = response.bytes()?.to_vec();
     // A cover is tens of kilobytes; anything far larger is not one.
     if bytes.is_empty() || bytes.len() > 4 * 1024 * 1024 {
-        bail!("그림이 아닙니다 ({} 바이트)", bytes.len());
+        bail!("{} 바이트", bytes.len());
     }
-    let Some(kind) = picture_kind(&bytes) else {
-        bail!("그림이 아닙니다");
-    };
+    match picture_kind(&bytes) {
+        // Only these two go inside a file: they are the two the format names.
+        Some(kind @ ("jpg" | "png")) => Ok((bytes, kind)),
+        Some(other) => bail!("{other}"),
+        None => bail!("그림이 아님"),
+    }
+}
+
+fn put_in((bytes, kind): (Vec<u8>, &'static str), saved: &Path) -> Result<()> {
     let file = std::fs::read(saved)?;
     let Some(with) = mp4::with_cover(&file, &bytes, kind) else {
         // Opus in WebM, say. Nothing is written rather than a file rewritten
@@ -178,6 +217,11 @@ pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
     }
     if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
         return Some("webp");
+    }
+    // Named so a log line says what actually arrived; nothing puts one of these
+    // into a file.
+    if bytes.len() > 12 && &bytes[4..8] == b"ftyp" && &bytes[8..12] == b"avif" {
+        return Some("avif");
     }
     None
 }

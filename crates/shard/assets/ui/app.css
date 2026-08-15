@@ -321,7 +321,7 @@ button svg { display: block; }
   flex: none;
   align-self: flex-start;
   /* The same gap from the left as from the strip above it. */
-  margin: 8px 0 0 8px;
+  margin: 4px 0 0 4px;
   padding: 3px;
   background: var(--surface);
   border-radius: 12px 12px 0 0;
@@ -338,19 +338,19 @@ button svg { display: block; }
   bottom: 0;
   /* A short turn rather than a long sweep: the joint should read as a corner
      easing off, not as the control melting into the list. */
-  width: 3px;
-  height: 3px;
+  width: 5px;
+  height: 5px;
   background: var(--surface);
 }
 #shelves::before {
-  left: -3px;
-  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 3px, #000 3.5px);
-  mask-image: radial-gradient(circle at 0 0, transparent 3px, #000 3.5px);
+  left: -5px;
+  -webkit-mask-image: radial-gradient(circle at 0 0, transparent 5px, #000 5.5px);
+  mask-image: radial-gradient(circle at 0 0, transparent 5px, #000 5.5px);
 }
 #shelves::after {
-  right: -3px;
-  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 3px, #000 3.5px);
-  mask-image: radial-gradient(circle at 100% 0, transparent 3px, #000 3.5px);
+  right: -5px;
+  -webkit-mask-image: radial-gradient(circle at 100% 0, transparent 5px, #000 5.5px);
+  mask-image: radial-gradient(circle at 100% 0, transparent 5px, #000 5.5px);
 }
 .shelf {
   display: flex;
@@ -698,7 +698,7 @@ button svg { display: block; }
 #scrub { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
 #scrub::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: 99px; background: var(--field); }
 #played { position: absolute; left: 0; height: 4px; width: 0; border-radius: 99px; background: var(--accent); }
-#knob { position: absolute; width: 12px; height: 12px; margin-left: -3px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
+#knob { position: absolute; width: 12px; height: 12px; margin-left: -5px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
 #scrub:hover #knob { opacity: 1; }
 
 /*

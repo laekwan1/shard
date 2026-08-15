@@ -524,16 +524,25 @@ function takeShots() {
     }
   };
 
-  // A few seconds in, not the first frame: films open on black.
+  // A few seconds in, not the first frame: films open on black. Only when the
+  // length is known and worth stepping into — asking for a time in a film whose
+  // length is not a number never arrives anywhere, and the wait used to end in
+  // nothing at all.
   reader.addEventListener("loadeddata", () => {
-    const at = Math.min(3, (reader.duration || 9) / 3);
+    const length = reader.duration;
+    const at = Number.isFinite(length) && length > 6 ? Math.min(3, length / 3) : 0;
     if (at > 0.2) reader.currentTime = at;
     else draw();
   });
   reader.addEventListener("seeked", draw);
   reader.addEventListener("error", () => done(null));
-  // Nothing about this is worth hanging the queue for.
-  const watchdog = setTimeout(() => done(null), 8000);
+  // Long enough for a large file to reach the place asked for, and if it has a
+  // picture by then that picture is taken rather than nothing: seeking into a
+  // film of several hundred megabytes is several reads from a disk.
+  const watchdog = setTimeout(() => {
+    if (reader.readyState >= 2) draw();
+    else done(null);
+  }, 20000);
   reader.src = "/media/" + item.id;
 }
 

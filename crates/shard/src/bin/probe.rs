@@ -171,8 +171,9 @@ fn main() -> anyhow::Result<()> {
                 encrypted.unwrap_or_else(|| "실패".into()),
                 if tampered { "  << 응답이 다름" } else { "" }
             )),
-            Progress::Baseline { reachable } => report.say(format!(
-                "기준 (우회 없음): {}",
+            Progress::Baseline { reachable, addr } => report.say(format!(
+                "기준 (우회 없음, {}): {}",
+                addr.ip(),
                 if reachable { "성공 — 차단 아님" } else { "실패 — 차단 확인" }
             )),
             Progress::Attempt { index, label, ok, elapsed_ms } => report.say(format!(
