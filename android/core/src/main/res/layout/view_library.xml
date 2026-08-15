@@ -251,13 +251,20 @@
                 thing", and the library is not a thing on top of a screen — it
                 is the screen, and what is behind it is where back goes.
             -->
+            <!--
+                Two shelves: videos and music. A segmented control at the very
+                top, because it is the first thing a hand reaches for, and beside
+                it the way back — which is all the room a title was taking. What
+                screen this is is never in doubt once it is on it.
+            -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:paddingHorizontal="6dp"
-                android:paddingVertical="8dp">
+                android:paddingStart="2dp"
+                android:paddingEnd="10dp"
+                android:paddingVertical="6dp">
 
                 <ImageButton
                     android:id="@+id/backFromLibrary"
@@ -269,35 +276,14 @@
                     android:padding="8dp"
                     android:contentDescription="@string/library_back" />
 
-                <TextView
-                    android:id="@+id/libraryTitle"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="6dp"
-                    android:text="@string/library_title"
-                    android:textColor="@color/on_surface"
-                    android:textStyle="bold"
-                    android:letterSpacing="-0.01"
-                    android:textSize="19sp" />
-            </LinearLayout>
-
-            <!--
-                Two shelves: videos and music. A segmented control, the primary
-                split above the folders, because a video and a song are different
-                things to want and mixing them in one list makes each harder to
-                find. The one in force lifts to a pill; folders filter within the
-                video shelf, music is a flat list.
-            -->
             <LinearLayout
                 android:id="@+id/kinds"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
+                android:layout_weight="1"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:background="@drawable/segment_track"
-                android:layout_marginHorizontal="14dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="12dp"
+                android:layout_marginStart="4dp"
                 android:padding="4dp">
 
                 <LinearLayout
@@ -352,6 +338,7 @@
                         android:text="@string/library_tab_music"
                         android:textSize="14sp" />
                 </LinearLayout>
+            </LinearLayout>
             </LinearLayout>
 
             <!--
