@@ -1967,8 +1967,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         ).apply {
             gravity = android.view.Gravity.BOTTOM
             marginStart = (6 * density).toInt()
-            // Half the height difference, so it floats centred on the tab.
-            bottomMargin = (5 * density).toInt()
+            // Low against the tabs rather than centred on them: the tabs'
+            // labels sit in the lower half of their shape, and a + centred on
+            // the SHAPE floated above the text it stands beside.
+            bottomMargin = (2 * density).toInt()
         }
         add.setOnClickListener { askForFolder() }
         folderRow.addView(add)
