@@ -14,8 +14,18 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/muted">
+    <!-- Filled as well as stroked: the stroke is what keeps the corners round,
+         the fill is what makes it a solid mark rather than an outline.
+
+         The alpha matches it to the switch's unselected labels BY EYE, not by
+         token — both are `muted`, but a solid block of a colour reads brighter
+         than antialiased text in it (measured 135 against 119 on screen), so
+         the same value looked like two. 0.86 closes the gap. -->
     <path
+        android:fillColor="#FFFFFF"
         android:strokeColor="#FFFFFF"
+        android:fillAlpha="0.86"
+        android:strokeAlpha="0.86"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"

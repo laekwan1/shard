@@ -940,6 +940,55 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
 
     // ---- coming and going --------------------------------------------------
 
+    /**
+     * A sideways fling over the sheet turns the shelf: leftward to music,
+     * rightward to video — the directions the switch itself lays them out in,
+     * so the content appears to slide the way the finger sent it.
+     *
+     * Fed by the activity's dispatch rather than listened for here: the list
+     * consumes its own touches for scrolling, and a listener on any one view
+     * would go deaf the moment a child claimed the gesture. Observing the
+     * dispatch stream costs nothing and misses nothing.
+     *
+     * Only over the sheet (the folder strip and the list): the stage already
+     * answers horizontal gestures with seek and stop, and full screen is the
+     * player's alone.
+     */
+    private val shelfSwipe = android.view.GestureDetector(
+        activity,
+        object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onFling(
+                from: android.view.MotionEvent?,
+                to: android.view.MotionEvent,
+                velocityX: Float,
+                velocityY: Float,
+            ): Boolean {
+                val start = from ?: return false
+                if (expanded) return false
+                val origin = IntArray(2)
+                chrome.getLocationOnScreen(origin)
+                if (start.rawY < origin[1]) return false
+                val across = to.rawX - start.rawX
+                val down = to.rawY - start.rawY
+                val far = SWIPE_DP * activity.resources.displayMetrics.density
+                // Clearly sideways, or a scroll that drifts would turn the shelf.
+                if (kotlin.math.abs(across) < far ||
+                    kotlin.math.abs(across) < kotlin.math.abs(down) * 1.5f
+                ) return false
+                when {
+                    across < 0 && tab == Library.Kind.VIDEO -> selectTab(Library.Kind.MUSIC)
+                    across > 0 && tab == Library.Kind.MUSIC -> selectTab(Library.Kind.VIDEO)
+                }
+                return true
+            }
+        },
+    )
+
+    /** Every touch the activity dispatches while this screen is up. */
+    fun observeTouch(event: android.view.MotionEvent) {
+        if (isOpen) shelfSwipe.onTouchEvent(event)
+    }
+
     fun open() {
         onOpen?.invoke()
         root.visibility = View.VISIBLE

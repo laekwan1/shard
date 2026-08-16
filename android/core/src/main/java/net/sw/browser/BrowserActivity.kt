@@ -678,9 +678,9 @@ abstract class BrowserActivity : AppCompatActivity() {
         // it is closed — and then nothing appears to happen on a swipe.
         binding.bar.doOnLayout { hidePanel(animate = false) }
 
-        // The swipe is the only way in. The handle is a hint, not a button:
-        // it sits where sites put their own back arrow, and while it took taps
-        // a press aimed at the page's control opened our panel instead.
+        // The swipe from the top-left is the only way in. Every visible
+        // entrance tried here — a tap handle, a domain pill, a hint bar — sat
+        // on the corner where pages put their own controls. The page wins.
     }
 
     // The shared motion ladder, the same one the library reads and the same
@@ -782,6 +782,10 @@ abstract class BrowserActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (this::binding.isInitialized) {
             swipeDetector.onTouchEvent(event)
+            // The library reads the same stream to turn its shelf on a fling —
+            // it cannot listen on its own views, because the list consumes its
+            // touches for scrolling.
+            if (libraryMade && library.isOpen) library.observeTouch(event)
 
             // Only while the page is the screen. The library covers it, the
             // panel is furniture over it, and full screen is a player — a drag
@@ -792,10 +796,7 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (panelShown &&
-                        !touchIsInside(binding.bar, event) &&
-                        !touchIsInside(binding.handleArea, event)
-                    ) {
+                    if (panelShown && !touchIsInside(binding.bar, event)) {
                         hidePanel()
                     } else if (binding.url.hasFocus() && !touchIsInside(binding.url, event)) {
                         dismissKeyboard()

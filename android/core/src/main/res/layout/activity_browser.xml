@@ -176,34 +176,6 @@
             android:layout_height="2dp"
             android:max="100"
             android:visibility="invisible" />
-
-        <!--
-            The handle: a visual hint only — the swipe is the way in.
-
-            It used to take taps as well, and its corner is exactly where sites
-            put their own back button; a press aimed at YouTube's arrow opened
-            our panel instead. Marked unclickable so every tap falls through to
-            the page, while the mark stays to say the edge holds something.
-
-            A pill naming the site was also tried here and taken out again:
-            whatever it said about discoverability, it covered the page's own
-            header. The page wins, both times.
-        -->
-        <FrameLayout
-            android:id="@+id/handleArea"
-            android:layout_width="30dp"
-            android:layout_height="38dp"
-            android:layout_gravity="start|top"
-            android:layout_marginTop="12dp"
-            android:clickable="false"
-            android:focusable="false">
-
-            <View
-                android:layout_width="4dp"
-                android:layout_height="24dp"
-                android:layout_gravity="center"
-                android:background="@drawable/handle" />
-        </FrameLayout>
     </FrameLayout>
 
     <!-- Holds the player when a page asks for full screen. -->
