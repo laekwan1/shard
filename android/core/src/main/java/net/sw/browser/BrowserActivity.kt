@@ -717,7 +717,6 @@ abstract class BrowserActivity : AppCompatActivity() {
 
     private fun wireControls() {
         binding.power.setOnClickListener { setEngine(!engineOn) }
-        binding.reload.setOnClickListener { binding.web.reload() }
         binding.openLibrary.setOnClickListener {
             // The panel is the browser's furniture and has no business being
             // over a different screen.

@@ -672,11 +672,20 @@
                     android:scrollbars="none"
                     android:paddingHorizontal="10dp">
 
+                    <!--
+                        baselineAligned off, and it matters: a horizontal
+                        LinearLayout lines TextViews up by TEXT BASELINE by
+                        default, and the + button's larger glyph dragged every
+                        tab up off the strip's floor — tabs that are meant to
+                        stand on the list were floating above it.
+                    -->
                     <LinearLayout
                         android:id="@+id/folders"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal" />
+                        android:orientation="horizontal"
+                        android:gravity="bottom"
+                        android:baselineAligned="false" />
                 </HorizontalScrollView>
             </LinearLayout>
 

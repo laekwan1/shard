@@ -99,17 +99,6 @@
                     android:textColorHint="@color/muted"
                     android:importantForAutofill="no" />
 
-                <ImageButton
-                    android:id="@+id/reload"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_marginStart="4dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_refresh"
-                    android:scaleType="fitCenter"
-                    android:padding="9dp"
-                    android:contentDescription="@string/menu_reload" />
-
                 <!--
                     The way into what has already been saved. Beside the address
                     rather than buried in a menu: it is the other half of what

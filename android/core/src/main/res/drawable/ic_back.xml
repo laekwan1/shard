@@ -1,12 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Back: an outlined triangle with rounded corners, pointing the way out.
+    Back: a chevron, nothing else.
 
-    The user's own choice of mark, twice adjusted to their eye: taller than it
-    is wide (4.4 to 19.6 against 6.6 to 16.9), and grey rather than the
-    near-white the other glyphs wear — this one is furniture, not content.
-    Drawn as one closed stroke with the corners cut by quadratics; sharp
-    vertices would read as a rewind button.
+    Fourth and simplest drawing of this glyph — the filled arrow, the stroke
+    arrow and the rounded triangle each carried more shape than the job needs.
+    Grey like the switch's unselected labels; stroke, so it cannot read
+    brighter than they do the way the filled triangle did.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -14,20 +13,10 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/muted">
-    <!-- Filled as well as stroked: the stroke is what keeps the corners round,
-         the fill is what makes it a solid mark rather than an outline.
-
-         The alpha matches it to the switch's unselected labels BY EYE, not by
-         token — both are `muted`, but a solid block of a colour reads brighter
-         than antialiased text in it (measured 135 against 119 on screen), so
-         the same value looked like two. 0.86 closes the gap. -->
     <path
-        android:fillColor="#FFFFFF"
         android:strokeColor="#FFFFFF"
-        android:fillAlpha="0.86"
-        android:strokeAlpha="0.86"
-        android:strokeWidth="2"
+        android:strokeWidth="2.4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8.69,10.46 L14.81,5.94 Q16.9,4.4 16.9,7.0 L16.9,17.0 Q16.9,19.6 14.81,18.06 L8.69,13.54 Q6.6,12 8.69,10.46 Z" />
+        android:pathData="M14.4,5.6 L8,12 L14.4,18.4" />
 </vector>
