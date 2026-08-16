@@ -258,6 +258,7 @@
                         android:layout_weight="1"
                         android:progressDrawable="@drawable/scrub_track"
                         android:thumb="@drawable/scrub_thumb"
+                        android:background="@null"
                         android:splitTrack="false"
                         android:maxHeight="2dp"
                         android:max="1000" />
@@ -501,6 +502,7 @@
                     android:layout_weight="1"
                     android:progressDrawable="@drawable/scrub_track"
                     android:thumb="@drawable/scrub_thumb"
+                    android:background="@null"
                     android:splitTrack="false"
                     android:maxHeight="2dp"
                     android:max="1000" />
