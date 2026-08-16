@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Back: a drawn stroke, not the platform's filled block arrow.
+    Back: an outlined triangle with rounded corners, pointing the way out.
 
-    Every glyph this app draws is a 1.4-2 stroke with round caps — the
-    transport, the toggles, the folder marks. The old back arrow was the one
-    Material filled shape among them and sat visibly heavier than everything it
-    shared a row with. Same reach, same meaning, lighter voice.
+    The user's own choice of mark. Drawn as one closed stroke with the corners
+    cut by quadratics — a stroked triangle with sharp vertices reads as a play
+    button turned around, and the rounding is what separates "back" from
+    "rewind". Grey-white through the same tint every other glyph wears.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -17,11 +17,6 @@
         android:strokeColor="#FFFFFF"
         android:strokeWidth="2"
         android:strokeLineCap="round"
-        android:pathData="M19.5,12 L5.5,12" />
-    <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2"
-        android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M11.5,5.8 L5.3,12 L11.5,18.2" />
+        android:pathData="M8.07,10.73 L14.93,6.87 Q17.2,5.6 17.2,8.2 L17.2,15.8 Q17.2,18.4 14.93,17.13 L8.07,13.27 Q5.8,12 8.07,10.73 Z" />
 </vector>

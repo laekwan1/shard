@@ -131,6 +131,28 @@ object Library {
      * folder", and it is the one that cannot be undone — so it is not the one
      * this does.
      */
+    /**
+     * Rename a folder by moving everything in it and re-remembering the name.
+     *
+     * There is no rename in the media store's vocabulary — a folder is only
+     * the shared prefix of its files' paths — so a rename is each file moved
+     * to the new prefix. Partial failure leaves some files behind under the
+     * old name; false says so, and both names stay visible so nothing is lost.
+     */
+    fun renameFolder(context: Context, from: String, to: String, items: List<Item>, kind: Kind): Boolean {
+        val clean = clean(to)
+        if (clean.isBlank()) return false
+        var all = true
+        items.filter { it.kind == kind && it.folder == from }.forEach {
+            if (!move(context, it, clean)) all = false
+        }
+        val kept = remembered(context, kind)
+        prefs(context).edit()
+            .putStringSet(emptyKey(kind), if (all) kept - from + clean else kept + clean)
+            .apply()
+        return all
+    }
+
     fun removeFolder(context: Context, name: String, items: List<Item>, kind: Kind) {
         items.filter { it.kind == kind && it.folder == name }.forEach { move(context, it, "") }
         prefs(context).edit().putStringSet(emptyKey(kind), remembered(context, kind) - name).apply()

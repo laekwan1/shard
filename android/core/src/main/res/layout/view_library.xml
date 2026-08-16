@@ -82,6 +82,7 @@
                 android:layout_height="wrap_content"
                 android:background="@drawable/segment_track"
                 android:layout_marginStart="4dp"
+                android:layout_marginEnd="44dp"
                 android:padding="4dp">
 
                 <!--
@@ -649,12 +650,19 @@
                 was removed once before while it was still the only way to reach
                 those settings, which locked them away — hence the order.
             -->
+            <!--
+                A tab strip, in the browser's sense: the strip wears the chrome
+                colour, the tab in force wears the list's, and the two merging
+                is what says which folder the list below belongs to. The air
+                above the tabs is what keeps them from hanging off the switch.
+            -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingBottom="6dp">
+                android:gravity="bottom"
+                android:background="@color/chrome"
+                android:paddingTop="7dp">
 
                 <HorizontalScrollView
                     android:id="@+id/folderScroll"
@@ -671,11 +679,6 @@
                         android:orientation="horizontal" />
                 </HorizontalScrollView>
             </LinearLayout>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="@color/divider" />
 
             <FrameLayout
                 android:layout_width="match_parent"

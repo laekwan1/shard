@@ -178,20 +178,25 @@
             android:visibility="invisible" />
 
         <!--
-            Always-visible handle, top-left and the same height as the address
-            bar it opens onto — so the panel appears to slide out from under it
-            rather than from somewhere unrelated. Tap it, or swipe right.
+            The handle: a visual hint only — the swipe is the way in.
 
-            A pill naming the site was tried here and taken out again: whatever
-            it said about discoverability, it sat on the page's own header and
-            covered it. The page wins.
+            It used to take taps as well, and its corner is exactly where sites
+            put their own back button; a press aimed at YouTube's arrow opened
+            our panel instead. Marked unclickable so every tap falls through to
+            the page, while the mark stays to say the edge holds something.
+
+            A pill naming the site was also tried here and taken out again:
+            whatever it said about discoverability, it covered the page's own
+            header. The page wins, both times.
         -->
         <FrameLayout
             android:id="@+id/handleArea"
             android:layout_width="30dp"
             android:layout_height="38dp"
             android:layout_gravity="start|top"
-            android:layout_marginTop="12dp">
+            android:layout_marginTop="12dp"
+            android:clickable="false"
+            android:focusable="false">
 
             <View
                 android:layout_width="4dp"

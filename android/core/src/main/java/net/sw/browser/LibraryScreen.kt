@@ -1881,21 +1881,28 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 showEmpty()
             }
             chip.setOnLongClickListener {
-                confirmRemoveFolder(name)
+                // The same grammar a file row answers with: what it can do,
+                // then the destructive thing last.
+                MaterialAlertDialogBuilder(activity)
+                    .setTitle(name)
+                    .setItems(
+                        arrayOf(
+                            activity.getString(R.string.library_rename),
+                            activity.getString(R.string.library_folder_remove),
+                        ),
+                    ) { _, which ->
+                        if (which == 0) askToRenameFolder(name) else confirmRemoveFolder(name)
+                    }
+                    .show()
                 true
             }
             folderRow.addView(chip)
         }
-        // The way to make a folder, as the last chip in the row of folders —
+        // The way to make a folder: a bare +, the last tab in the row —
         // where the folder it makes will appear, so cause and effect share an
-        // address. It used to be an icon button pinned past the row's end,
-        // which was the heaviest thing on the line and spoke a different
-        // language from the chips beside it.
-        folderRow.addView(
-            chip("+ " + activity.getString(R.string.library_new_folder), false, "") {
-                askForFolder()
-            }
-        )
+        // address. Just the mark: the dialog it opens says the rest, and a
+        // label would make the quietest control on the strip the widest.
+        folderRow.addView(chip("+", false, "") { askForFolder() })
     }
 
     /**
@@ -1914,20 +1921,20 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // force. A folder is a filter over the list, not a place navigated to,
         // and a chip is what a filter looks like. The underlined-tab drawing
         // this used to be gave the same feature two shapes across the two apps.
-        view.setBackgroundResource(R.drawable.folder_chip)
-        // Pills need air between them; the underlined tabs used to touch.
+        view.setBackgroundResource(R.drawable.folder_tab)
+        // The hair between tabs, as a browser draws them: near, not touching.
         view.layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
             ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { marginEnd = (6 * density).toInt() }
+        ).apply { marginEnd = (3 * density).toInt() }
         view.setTextColor(activity.getColor(if (on) R.color.on_surface else R.color.muted))
-        view.textSize = 14f
+        view.textSize = 13f
         view.setTypeface(
             view.typeface,
             if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
         )
-        val padH = (14 * density).toInt()
-        val padV = (7 * density).toInt()
+        val padH = (13 * density).toInt()
+        val padV = (6 * density).toInt()
         view.setPadding(padH, padV, padH, padV)
         view.setOnClickListener { tap() }
         // A folder is somewhere to put things, so it accepts things being put
@@ -1983,6 +1990,37 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                     val done = moving?.let { Library.move(activity, it, name) } ?: true
                     ui.post {
                         if (!done) toast(activity.getString(R.string.library_move_failed))
+                        reload()
+                    }
+                }
+            }
+            .show()
+    }
+
+    /**
+     * Rename a folder: every file in it moves, and the memory of it moves too.
+     *
+     * Renaming and then reloading has a window where neither name exists, so
+     * the chip that was in force follows the new name before the reload asks
+     * storage what is true now.
+     */
+    private fun askToRenameFolder(name: String) {
+        val field = EditText(activity)
+        field.setText(name)
+        field.setSelection(field.text.length)
+        field.setSingleLine()
+        MaterialAlertDialogBuilder(activity)
+            .setTitle(R.string.library_rename)
+            .setView(field)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(android.R.string.ok) { _, _ ->
+                val fresh = Library.clean(field.text.toString())
+                if (fresh.isBlank() || fresh == name) return@setPositiveButton
+                work.execute {
+                    val moved = Library.renameFolder(activity, name, fresh, items, tab)
+                    ui.post {
+                        if (!moved) toast(activity.getString(R.string.library_rename_failed))
+                        if (showing == name) showing = fresh
                         reload()
                     }
                 }

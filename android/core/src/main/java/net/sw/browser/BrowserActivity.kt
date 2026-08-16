@@ -678,8 +678,9 @@ abstract class BrowserActivity : AppCompatActivity() {
         // it is closed — and then nothing appears to happen on a swipe.
         binding.bar.doOnLayout { hidePanel(animate = false) }
 
-        // The handle is the reliable way in; the swipe is the quick one.
-        binding.handleArea.setOnClickListener { if (panelShown) hidePanel() else showPanel() }
+        // The swipe is the only way in. The handle is a hint, not a button:
+        // it sits where sites put their own back arrow, and while it took taps
+        // a press aimed at the page's control opened our panel instead.
     }
 
     // The shared motion ladder, the same one the library reads and the same

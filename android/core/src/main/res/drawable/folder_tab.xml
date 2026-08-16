@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A folder, drawn as a browser tab: square shoulders, rounded only at the
+    top, standing on the list it filters.
+
+    The tab in force wears the list's own colour, so it merges with what is
+    under it — the same trick every browser uses to say "this tab is that
+    page". The strip behind is the chrome colour, which is what makes the
+    merge visible. No outline anywhere: a tab is named by what it is attached
+    to, not by a border.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <corners
+                android:topLeftRadius="@dimen/r_sm"
+                android:topRightRadius="@dimen/r_sm"
+                android:bottomLeftRadius="0dp"
+                android:bottomRightRadius="0dp" />
+            <solid android:color="@color/surface" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <corners
+                android:topLeftRadius="@dimen/r_sm"
+                android:topRightRadius="@dimen/r_sm"
+                android:bottomLeftRadius="0dp"
+                android:bottomRightRadius="0dp" />
+            <solid android:color="#12FFFFFF" />
+        </shape>
+    </item>
+</selector>
