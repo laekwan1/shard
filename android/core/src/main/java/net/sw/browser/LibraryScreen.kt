@@ -63,6 +63,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val folderRow: LinearLayout = root.findViewById(R.id.folders)
     private val folderScroll: View = root.findViewById(R.id.folderScroll)
     private val newFolder: ImageButton = root.findViewById(R.id.newFolder)
+    private val kinds: android.widget.FrameLayout = root.findViewById(R.id.kinds)
+    private val shelfThumb: View = root.findViewById(R.id.shelfThumb)
     private val tabVideo: View = root.findViewById(R.id.tabVideo)
     private val tabVideoIcon: android.widget.ImageView = root.findViewById(R.id.tabVideoIcon)
     private val tabVideoText: TextView = root.findViewById(R.id.tabVideoText)
@@ -840,6 +842,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         syncPlayerView()
         styleTab(tabVideo, tabVideoIcon, tabVideoText, kind == Library.Kind.VIDEO)
         styleTab(tabMusic, tabMusicIcon, tabMusicText, kind == Library.Kind.MUSIC)
+        moveShelfThumb(kind)
         // Both shelves keep folders now — the names differ per shelf, so they are
         // recomputed for the one being shown.
         folders = runCatching { Library.folders(activity, items, kind) }.getOrDefault(emptyList())
@@ -864,6 +867,54 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      * the label and its icon — the accent when in force, muted when not — so the
      * active shelf reads at a glance without shouting a full accent fill.
      */
+    /**
+     * Slide the lifted pill under the shelf that was chosen.
+     *
+     * Sized and placed here rather than in the layout: both depend on the
+     * track's measured width, which does not exist until layout has run — the
+     * `post` covers the first call, made from init before any layout. Jumped
+     * rather than animated on that first call, because a pill seen sliding into
+     * a screen that has only just appeared is answering a press nobody made.
+     */
+    init {
+        // The thumb's size is a share of the track's, so a track that changes
+        // width — a rotation — has to re-derive it. The listener re-runs the
+        // same placement the tab switch does.
+        kinds.addOnLayoutChangeListener { _, l, _, r, _, ol, _, or_, _ ->
+            if (r - l != or_ - ol) moveShelfThumb(tab)
+        }
+    }
+
+    private fun moveShelfThumb(kind: Library.Kind) {
+        kinds.post {
+            val gap = (4 * activity.resources.displayMetrics.density).toInt()
+            val inner = kinds.width - kinds.paddingLeft - kinds.paddingRight
+            if (inner <= 0) return@post
+            val half = (inner - gap) / 2
+            val tall = kinds.height - kinds.paddingTop - kinds.paddingBottom
+            if (shelfThumb.layoutParams.width != half || shelfThumb.layoutParams.height != tall) {
+                shelfThumb.layoutParams = shelfThumb.layoutParams.apply {
+                    width = half
+                    height = tall
+                }
+            }
+            val target = if (kind == Library.Kind.VIDEO) 0f else (half + gap).toFloat()
+            if (shelfThumb.translationX == target) return@post
+            if (!shelfThumb.isLaidOut) {
+                shelfThumb.translationX = target
+            } else {
+                shelfThumb.animate().translationX(target)
+                    .setDuration(activity.resources.getInteger(R.integer.t_swap).toLong())
+                    .setInterpolator(
+                        android.view.animation.AnimationUtils.loadInterpolator(
+                            activity, R.interpolator.ease
+                        )
+                    )
+                    .start()
+            }
+        }
+    }
+
     private fun styleTab(tab: View, icon: android.widget.ImageView, text: TextView, on: Boolean) {
         tab.isSelected = on
         val colour = if (on) android.graphics.Color.WHITE else activity.getColor(R.color.muted)
@@ -1842,17 +1893,24 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         val density = activity.resources.displayMetrics.density
         view.text = label
         view.isSelected = on
-        // A tab, not a pill: the label on an accent underline when it is the one
-        // in force, plain otherwise — the row reads like a browser's tabs.
-        view.setBackgroundResource(R.drawable.folder_tab)
+        // The same chip the desktop draws: outlined while idle, filled while in
+        // force. A folder is a filter over the list, not a place navigated to,
+        // and a chip is what a filter looks like. The underlined-tab drawing
+        // this used to be gave the same feature two shapes across the two apps.
+        view.setBackgroundResource(R.drawable.folder_chip)
+        // Pills need air between them; the underlined tabs used to touch.
+        view.layoutParams = LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { marginEnd = (6 * density).toInt() }
         view.setTextColor(activity.getColor(if (on) R.color.on_surface else R.color.muted))
         view.textSize = 14f
         view.setTypeface(
             view.typeface,
             if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
         )
-        val padH = (12 * density).toInt()
-        val padV = (9 * density).toInt()
+        val padH = (14 * density).toInt()
+        val padV = (7 * density).toInt()
         view.setPadding(padH, padV, padH, padV)
         view.setOnClickListener { tap() }
         // A folder is somewhere to put things, so it accepts things being put

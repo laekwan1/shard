@@ -394,7 +394,9 @@ button svg { display: block; }
   border-radius: var(--r-md) var(--r-md) 0 0;
 }
 .shelf {
-  /* Half each of whatever the row is. */
+  /* Half each of whatever the row is, standing above the sliding pill. */
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   align-items: center;
@@ -412,7 +414,22 @@ button svg { display: block; }
 }
 .shelf svg { width: 15px; height: 15px; }
 .shelf:hover { color: var(--on-surface); }
-.shelf.on { color: #fff; background: #34343b; border-color: #ffffffa6; font-weight: 700; }
+/* The fill lives on the sliding pill; the shelf itself only brightens and
+   thickens. The white outline the chosen half used to wear is gone — fill and
+   weight already say everything it said, more quietly. */
+.shelf.on { color: #fff; font-weight: 700; }
+
+#shelfPill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 4.5px);
+  border-radius: 8px;
+  background: #34343b;
+  transition: transform var(--t-swap) var(--ease);
+}
+#shelves.music #shelfPill { transform: translateX(calc(100% + 3px)); }
 
 #sheet {
   flex: 1;
@@ -463,7 +480,9 @@ button svg { display: block; }
 /* Chosen says so by weight, not by growing. A label that changes size when it
    is picked reflows the row it is in, and the row jumps under the pointer that
    picked it. */
-.folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; font-weight: 700; }
+/* Chosen is said by the fill and the weight; the outline belongs to idle
+   chips, where it is the only thing marking the pressable area. */
+.folder.on { color: #fff; background: #34343b; border-color: transparent; font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip

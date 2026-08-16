@@ -275,6 +275,8 @@ for (const button of document.querySelectorAll(".shelf")) {
     for (const other of document.querySelectorAll(".shelf")) {
       other.classList.toggle("on", other === button);
     }
+    // The pill slides on this class; the buttons themselves only recolour.
+    document.getElementById("shelves").classList.toggle("music", shelf.kind === "music");
     send("library.list", { kind: shelf.kind });
   });
 }

@@ -250,6 +250,18 @@ abstract class BrowserActivity : AppCompatActivity() {
 
         if (autoStart) setEngine(true) else showEngineState(false)
         binding.web.loadUrl(homeUrl)
+        nameHandle(homeUrl)
+        // The pill follows the reading. A threshold keeps a resting finger from
+        // flickering it, and the panel being open pins it — the pill is what
+        // the panel slid out from.
+        binding.web.setOnScrollChangeListener { _, _, y, _, oldY ->
+            val slop = 8 * resources.displayMetrics.density
+            when {
+                panelShown -> showHandle(true)
+                y - oldY > slop -> showHandle(false)
+                oldY - y > slop || y == 0 -> showHandle(true)
+            }
+        }
         ui.post(statusTicker)
     }
 
@@ -523,6 +535,7 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 binding.url.setText(url)
+                nameHandle(url)
                 // A new page has no title yet; the chrome client fills it in.
                 pageTitle = ""
                 // Media found on the last page has nothing to do with this one.
@@ -553,6 +566,7 @@ abstract class BrowserActivity : AppCompatActivity() {
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                 if (url != binding.url.text.toString()) {
                     binding.url.setText(url)
+                    nameHandle(url)
                     // A different video's streams are not this one's.
                     catcher.clear()
                     PageContext.current = PageContext(url, view.settings.userAgentString)
@@ -835,6 +849,43 @@ abstract class BrowserActivity : AppCompatActivity() {
         val y = event.rawY.toInt()
         return x >= origin[0] && x <= origin[0] + view.width &&
             y >= origin[1] && y <= origin[1] + view.height
+    }
+
+    /**
+     * Put the site's name on the pill that opens the address panel.
+     *
+     * The host and not the whole address: the pill answers "where am I", and
+     * the path is noise at that size. `www.` is shaved for the same reason.
+     */
+    private fun nameHandle(url: String) {
+        val host = Uri.parse(url).host?.removePrefix("www.").orEmpty()
+        if (host.isNotBlank()) binding.handleLabel.text = host
+    }
+
+    /** Whether the pill is currently shown, so scrolling does not re-run the fade. */
+    private var handleShown = true
+
+    /**
+     * The pill steps aside while the page is read.
+     *
+     * Down means reading, so it leaves; the first upward scroll is reaching for
+     * the top, so it returns. Invisible rather than merely transparent — a
+     * transparent view still takes the tap that was aimed at the page under it.
+     */
+    private fun showHandle(on: Boolean) {
+        if (handleShown == on) return
+        handleShown = on
+        binding.handleArea.animate().cancel()
+        if (on) {
+            binding.handleArea.visibility = View.VISIBLE
+            binding.handleArea.animate().alpha(1f)
+                .setDuration(tSwap).setInterpolator(easeEnter).start()
+        } else {
+            binding.handleArea.animate().alpha(0f)
+                .setDuration(tSwap).setInterpolator(easeExit)
+                .withEndAction { binding.handleArea.visibility = View.INVISIBLE }
+                .start()
+        }
     }
 
     private fun dismissKeyboard() {

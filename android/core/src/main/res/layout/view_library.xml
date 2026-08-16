@@ -59,69 +59,93 @@
                 android:padding="12dp"
                 android:contentDescription="@string/library_back" />
 
-            <LinearLayout
+            <!--
+                A frame rather than a row, because the lifted pill is one view
+                that slides underneath the two halves. Two pills blinking on and
+                off say "the state changed"; one pill travelling says "your
+                press moved this here". The thumb's size and position are laid
+                out in code — they depend on the frame's measured width.
+            -->
+            <FrameLayout
                 android:id="@+id/kinds"
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
                 android:background="@drawable/segment_track"
                 android:layout_marginStart="4dp"
                 android:padding="4dp">
 
-                <LinearLayout
-                    android:id="@+id/tabVideo"
+                <!--
+                    Both dimensions are set in code. Zero here, and deliberately:
+                    a match_parent child inside a wrap_content FrameLayout is
+                    measured against the whole space on offer before the frame
+                    has a size, and it inflated the header to the full screen —
+                    the track must take its height from the labels, never from
+                    the thumb that slides under them.
+                -->
+                <View
+                    android:id="@+id/shelfThumb"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:paddingVertical="9dp"
-                    android:background="@drawable/segment_pill">
-
-                    <ImageView
-                        android:id="@+id/tabVideoIcon"
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:layout_marginEnd="8dp"
-                        android:src="@drawable/ic_video"
-                        android:contentDescription="@null" />
-
-                    <TextView
-                        android:id="@+id/tabVideoText"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/library_tab_video"
-                        android:textSize="14sp" />
-                </LinearLayout>
+                    android:layout_height="0dp"
+                    android:background="@drawable/segment_thumb" />
 
                 <LinearLayout
-                    android:id="@+id/tabMusic"
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="4dp"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:paddingVertical="9dp"
-                    android:background="@drawable/segment_pill">
+                    android:orientation="horizontal">
 
-                    <ImageView
-                        android:id="@+id/tabMusicIcon"
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:layout_marginEnd="8dp"
-                        android:src="@drawable/ic_music"
-                        android:contentDescription="@null" />
-
-                    <TextView
-                        android:id="@+id/tabMusicText"
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:id="@+id/tabVideo"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="@string/library_tab_music"
-                        android:textSize="14sp" />
+                        android:layout_weight="1"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:paddingVertical="9dp">
+
+                        <ImageView
+                            android:id="@+id/tabVideoIcon"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginEnd="8dp"
+                            android:src="@drawable/ic_video"
+                            android:contentDescription="@null" />
+
+                        <TextView
+                            android:id="@+id/tabVideoText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/library_tab_video"
+                            android:textSize="14sp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/tabMusic"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="4dp"
+                        android:orientation="horizontal"
+                        android:gravity="center"
+                        android:paddingVertical="9dp">
+
+                        <ImageView
+                            android:id="@+id/tabMusicIcon"
+                            android:layout_width="18dp"
+                            android:layout_height="18dp"
+                            android:layout_marginEnd="8dp"
+                            android:src="@drawable/ic_music"
+                            android:contentDescription="@null" />
+
+                        <TextView
+                            android:id="@+id/tabMusicText"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/library_tab_music"
+                            android:textSize="14sp" />
+                    </LinearLayout>
                 </LinearLayout>
-            </LinearLayout>
+            </FrameLayout>
         </LinearLayout>
 
         <!--

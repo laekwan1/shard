@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The lifted pill of the video/music switch — one view that slides between
+    the two halves, rather than each half drawing its own when selected.
+
+    Sliding is the point. Two pills that blink on and off say "the state
+    changed"; one pill that travels says "your press moved this here", which is
+    the difference between a control and an indicator. The white outline the old
+    per-half pill wore is gone with it — the fill and the bold label already say
+    everything the outline said.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="@dimen/r_md" />
+    <solid android:color="#34343B" />
+</shape>

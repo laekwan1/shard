@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A folder chip: outlined while idle, filled while in force.
+
+    The same language the desktop window speaks, instead of the underlined tabs
+    this row used to be — the two apps drew the same feature two ways. A chip
+    fits what a folder is here: a filter laid over the list, not a place being
+    navigated to. Pill-round, which at a chip's height reads as a chip rather
+    than a lozenge.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <corners android:radius="100dp" />
+            <solid android:color="#34343B" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="100dp" />
+            <stroke android:width="1dp" android:color="#2EFFFFFF" />
+        </shape>
+    </item>
+</selector>
