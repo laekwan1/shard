@@ -1,4 +1,5 @@
 import org.gradle.internal.os.OperatingSystem
+import java.util.Properties
 
 plugins {
     id("com.android.application")
@@ -14,6 +15,26 @@ val abis = buildList {
     if (emulator) add("x86_64")
 }
 
+// The release signing key, read from a file that is never committed. Absent —
+// on a fresh clone or a machine without the key — a release build still runs;
+// it just comes out unsigned, so the missing key is a warning, not a wall.
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+val hasKeystore = keystoreProps.getProperty("storeFile") != null
+
+// Monotonic by construction: one more commit is one higher code, so an update
+// can never present a version the phone thinks it already has. versionName
+// carries the same count so the number a user sees moves with every build.
+fun gitCount(): Int = try {
+    val p = ProcessBuilder("git", "rev-list", "--count", "HEAD")
+        .directory(rootProject.projectDir).start()
+    p.inputStream.bufferedReader().readText().trim().toInt().also { p.waitFor() }
+} catch (e: Exception) {
+    1
+}
+
 android {
     namespace = "net.shard"
     compileSdk = 35
@@ -22,14 +43,40 @@ android {
         applicationId = "net.shard"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = gitCount()
+        versionName = "0.1.${gitCount()}"
         ndk { abiFilters += abis }
+    }
+
+    signingConfigs {
+        if (hasKeystore) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("shardAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // v2 covers the whole file against tampering (min SDK 26 needs
+                // no v1); v3 carries the key's identity so the signer can be
+                // rotated later without every phone treating it as a new app.
+                enableV1Signing = false
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Shrink and obfuscate: a smaller download, and a release the
+            // curious cannot read straight out of the APK. The keep rules that
+            // hold the JNI and web bridges together are in proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            if (hasKeystore) signingConfig = signingConfigs.getByName("release")
         }
     }
 

@@ -49,3 +49,9 @@ android/**/jniLibs/
 
 # Machine-local editor settings, which are one person's and not the project's.
 .claude/settings.local.json
+
+# Android release signing — the key IS the app's identity; never commit it.
+android/keystore/
+android/keystore.properties
+*.jks
+*.keystore
