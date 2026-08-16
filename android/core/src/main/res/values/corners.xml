@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Corners: one ladder, the same rungs the desktop shell keeps.
+
+    There were five values here (11, 14, 16, 20, 22dp) and ten more in the
+    shell, and the two sets had never been compared. None of the differences
+    meant anything - each was chosen once, next to whatever was already there.
+
+    Nesting takes the rule that an inner radius is the outer one less the gap
+    between them: a 20dp tile with 8dp of padding holds a 12dp picture. Set the
+    inner one tighter and the two corners look pushed apart.
+-->
+<resources>
+    <dimen name="r_xs">4dp</dimen>
+    <dimen name="r_sm">8dp</dimen>
+    <dimen name="r_md">12dp</dimen>
+    <dimen name="r_lg">16dp</dimen>
+    <dimen name="r_xl">20dp</dimen>
+    <dimen name="r_2xl">28dp</dimen>
+</resources>

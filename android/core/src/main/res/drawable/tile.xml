@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The rounded well a thumbnail sits in, shown while it loads or has none. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <corners android:radius="11dp" />
+    <corners android:radius="@dimen/r_md" />
     <solid android:color="@color/raised" />
 </shape>

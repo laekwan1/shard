@@ -784,7 +784,17 @@ function another() {
 
 document.getElementById("shut").addEventListener("click", shutPlayer);
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
-video.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
+// A click on the picture plays or pauses — but only a real click.
+//
+// A touch also arrives here as a click, and on a touch screen the picture is
+// what a finger lands on to bring the controls up. Answering both with a pause
+// means the controls cannot be reached without stopping what they are for.
+// The phone draws its own conclusion from the same rule: there, a tap shows the
+// bar first and only the next one pauses.
+video.addEventListener("click", (e) => {
+  if (e.pointerType && e.pointerType !== "mouse") return;
+  video.paused ? video.play() : video.pause();
+});
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
 video.addEventListener("pause", () => (playButton.innerHTML = PLAY));
 video.addEventListener("ended", () => {
@@ -803,16 +813,33 @@ video.addEventListener("ended", () => {
   if (at >= 0 && at + 1 < list.length) play(list[at + 1]);
 });
 
+// How often the line and the clock are redrawn while something plays.
+//
+// `timeupdate` fires whenever the player feels like it — four times a second on
+// some files, dozens on others — and every one of them rewrote the clock and
+// moved the knob. The reading only changes once a second, so most of that work
+// produced the same pixels. A fixed beat also makes the knob travel evenly
+// instead of in whatever steps the decoder happened to report.
+const TICK_MS = 200;
+let lastTick = 0;
+
 video.addEventListener("timeupdate", () => {
   // Not while the line is being dragged: the picture belongs to the hand then,
   // and letting playback write over it makes the knob jump back under the
   // pointer.
   if (scrubbing) return;
+  const now = performance.now();
+  if (now - lastTick < TICK_MS) return;
+  lastTick = now;
+  paintTime();
+});
+
+function paintTime() {
   const length = video.duration || 0;
   const at = video.currentTime || 0;
   markScrub(length ? at / length : 0);
   clock.textContent = say(at) + " / " + say(length);
-});
+}
 
 function say(seconds) {
   seconds = Math.max(0, Math.floor(seconds || 0));
@@ -863,6 +890,12 @@ scrub.addEventListener("mousedown", (e) => {
   document.addEventListener("mousemove", move);
   document.addEventListener("mouseup", up);
 });
+
+function seekStep(far) {
+  const length = video.duration || 0;
+  const share = length / (far ? 5 : 20);
+  return Math.min(Math.max(share, far ? 15 : 3), far ? 120 : 30);
+}
 
 const RATES = [1, 1.25, 1.5, 2, 0.5, 0.75];
 let rateAt = 0;
@@ -942,11 +975,17 @@ document.addEventListener("keydown", (e) => {
       e.preventDefault();
       video.paused ? video.play() : video.pause();
       break;
+    // A twentieth of what is playing, rather than a fixed three seconds — that
+    // is a third of a short clip and nothing at all in a two-hour film. Shift
+    // takes a fifth. Bounded so a very long file does not jump minutes and a
+    // very short one still moves.
     case "ArrowRight":
-      video.currentTime += e.shiftKey ? 30 : 3;
+      video.currentTime += seekStep(e.shiftKey);
+      paintTime();
       break;
     case "ArrowLeft":
-      video.currentTime -= e.shiftKey ? 30 : 3;
+      video.currentTime -= seekStep(e.shiftKey);
+      paintTime();
       break;
     case "Home":
       e.preventDefault();

@@ -208,7 +208,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         },
     )
     private val thumbCache = android.util.LruCache<android.net.Uri, android.graphics.Bitmap>(48)
-    private val tileCorner = 11f * activity.resources.displayMetrics.density
+    // The same rung `tile.xml` uses, read from the ladder rather than typed
+    // again: this one is applied in code because a ShapeableImageView takes its
+    // shape from a model, not from a background drawable.
+    private val tileCorner = activity.resources.getDimension(R.dimen.r_md)
     private val tilePad = (14 * activity.resources.displayMetrics.density).toInt()
     private val mutedTint =
         android.content.res.ColorStateList.valueOf(activity.getColor(R.color.muted))
@@ -551,7 +554,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             updateVideoBar()
             ui.removeCallbacks(vbTick)
             ui.post(vbTick)
-            ui.postDelayed(hideControls, CONTROLS_MS.toLong())
+            // Only while something is actually playing. A stopped picture is
+            // being looked at rather than watched, and taking the controls away
+            // from someone who paused to use them is taking them away at the
+            // one moment they are wanted. Pressing play starts the countdown,
+            // because that press comes back through here.
+            if (wantsPlay) ui.postDelayed(hideControls, CONTROLS_MS.toLong())
         } else {
             ui.removeCallbacks(vbTick)
         }
@@ -1905,11 +1913,21 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         /** The name, changed where it is written. */
         const val RENAME = 6
 
-        /** How long the controls stay up after being asked for. */
-        const val CONTROLS_MS = 3_000
+        /**
+         * How long the controls stay up after being asked for.
+         *
+         * Five seconds, not three. Three is over before a hand that has just
+         * seen the bar appear can reach the button it appeared for.
+         */
+        const val CONTROLS_MS = 5_000
 
-        /** How often the bar's scrubber and clock are moved along. */
-        const val TICK_MS = 500L
+        /**
+         * How often the bar's scrubber and clock are moved along.
+         *
+         * Twice a second was visible as a stutter in the knob — it moved in
+         * steps a fifth of a second wide while the film ran smoothly behind it.
+         */
+        const val TICK_MS = 200L
 
         /**
          * How far in "previous" stops meaning the one before and starts meaning

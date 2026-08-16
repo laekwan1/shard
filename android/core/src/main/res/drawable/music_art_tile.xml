@@ -3,7 +3,7 @@
      a warm rounded tile in the app's own amber, so the note has something to sit
      on rather than floating on black. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <corners android:radius="22dp" />
+    <corners android:radius="@dimen/r_xl" />
     <gradient
         android:startColor="#B06A2C"
         android:endColor="#E0A030"

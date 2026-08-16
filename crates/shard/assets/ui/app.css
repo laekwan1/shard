@@ -60,6 +60,26 @@
   --state-focus: rgba(255, 255, 255, .10);
   --state-press: rgba(255, 255, 255, .10);
   --state-drag: rgba(255, 255, 255, .16);
+
+  /*
+      Corners: one ladder, and the phone climbs the same one.
+
+      There were nine values in this file — 5, 6, 7, 8, 9, 10, 12, 14, 15, 34 —
+      and five more on the phone that had never been compared with them. None of
+      the differences meant anything; they were each chosen once, next to
+      whatever was already there.
+
+      Nesting takes the rule that an inner radius is the outer one less the gap
+      between them. A 20 tile with 8 of padding holds a 12 picture — otherwise
+      the inner corner is tighter than the outer and the two look pushed apart.
+  */
+  --r-xs: 4px;    /* a hairline marker, a drag indicator */
+  --r-sm: 8px;    /* a small button, a menu row */
+  --r-md: 12px;   /* a file row, a segment, a thumbnail */
+  --r-lg: 16px;   /* a panel that holds rows */
+  --r-xl: 20px;   /* a card, the 16:9 tile */
+  --r-2xl: 28px;  /* a sheet, the big art tile */
+  --r-pill: 999px;
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Malgun Gothic", sans-serif;
 }
 
@@ -177,7 +197,7 @@ button svg { display: block; }
   min-width: 0;
   max-width: 172px;
   padding: 0 8px 0 11px;
-  border-radius: 7px 7px 0 0;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
   font-size: 12px;
   color: var(--muted);
   background: #1a1a1a;
@@ -203,7 +223,7 @@ button svg { display: block; }
   font-size: 12px;
   align-self: flex-end;
   margin: 0 0 4px 5px;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 #newtab svg { width: 11px; height: 11px; }
 #newtab:hover { color: var(--on-surface); background: var(--state-hover); }
@@ -218,7 +238,7 @@ button svg { display: block; }
   padding: 0 8px;
   background: var(--toolbar);
 }
-#address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: 8px; color: var(--muted); font-size: 16px; }
+#address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: var(--r-sm); color: var(--muted); font-size: 16px; }
 #address button:hover { color: var(--on-surface); background: #ffffff0f; }
 #url {
   flex: 1;
@@ -229,7 +249,7 @@ button svg { display: block; }
   color: var(--on-surface);
   background: var(--field);
   border: 1px solid transparent;
-  border-radius: 15px;
+  border-radius: var(--r-pill);
   outline: none;
   user-select: text;
 }
@@ -242,7 +262,7 @@ button svg { display: block; }
   height: 24px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   color: var(--on-surface);
   transition: background var(--t-press) var(--ease), color var(--t-press) var(--ease);
 }
@@ -299,6 +319,13 @@ button svg { display: block; }
   stroke-linecap: round;
   transition: stroke .35s;
 }
+/* The only place a press is answered with movement. The switch is the thing
+   the window is for, and it is big enough that a press with no give reads as a
+   picture rather than a button. Size only — the colours underneath keep the
+   plain curve, because a colour that overshoots is a colour that is briefly
+   wrong. */
+#power { transition: transform var(--t-swap) var(--ease-over); }
+#power:active { transform: scale(.965); }
 #power:hover .halo { opacity: .06; }
 #power[aria-pressed="true"] .body { fill: #16302b; }
 #power[aria-pressed="true"] .ring { stroke: var(--accent); stroke-width: 3; }
@@ -322,11 +349,11 @@ button svg { display: block; }
 .download .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed, and the reading beside it given room for three digits in figures of
    one width: without both, the bar grew and shrank as the number changed. */
-.download .track { flex: none; width: 96px; height: 4px; border-radius: 99px; background: var(--field); overflow: hidden; }
+.download .track { flex: none; width: 96px; height: 4px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; }
 .download .percent { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* Told to be a block. A span is inline, and a width set on an inline box is
    ignored — which is why the track was there and the colour in it never was. */
-.download .fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width var(--t-swap) var(--ease); }
+.download .fill { display: block; height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width var(--t-swap) var(--ease); }
 .download .stop { width: 20px; height: 20px; border-radius: 50%; color: var(--muted); }
 .download .stop:hover { background: var(--state-hover); color: var(--on-surface); }
 
@@ -364,7 +391,7 @@ button svg { display: block; }
   background: var(--surface);
   /* Square where it meets the panel. Rounded, the two bottom corners would show
      the chrome colour behind them as a pair of bright wedges on the rule. */
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--r-md) var(--r-md) 0 0;
 }
 .shelf {
   /* Half each of whatever the row is. */
@@ -380,12 +407,12 @@ button svg { display: block; }
   color: var(--muted);
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
 .shelf svg { width: 15px; height: 15px; }
 .shelf:hover { color: var(--on-surface); }
-.shelf.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
+.shelf.on { color: #fff; background: #34343b; border-color: #ffffffa6; font-weight: 700; }
 
 #sheet {
   flex: 1;
@@ -429,11 +456,14 @@ button svg { display: block; }
   color: var(--muted);
   background: transparent;
   border: 1px solid #ffffff1c;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
 .folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
-.folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
+/* Chosen says so by weight, not by growing. A label that changes size when it
+   is picked reflows the row it is in, and the row jumps under the pointer that
+   picked it. */
+.folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip
@@ -447,7 +477,7 @@ button svg { display: block; }
   padding: 0;
   font-size: 12px;
   border-color: transparent;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 .folder.add svg { width: 11px; height: 11px; }
 .folder.add:hover { background: var(--state-hover); color: #fff; border-color: transparent; }
@@ -472,7 +502,7 @@ button svg { display: block; }
   align-items: center;
   gap: 8px;
   padding: 7px 10px 7px 14px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   margin: 0 6px;
 }
 /* A hair between one row and the next, held off both walls so it reads as a
@@ -497,7 +527,7 @@ button svg { display: block; }
   left: 10px;
   right: 10px;
   height: 2px;
-  border-radius: 2px;
+  border-radius: var(--r-xs);
   background: var(--accent);
 }
 .file.above::after { top: -1px; }
@@ -510,7 +540,7 @@ button svg { display: block; }
   flex: none;
   width: 44px;
   height: 26px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: #0b0d11 center/cover no-repeat;
   border: 1px solid #ffffff0f;
 }
@@ -529,7 +559,7 @@ button svg { display: block; }
 }
 .file .go svg { width: 11px; height: 11px; }
 .file .go:hover { color: #fff; background: #ffffff1f; }
-.file .rename { flex: 1; font: inherit; font-size: 12px; color: var(--on-surface); background: var(--field); border: 1px solid var(--accent); border-radius: 6px; padding: 4px 8px; }
+.file .rename { flex: 1; font: inherit; font-size: 12px; color: var(--on-surface); background: var(--field); border: 1px solid var(--accent); border-radius: var(--r-sm); padding: 4px 8px; }
 
 #empty { margin: 34px auto; text-align: center; font-size: 11.5px; color: var(--muted); }
 
@@ -560,7 +590,7 @@ button svg { display: block; }
 .settings-bar { display: flex; justify-content: flex-end; gap: 6px; max-width: 720px; margin: 0 auto 16px; }
 .settings-bar button {
   padding: 7px 13px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   font-size: 12px;
   color: var(--muted);
   border: 1px solid var(--divider);
@@ -592,7 +622,7 @@ button svg { display: block; }
   flex: none;
   width: 42px;
   height: 24px;
-  border-radius: 99px;
+  border-radius: var(--r-pill);
   background: var(--field);
   position: relative;
   transition: background var(--t-swap) var(--ease);
@@ -613,7 +643,7 @@ button svg { display: block; }
 .choice { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .choice button {
   padding: 6px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   font-size: 12px;
   color: var(--muted);
   background: var(--raised);
@@ -631,7 +661,7 @@ button svg { display: block; }
   color: var(--on-surface);
   background: var(--field);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   outline: none;
   resize: vertical;
   user-select: text;
@@ -648,10 +678,10 @@ button svg { display: block; }
   padding: 5px;
   background: var(--raised);
   border: 1px solid var(--divider);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   box-shadow: 0 12px 30px #000000a6;
 }
-#menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 12.5px; }
+#menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: var(--r-sm); font-size: 12.5px; }
 #menu button:hover { background: var(--state-hover); }
 #menu button.danger:hover { background: #7f1d1d; color: #fff; }
 #menu hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
@@ -670,12 +700,12 @@ button svg { display: block; }
   color: var(--on-surface);
   background: var(--field);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--r-sm);
   outline: none;
   user-select: text;
 }
 #probe input:focus { border-color: var(--accent); }
-#probe .go { padding: 0 16px; height: 32px; border-radius: 8px; font-size: 12px; color: var(--on-surface); border: 1px solid #ffffff45; }
+#probe .go { padding: 0 16px; height: 32px; border-radius: var(--r-sm); font-size: 12px; color: var(--on-surface); border: 1px solid #ffffff45; }
 #probe .go:hover { color: #04252b; background: var(--accent); border-color: var(--accent); }
 #probe .go[disabled] { color: var(--dim); border-color: var(--divider); background: none; }
 /* What the run has said so far, oldest first. */
@@ -709,7 +739,7 @@ button svg { display: block; }
   place-items: center;
   width: 152px;
   height: 152px;
-  border-radius: 34px;
+  border-radius: var(--r-2xl);
   background:
     radial-gradient(120% 120% at 28% 12%, #4fe3f5 0%, #22c2dd 38%, #0e7f95 72%, #0a5d70 100%);
   box-shadow:
@@ -727,7 +757,7 @@ button svg { display: block; }
   width: min(78%, 520px);
   height: auto;
   aspect-ratio: 16 / 9;
-  border-radius: 14px;
+  border-radius: var(--r-lg);
   background-color: #0b0d11;
   background-size: contain;
   background-position: center;
@@ -784,7 +814,7 @@ button svg { display: block; }
   top: 50%;
   height: 2px;
   margin-top: -1px;
-  border-radius: 99px;
+  border-radius: var(--r-pill);
   background: #ffffff33;
 }
 #played {
@@ -794,7 +824,7 @@ button svg { display: block; }
   height: 2px;
   margin-top: -1px;
   width: 0;
-  border-radius: 99px;
+  border-radius: var(--r-pill);
   background: var(--accent);
 }
 /* Centred on its own point rather than nudged there with a margin, so growing
@@ -842,7 +872,7 @@ button svg { display: block; }
 */
 #player.mini #scrub { height: 16px; }
 #player.mini #row { gap: 10px; margin-top: 3px; }
-#player.mini #row button { width: 30px; height: 30px; border-radius: 8px; }
+#player.mini #row button { width: 30px; height: 30px; border-radius: var(--r-sm); }
 #player.mini #knob { width: 8px; height: 8px; }
 #player.mini #scrub:hover #knob { width: 11px; height: 11px; }
 #player.mini #now { display: none; }
@@ -878,7 +908,7 @@ button svg { display: block; }
   height: 48px;
   display: grid;
   place-items: center;
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   color: var(--muted);
   font-size: 13px;
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease);
@@ -908,7 +938,7 @@ button svg { display: block; }
    and beside controls this size the bar and its handle were the heaviest things
    on the row. */
 #volume { width: 42px; height: 10px; appearance: none; -webkit-appearance: none; background: transparent; }
-#volume::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: var(--field); }
+#volume::-webkit-slider-runnable-track { height: 3px; border-radius: var(--r-pill); background: var(--field); }
 #volume::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 7px;
@@ -924,10 +954,10 @@ button svg { display: block; }
   padding: 4px;
   background: var(--raised);
   border: 1px solid var(--divider);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   box-shadow: 0 12px 30px #000000a6;
 }
-#rates button { display: block; width: 100%; text-align: left; padding: 5px 12px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+#rates button { display: block; width: 100%; text-align: left; padding: 5px 12px; border-radius: var(--r-sm); font-size: 12px; color: var(--muted); }
 #rates button:hover { background: var(--state-hover); color: #fff; }
 #rates button.on { color: var(--accent); }
 
