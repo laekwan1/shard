@@ -10,7 +10,16 @@
 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="@color/state_drag">
-    <item android:id="@android:id/mask">
+    <!-- The glow is inset from the touch target: the target is 48dp because a
+         finger needs it, but light filling all 48 made the press look bigger
+         than the glyph it answered. 7dp off each side leaves a 34dp square —
+         the glyph plus a hand's width of light around it. -->
+    <item
+        android:id="@android:id/mask"
+        android:left="7dp"
+        android:top="7dp"
+        android:right="7dp"
+        android:bottom="7dp">
         <shape android:shape="rectangle">
             <corners android:radius="@dimen/r_md" />
             <solid android:color="#FFFFFF" />
