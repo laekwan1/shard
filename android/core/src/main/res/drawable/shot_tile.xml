@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The well behind a list row's 16:9 frame, before a thumbnail lands.
+
+    Its own drawable rather than `tile`: the tile's 12dp corner is right on the
+    46dp square in the music bar, but on a frame 36 tall it is a third of the
+    height and the well read as a pill. The corner here matches `shotCorner` in
+    LibraryScreen — the clip and the background have to agree, or the picture
+    shows one shape and the empty state another.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="@dimen/r_xs" />
+    <solid android:color="@color/raised" />
+</shape>

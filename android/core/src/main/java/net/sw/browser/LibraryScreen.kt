@@ -224,15 +224,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val tileCorner = activity.resources.getDimension(R.dimen.r_md)
 
     /**
-     * The corner on the list row's frame, which is a rung below the tile's.
+     * The corner on the list row's frame: the bottom rung.
      *
      * A radius is only right against the side it is cut from. 12 on the 46dp
-     * square in the music bar reads as a rounded tile; the same 12 on a frame
-     * 36 tall is a third of its height, and the row came out holding lozenges
-     * rather than pictures. The desktop's own 26px frame uses the bottom rung
-     * for the same reason.
+     * square in the music bar reads as a rounded tile; on a frame 36 tall it
+     * was a third of the height and the pictures came out as lozenges. Even 8
+     * still read as a pill at that height — a corner keeps reading as a curve
+     * until it is a clearly small share of the side, and on 36dp that is 4.
+     * The desktop's own 26px frame sits on the same rung.
      */
-    private val shotCorner = activity.resources.getDimension(R.dimen.r_sm)
+    private val shotCorner = activity.resources.getDimension(R.dimen.r_xs)
     // Sized to the shorter side of the 64x36 frame. At the 14dp it was drawn for
     // — a 52dp square — the glyph came out taller than the frame it sits in.
     private val tilePad = (8 * activity.resources.displayMetrics.density).toInt()
