@@ -1947,11 +1947,28 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
             folderRow.addView(chip)
         }
-        // The way to make a folder: a bare +, the last tab in the row —
-        // where the folder it makes will appear, so cause and effect share an
-        // address. Just the mark: the dialog it opens says the rest, and a
-        // label would make the quietest control on the strip the widest.
-        folderRow.addView(chip("+", false, "") { askForFolder() })
+        // The way to make a folder: the same button the desktop's tab strip
+        // ends with — a small rounded square beside the tabs, not a tab among
+        // them. A + drawn as a tab promised a folder that does not exist yet;
+        // a button beside the row says "this makes more of these".
+        val density = activity.resources.displayMetrics.density
+        val add = TextView(activity)
+        add.text = "+"
+        add.textSize = 17f
+        add.setTextColor(activity.getColor(R.color.muted))
+        add.gravity = android.view.Gravity.CENTER
+        add.includeFontPadding = false
+        add.setBackgroundResource(R.drawable.new_tab)
+        add.layoutParams = LinearLayout.LayoutParams(
+            (30 * density).toInt(),
+            (30 * density).toInt(),
+        ).apply {
+            gravity = android.view.Gravity.BOTTOM
+            marginStart = (6 * density).toInt()
+            bottomMargin = (4 * density).toInt()
+        }
+        add.setOnClickListener { askForFolder() }
+        folderRow.addView(add)
     }
 
     /**
@@ -1982,9 +1999,14 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             view.typeface,
             if (on) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL,
         )
-        val padH = (13 * density).toInt()
+        val padH = (16 * density).toInt()
         val padV = (6 * density).toInt()
         view.setPadding(padH, padV, padH, padV)
+        // A floor under the width, so one-word folders read as tabs rather
+        // than as text with corners. Centred, or a short name leans left in
+        // the room the floor grants it.
+        view.minimumWidth = (64 * density).toInt()
+        view.gravity = android.view.Gravity.CENTER
         view.setOnClickListener { tap() }
         // A folder is somewhere to put things, so it accepts things being put
         // on it. The chip lifts while a row is over it, or a drop is a guess.

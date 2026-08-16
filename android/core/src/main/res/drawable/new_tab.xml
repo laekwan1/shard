@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The new-folder button, the same shape the desktop's new-tab button is: a
+    small rounded square beside the tabs, quiet until pressed. A ripple bounded
+    by the mask rather than a painted background — the desktop one has no fill
+    until the pointer is on it, and this is the touch equivalent.
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/state_drag">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/r_sm" />
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+</ripple>
