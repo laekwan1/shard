@@ -76,12 +76,12 @@
         android:id="@+id/more"
         android:focusable="false"
         android:focusableInTouchMode="false"
-        android:layout_width="38dp"
-        android:layout_height="38dp"
+        android:layout_width="@dimen/target"
+        android:layout_height="@dimen/target"
         android:layout_marginStart="6dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:src="@drawable/ic_more"
         android:scaleType="fitCenter"
-        android:padding="9dp"
+        android:padding="14dp"
         android:contentDescription="@string/menu" />
 </LinearLayout>

@@ -81,7 +81,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val vbOnward: ImageButton = root.findViewById(R.id.vbOnward)
     private val vbShuffle: ImageButton = root.findViewById(R.id.vbShuffle)
     private val vbBackground: ImageButton = root.findViewById(R.id.vbBackground)
-    private val vbClock: TextView = root.findViewById(R.id.vbClock)
+    private val vbElapsed: TextView = root.findViewById(R.id.vbElapsed)
+    private val vbTotal: TextView = root.findViewById(R.id.vbTotal)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
     private val npPrev: ImageButton = root.findViewById(R.id.npPrev)
     private val npNext: ImageButton = root.findViewById(R.id.npNext)
@@ -465,6 +466,40 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** Whether the bar over the picture is up. */
     private var controlsShown = false
 
+    // The shared motion ladder — the same three durations and curves the desktop
+    // shell keeps in `app.css`, read from resources so there is one place to
+    // change them. See `res/values/motion.xml`.
+    private val tSwap = activity.resources.getInteger(R.integer.t_swap).toLong()
+    private val easeIn =
+        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_in)
+    private val easeOut =
+        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_out)
+
+    /**
+     * Bring a control in, or take it out, on the shared curve.
+     *
+     * The bar used to appear and vanish outright. Over a moving picture that
+     * reads as a glitch rather than as something arriving — there is nothing to
+     * tell the eye that the bar came from anywhere. Arriving and leaving get
+     * different curves because they are different events: one settles, the other
+     * gets out of the way.
+     */
+    private fun fade(view: View, on: Boolean) {
+        view.animate().cancel()
+        if (on) {
+            if (view.visibility != View.VISIBLE) view.alpha = 0f
+            view.visibility = View.VISIBLE
+            view.animate().alpha(1f).setDuration(tSwap).setInterpolator(easeIn).start()
+        } else {
+            if (view.visibility != View.VISIBLE) {
+                view.alpha = 0f
+                return
+            }
+            view.animate().alpha(0f).setDuration(tSwap).setInterpolator(easeOut)
+                .withEndAction { view.visibility = View.GONE }.start()
+        }
+    }
+
     /** True while the video scrubber is under a finger, so the ticker leaves it. */
     private var vbSeeking = false
 
@@ -498,8 +533,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (on && playing?.kind != Library.Kind.VIDEO) return
         controlsShown = on
         ui.removeCallbacks(hideControls)
-        videoBar.visibility = if (on) View.VISIBLE else View.GONE
-        leaveFullScreen.visibility = if (on && expanded) View.VISIBLE else View.GONE
+        fade(videoBar, on)
+        fade(leaveFullScreen, on && expanded)
         if (on) {
             updateVideoBar()
             ui.removeCallbacks(vbTick)
@@ -518,7 +553,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 val duration = exo.duration.coerceAtLeast(1)
                 val position = exo.currentPosition.coerceIn(0, duration)
                 if (!vbSeeking) vbSeek.progress = (position * 1000 / duration).toInt()
-                vbClock.text = "${clock(position.toInt())} / ${clock(duration.toInt())}"
+                vbElapsed.text = clock(position.toInt())
+                vbTotal.text = clock(duration.toInt())
             }
             ui.postDelayed(this, TICK_MS)
         }
@@ -706,7 +742,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 val duration = player?.duration ?: return
                 val at = progress.toLong() * duration / 1000
                 player?.seekTo(at)
-                vbClock.text = "${clock(at.toInt())} / ${clock(duration.toInt())}"
+                vbElapsed.text = clock(at.toInt())
             }
             override fun onStartTrackingTouch(bar: android.widget.SeekBar) {
                 vbSeeking = true
@@ -1621,8 +1657,9 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         )
         // The way back, in the corner every screen keeps it. Full screen hides
         // the header this normally lives in, and a gesture nobody was told
-        // about is not a way out.
-        leaveFullScreen.visibility = if (expanded) View.VISIBLE else View.GONE
+        // about is not a way out. It travels with the bar, so whether it is up
+        // is the bar's question — this only says whether it is allowed at all.
+        fade(leaveFullScreen, expanded && controlsShown)
         stage.post { fitSurface() }
     }
 

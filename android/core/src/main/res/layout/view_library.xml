@@ -51,12 +51,12 @@
 
             <ImageButton
                 android:id="@+id/backFromLibrary"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="@dimen/target"
+                android:layout_height="@dimen/target"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_back"
                 android:scaleType="fitCenter"
-                android:padding="8dp"
+                android:padding="12dp"
                 android:contentDescription="@string/library_back" />
 
             <LinearLayout
@@ -218,21 +218,62 @@
                 android:visibility="gone">
 
                 <!--
-                    Tinted by hand. A SeekBar is a platform widget and takes its
-                    colour from `android:colorControlActivated`, which the
-                    Material theme sets to its own lavender — setting
-                    `colorPrimary` to the app's accent, as the theme does, never
-                    reaches it. So the scrubber came out a colour that appears
-                    nowhere else in either app.
+                    The line, with the two times at its ends — the same shape
+                    the music bar has, so a song and a video are not two things
+                    to learn.
+
+                    The times used to sit in the button row. Once every button
+                    became 48 across, seven of them and a clock came to more
+                    than a 411dp phone has, and the total was clipped clean off:
+                    it read "0:01 /". Out here they cost no height at all, since
+                    the line is already 48 tall for the sake of the finger.
+
+                    The line itself is drawn by us. A SeekBar takes its colour
+                    from `android:colorControlActivated`, which the Material
+                    theme sets to its own lavender — setting `colorPrimary` to
+                    the app's accent, as the theme does, never reaches it.
                 -->
-                <SeekBar
-                    android:id="@+id/vbSeek"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:progressTint="@color/accent"
-                    android:thumbTint="@color/accent"
-                    android:progressBackgroundTint="@color/muted"
-                    android:max="1000" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/vbElapsed"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="42dp"
+                        android:gravity="center"
+                        android:textColor="@color/on_surface"
+                        android:textSize="11sp"
+                        android:maxLines="1"
+                        android:fontFeatureSettings="tnum"
+                        android:text="0:00" />
+
+                    <SeekBar
+                        android:id="@+id/vbSeek"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/target"
+                        android:layout_weight="1"
+                        android:progressDrawable="@drawable/scrub_track"
+                        android:thumb="@drawable/scrub_thumb"
+                        android:splitTrack="false"
+                        android:maxHeight="2dp"
+                        android:max="1000" />
+
+                    <TextView
+                        android:id="@+id/vbTotal"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="42dp"
+                        android:gravity="center"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp"
+                        android:maxLines="1"
+                        android:fontFeatureSettings="tnum"
+                        android:text="0:00" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -242,32 +283,32 @@
 
                     <ImageButton
                         android:id="@+id/vbPrev"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_pb_prev"
                         android:scaleType="fitCenter"
-                        android:padding="10dp"
+                        android:padding="14dp"
                         android:contentDescription="@string/library_previous" />
 
                     <ImageButton
                         android:id="@+id/vbToggle"
-                        android:layout_width="46dp"
-                        android:layout_height="46dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_pb_pause"
                         android:scaleType="fitCenter"
-                        android:padding="10dp"
+                        android:padding="11dp"
                         android:contentDescription="@string/library_playing" />
 
                     <ImageButton
                         android:id="@+id/vbNext"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_pb_next"
                         android:scaleType="fitCenter"
-                        android:padding="10dp"
+                        android:padding="14dp"
                         android:contentDescription="@string/library_next" />
 
                     <!--
@@ -278,56 +319,50 @@
                     -->
                     <ImageButton
                         android:id="@+id/vbOnward"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:layout_marginStart="4dp"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_onward"
                         android:scaleType="fitCenter"
-                        android:padding="11dp"
+                        android:padding="16dp"
                         android:contentDescription="@string/library_end_next" />
 
                     <ImageButton
                         android:id="@+id/vbShuffle"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_shuffle"
                         android:scaleType="fitCenter"
-                        android:padding="11dp"
+                        android:padding="16dp"
                         android:contentDescription="@string/library_end_shuffle" />
 
                     <ImageButton
                         android:id="@+id/vbBackground"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_offscreen"
                         android:scaleType="fitCenter"
-                        android:padding="11dp"
+                        android:padding="16dp"
                         android:contentDescription="@string/library_background" />
 
-                    <TextView
-                        android:id="@+id/vbClock"
+                    <!-- What is left over, between the settings and the way out
+                         of full screen. The times moved up to the line. -->
+                    <View
                         android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:gravity="end"
-                        android:paddingHorizontal="6dp"
-                        android:textColor="@color/on_surface"
-                        android:textSize="11sp"
-                        android:maxLines="1"
-                        android:fontFeatureSettings="tnum"
-                        android:text="0:00 / 0:00" />
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
 
                     <ImageButton
                         android:id="@+id/expand"
-                        android:layout_width="40dp"
-                        android:layout_height="40dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_expand"
                         android:scaleType="fitCenter"
-                        android:padding="10dp"
+                        android:padding="14dp"
                         android:contentDescription="@string/library_expand" />
                 </LinearLayout>
             </LinearLayout>
@@ -394,8 +429,8 @@
 
                 <com.google.android.material.imageview.ShapeableImageView
                     android:id="@+id/npArt"
-                    android:layout_width="46dp"
-                    android:layout_height="46dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="@drawable/tile"
                     android:scaleType="centerInside"
                     android:padding="12dp"
@@ -431,8 +466,8 @@
 
                 <ImageButton
                     android:id="@+id/npStop"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_close"
                     android:scaleType="fitCenter"
@@ -462,11 +497,12 @@
                 <SeekBar
                     android:id="@+id/npSeek"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
+                    android:layout_height="@dimen/target"
                     android:layout_weight="1"
-                    android:progressTint="@color/accent"
-                    android:thumbTint="@color/accent"
-                    android:progressBackgroundTint="@color/muted"
+                    android:progressDrawable="@drawable/scrub_track"
+                    android:thumb="@drawable/scrub_thumb"
+                    android:splitTrack="false"
+                    android:maxHeight="2dp"
                     android:max="1000" />
 
                 <TextView
@@ -494,32 +530,32 @@
 
                 <ImageButton
                     android:id="@+id/npPrev"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_pb_prev"
                     android:scaleType="fitCenter"
-                    android:padding="10dp"
+                    android:padding="14dp"
                     android:contentDescription="@string/library_previous" />
 
                 <ImageButton
                     android:id="@+id/npToggle"
-                    android:layout_width="46dp"
-                    android:layout_height="46dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_pb_pause"
                     android:scaleType="fitCenter"
-                    android:padding="10dp"
+                    android:padding="11dp"
                     android:contentDescription="@string/library_playing" />
 
                 <ImageButton
                     android:id="@+id/npNext"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_pb_next"
                     android:scaleType="fitCenter"
-                    android:padding="10dp"
+                    android:padding="14dp"
                     android:contentDescription="@string/library_next" />
 
                 <View
@@ -529,32 +565,32 @@
 
                 <ImageButton
                     android:id="@+id/npOnward"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_onward"
                     android:scaleType="fitCenter"
-                    android:padding="11dp"
+                    android:padding="16dp"
                     android:contentDescription="@string/library_end_next" />
 
                 <ImageButton
                     android:id="@+id/npShuffle"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_shuffle"
                     android:scaleType="fitCenter"
-                    android:padding="11dp"
+                    android:padding="16dp"
                     android:contentDescription="@string/library_end_shuffle" />
 
                 <ImageButton
                     android:id="@+id/npBackground"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_offscreen"
                     android:scaleType="fitCenter"
-                    android:padding="11dp"
+                    android:padding="16dp"
                     android:contentDescription="@string/library_background" />
             </LinearLayout>
         </LinearLayout>
@@ -602,8 +638,8 @@
 
                 <ImageButton
                     android:id="@+id/newFolder"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
                     android:layout_marginEnd="6dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_new_folder"
@@ -641,8 +677,8 @@
 
                     <ImageView
                         android:id="@+id/emptyIcon"
-                        android:layout_width="46dp"
-                        android:layout_height="46dp"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
                         android:layout_marginBottom="14dp"
                         android:alpha="0.5"
                         android:src="@drawable/ic_video"

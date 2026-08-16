@@ -5,6 +5,13 @@
     <style name="Theme.Shard" parent="Theme.Material3.Dark.NoActionBar">
         <item name="colorPrimary">@color/accent</item>
         <item name="colorOnPrimary">@color/on_accent</item>
+        <!--
+             The ripple, set once here rather than at each button: the theme
+             hands this to every `?attr/selectableItemBackground*` in the app,
+             so it is the one place a state layer can be a ladder rather than a
+             guess. The shell keeps the same ladder in its own state layer tokens.
+        -->
+        <item name="android:colorControlHighlight">@color/state_press</item>
         <item name="android:statusBarColor" tools:targetApi="l">@android:color/transparent</item>
         <item name="android:navigationBarColor" tools:targetApi="l">@color/surface</item>
         <item name="android:windowBackground">@color/surface</item>

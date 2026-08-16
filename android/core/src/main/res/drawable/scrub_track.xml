@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The scrubber's line: 2dp, and two levels rather than three.
+
+    There is no buffered level. Everything the library plays is a file on this
+    phone, so a buffer bar would be a full-width stripe from the first frame —
+    brighter than the part that has actually played, and saying nothing.
+
+    The unplayed part is white at 20%, not the field colour: this sits over a
+    picture as often as over a panel, and a fixed grey disappears into a dark
+    frame.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/background">
+        <shape android:shape="rectangle">
+            <size android:height="2dp" />
+            <corners android:radius="100dp" />
+            <solid android:color="#33FFFFFF" />
+        </shape>
+    </item>
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <size android:height="2dp" />
+                <corners android:radius="100dp" />
+                <solid android:color="@color/accent" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Motion, as three durations and one ladder of state layers — the same numbers
+    the desktop shell keeps in `app.css`, so the two apps do not drift.
+
+    Three durations rather than the one that used to be typed at every call
+    site. A colour arriving is almost instant; a thing changing size has to be
+    followed by the eye and needs longer. Anything that moves should say which
+    of the three it is.
+-->
+<resources>
+    <!-- A tint under a finger. -->
+    <integer name="t_press">100</integer>
+    <!-- A chip taking force, a pill sliding, a bar arriving. -->
+    <integer name="t_swap">200</integer>
+    <!-- A screen arriving or leaving. -->
+    <integer name="t_screen">350</integer>
+
+    <!--
+        The state layer. On the phone this is the ripple colour, which the theme
+        hands to every `?attr/selectableItemBackground*` in the app at once —
+        so it is set here rather than at each button.
+    -->
+    <color name="state_hover">#14FFFFFF</color>
+    <color name="state_press">#1AFFFFFF</color>
+    <color name="state_drag">#29FFFFFF</color>
+
+    <!-- The reach a finger needs, whatever the thing being pressed looks like. -->
+    <dimen name="target">48dp</dimen>
+</resources>

@@ -24,6 +24,38 @@
   --dim: #606878;            /* the power ring when it is off */
   --bar: 32px;              /* a Windows caption's own height */
   --toolbar-h: 46px;        /* TOOLBAR_HEIGHT */
+
+  /*
+      Motion: three durations and three curves, rather than the one number that
+      was typed at every call site.
+
+      A tint and a size change were moving at the same speed, which is what made
+      everything feel like it was on the same rubber band. A colour arriving is
+      almost instant; a thing changing size has to be followed by the eye and
+      needs longer. `--ease` is the house curve — it leaves quickly and settles
+      slowly, so a movement reads as ending rather than stopping.
+  */
+  --t-press: 100ms;   /* a tint under a pointer */
+  --t-swap: 200ms;    /* a chip taking force, a pill sliding */
+  --t-screen: 350ms;  /* a screen arriving or leaving */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  /*
+      Overshoot is for position, size and radius only, and only on the two
+      things that are meant to feel physical: the power switch and the stage.
+      A colour that overshoots is a colour that is briefly wrong.
+  */
+  --ease-over: cubic-bezier(.2, 1.2, .3, 1);
+
+  /*
+      State layers: one ladder for every surface a pointer can touch, instead of
+      a different #ffffffXX guessed at each place. Same numbers on the phone.
+  */
+  --state-hover: rgba(255, 255, 255, .08);
+  --state-focus: rgba(255, 255, 255, .10);
+  --state-press: rgba(255, 255, 255, .10);
+  --state-drag: rgba(255, 255, 255, .16);
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, "Malgun Gothic", sans-serif;
 }
 
@@ -103,7 +135,7 @@ button svg { display: block; }
   padding: 0 20px 0 10px;
   flex: none;
   color: var(--on-surface);
-  transition: color .13s;
+  transition: color var(--t-press) var(--ease);
 }
 #chip svg {
   width: 16px;
@@ -111,12 +143,12 @@ button svg { display: block; }
   color: var(--accent);
   /* Dimmed until wanted, so the mark is not the loudest thing on screen. */
   opacity: .82;
-  transition: opacity .13s, transform .1s;
+  transition: opacity var(--t-press) var(--ease), transform var(--t-press) var(--ease);
 }
 #chip span {
   font-size: 12.5px;
   font-weight: 400;
-  transition: transform .1s;
+  transition: transform var(--t-press) var(--ease);
 }
 #chip:hover { color: #fff; }
 #chip:hover svg { opacity: 1; }
@@ -145,7 +177,7 @@ button svg { display: block; }
   font-size: 12px;
   color: var(--muted);
   background: #1a1a1a;
-  transition: background .12s, color .12s;
+  transition: background var(--t-press) var(--ease), color var(--t-press) var(--ease);
 }
 .tab:hover { background: #262626; color: var(--on-surface); }
 /* The one in front is the sheet below it: same colour, no seam. */
@@ -170,7 +202,7 @@ button svg { display: block; }
   border-radius: 6px;
 }
 #newtab svg { width: 11px; height: 11px; }
-#newtab:hover { color: var(--on-surface); background: #ffffff14; }
+#newtab:hover { color: var(--on-surface); background: var(--state-hover); }
 
 /* ---- the address row ------------------------------------------------------ */
 
@@ -208,10 +240,10 @@ button svg { display: block; }
   place-items: center;
   border-radius: 5px;
   color: var(--on-surface);
-  transition: background .12s, color .12s;
+  transition: background var(--t-press) var(--ease), color var(--t-press) var(--ease);
 }
 #frame-buttons svg { width: 11px; height: 11px; }
-#frame-buttons button:hover { background: #ffffff14; color: var(--on-surface); }
+#frame-buttons button:hover { background: var(--state-hover); color: var(--on-surface); }
 #frame-buttons button.danger:hover { background: #e81123; color: #fff; }
 
 /* ---- screens ------------------------------------------------------------- */
@@ -290,9 +322,9 @@ button svg { display: block; }
 .download .percent { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* Told to be a block. A span is inline, and a width set on an inline box is
    ignored — which is why the track was there and the colour in it never was. */
-.download .fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .2s; }
+.download .fill { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width var(--t-swap) var(--ease); }
 .download .stop { width: 20px; height: 20px; border-radius: 50%; color: var(--muted); }
-.download .stop:hover { background: #ffffff14; color: var(--on-surface); }
+.download .stop:hover { background: var(--state-hover); color: var(--on-surface); }
 
 /* ---- library --------------------------------------------------------------
    The two shelves are tabs, and the sheet below carries their colour, so the
@@ -345,7 +377,7 @@ button svg { display: block; }
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
-  transition: color .13s, background .13s, border-color .13s;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
 .shelf svg { width: 15px; height: 15px; }
 .shelf:hover { color: var(--on-surface); }
@@ -394,7 +426,7 @@ button svg { display: block; }
   background: transparent;
   border: 1px solid #ffffff1c;
   border-radius: 8px;
-  transition: color .12s, background .12s, border-color .12s;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
 .folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
 .folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
@@ -414,7 +446,7 @@ button svg { display: block; }
   border-radius: 6px;
 }
 .folder.add svg { width: 11px; height: 11px; }
-.folder.add:hover { background: #ffffff14; color: #fff; border-color: transparent; }
+.folder.add:hover { background: var(--state-hover); color: #fff; border-color: transparent; }
 
 /*
     The list, in the same panel the folders are on. What is left below it stays
@@ -448,7 +480,7 @@ button svg { display: block; }
   right: 8px;
   top: 0;
   height: 1px;
-  background: #ffffff14;
+  background: var(--state-hover);
 }
 .file:hover { background: #ffffff0d; }
 .file:hover::before, .file:hover + .file::before { background: transparent; }
@@ -489,7 +521,7 @@ button svg { display: block; }
   display: grid; place-items: center;
   border-radius: 50%;
   color: var(--muted);
-  transition: color .12s, background .12s;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease);
 }
 .file .go svg { width: 11px; height: 11px; }
 .file .go:hover { color: #fff; background: #ffffff1f; }
@@ -528,7 +560,7 @@ button svg { display: block; }
   font-size: 12px;
   color: var(--muted);
   border: 1px solid var(--divider);
-  transition: color .13s, background .13s, border-color .13s;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
 .settings-bar button:hover { color: var(--on-surface); background: #ffffff0a; }
 /* The one that says the screen is done with. */
@@ -559,7 +591,7 @@ button svg { display: block; }
   border-radius: 99px;
   background: var(--field);
   position: relative;
-  transition: background .16s;
+  transition: background var(--t-swap) var(--ease);
 }
 .switch span {
   position: absolute;
@@ -569,7 +601,7 @@ button svg { display: block; }
   height: 18px;
   border-radius: 50%;
   background: var(--muted);
-  transition: transform .16s, background .16s;
+  transition: transform var(--t-swap) var(--ease), background var(--t-swap) var(--ease);
 }
 .switch.on { background: #2dd4bf3d; }
 .switch.on span { transform: translateX(18px); background: var(--accent); }
@@ -581,7 +613,7 @@ button svg { display: block; }
   font-size: 12px;
   color: var(--muted);
   background: var(--raised);
-  transition: color .12s, background .12s;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease);
 }
 .choice button:hover { color: var(--on-surface); }
 .choice button.on { color: #04252b; background: var(--accent); font-weight: 700; }
@@ -616,7 +648,7 @@ button svg { display: block; }
   box-shadow: 0 12px 30px #000000a6;
 }
 #menu button { display: block; width: 100%; text-align: left; padding: 8px 10px; border-radius: 7px; font-size: 12.5px; }
-#menu button:hover { background: #ffffff14; }
+#menu button:hover { background: var(--state-hover); }
 #menu button.danger:hover { background: #7f1d1d; color: #fff; }
 #menu hr { border: 0; border-top: 1px solid var(--divider); margin: 4px 2px; }
 
@@ -707,14 +739,75 @@ button svg { display: block; }
   filter: drop-shadow(0 1px 0 #ffffff30);
 }
 
-#controls { background: #0b0b0d; border-top: 1px solid var(--divider); padding: 10px 14px 12px; }
+/* Little padding of its own: the scrubber's reach is 15px of empty space above
+   and below the line already, and adding to it twice is what made the panel
+   taller than the picture deserved. */
+#controls { background: #0b0b0d; border-top: 1px solid var(--divider); padding: 2px 14px 8px; }
 
-/* The scrubber: a line to press anywhere along. */
-#scrub { position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; }
-#scrub::before { content: ""; position: absolute; left: 0; right: 0; height: 4px; border-radius: 99px; background: var(--field); }
-#played { position: absolute; left: 0; height: 4px; width: 0; border-radius: 99px; background: var(--accent); }
-#knob { position: absolute; width: 12px; height: 12px; margin-left: -5px; border-radius: 50%; background: #fff; opacity: 0; transition: opacity .12s; }
-#scrub:hover #knob { opacity: 1; }
+/*
+    The scrubber: a line to press anywhere along.
+
+    The line and the reach are different things. The line is 2px because that is
+    what a line should look like next to text this size; the height is the reach,
+    and the track is drawn down the middle of it.
+
+    32 rather than the 48 a finger wants. This window is driven by a pointer,
+    which lands where it is aimed — 16px either side of the line is already
+    generous for one, and the phone keeps the full 48 where it is actually
+    needed. At 48 here the controls panel came to 127px and took that much off
+    the picture, which is the wrong trade for a target nothing struggles to hit.
+
+    The handle no longer waits for a hover. It is where the film is up to — that
+    is worth seeing without asking — and it grows under the pointer instead of
+    appearing from nothing.
+
+    There is no buffered bar. Everything here is a file on this machine, so it
+    would be a full-width stripe from the first frame, brighter than the part
+    that has actually played.
+*/
+#scrub {
+  position: relative;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+#scrub::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 99px;
+  background: #ffffff33;
+}
+#played {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  width: 0;
+  border-radius: 99px;
+  background: var(--accent);
+}
+/* Centred on its own point rather than nudged there with a margin, so growing
+   it does not also mean re-deriving the offset. */
+#knob {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  transition: width var(--t-press) var(--ease), height var(--t-press) var(--ease);
+}
+#scrub:hover #knob,
+#scrub:active #knob { width: 14px; height: 14px; }
 
 /*
     Playing while somewhere else in the program.
@@ -734,8 +827,21 @@ button svg { display: block; }
 }
 #player.mini #stage { display: none; }
 #player.mini #controls { background: transparent; border-top: 0; padding: 7px 12px 0; }
+/*
+    The strip keeps the smaller controls, and deliberately.
+
+    Its height is agreed with Rust — `shell::NOW_PLAYING` — because the site
+    being browsed is made that much shorter to leave room for it. Growing the
+    transport here would push the strip past that number and cut it in half.
+    It is also a secondary surface: what is playing is set where the listening
+    is done, and this is the reminder that it is still going.
+*/
+#player.mini #scrub { height: 16px; }
+#player.mini #row { gap: 10px; margin-top: 3px; }
+#player.mini #row button { width: 30px; height: 30px; border-radius: 8px; }
+#player.mini #knob { width: 8px; height: 8px; }
+#player.mini #scrub:hover #knob { width: 11px; height: 11px; }
 #player.mini #now { display: none; }
-#player.mini #row { margin-top: 3px; }
 #player.mini #full { display: none; }
 /* Only on the strip. Full height the way out is the screen behind it or Esc;
    on the strip there is no screen behind, so there has to be one here. */
@@ -746,7 +852,9 @@ button svg { display: block; }
 #player.mini #title { display: block; }
 #title { display: none; font-size: 11.5px; color: var(--muted); max-width: 34%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-#row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+/* No gap: the buttons carry their own room now that they are 48 across, and
+   ten more pixels between each of eleven of them is a row that stops fitting. */
+#row { display: flex; align-items: center; gap: 0; margin-top: 0; }
 /* Around the play button, in the order they are reached for. */
 #prev, #next { color: var(--on-surface); }
 /* The two that say how the shelf plays through, lit while they are in force. */
@@ -755,8 +863,39 @@ button svg { display: block; }
    these are set where the listening is done. */
 #player.mini #onward,
 #player.mini #shuffle { display: none; }
-#row button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); font-size: 13px; transition: color .12s, background .12s; }
-#row button:hover { color: #fff; background: #ffffff14; }
+/*
+    48 across, which is what every desktop player's transport is and what a
+    pointer wants. 30 was under the size a target is meant to be even for a
+    mouse, and the row is the one place in the program where things are pressed
+    without looking.
+*/
+#row button {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 13px;
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease);
+}
+#row button:hover { color: #fff; background: var(--state-hover); }
+#row button:active { background: var(--state-press); }
+/*
+    A narrow window cannot hold this row at full size, and a flex box answers by
+    shrinking every child — so at the smallest the window is allowed to be
+    (440px) the transport came out 34 across, which is the size it used to be
+    everywhere and the reason it was changed.
+
+    The slider goes first instead. It is the one control that needs width to be
+    worth having, and it is not the only way to the sound: the mute button is
+    beside it and the wheel over the picture works. With it gone the buttons hold
+    44 at the narrowest, which is a target rather than a guess.
+*/
+@media (max-width: 720px) {
+  #volume { display: none; }
+}
+
 #play { color: #fff !important; }
 #clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .spacer { flex: 1; }
@@ -784,7 +923,7 @@ button svg { display: block; }
   box-shadow: 0 12px 30px #000000a6;
 }
 #rates button { display: block; width: 100%; text-align: left; padding: 5px 12px; border-radius: 6px; font-size: 12px; color: var(--muted); }
-#rates button:hover { background: #ffffff14; color: #fff; }
+#rates button:hover { background: var(--state-hover); color: #fff; }
 #rates button.on { color: var(--accent); }
 
 #now { margin: 6px 2px 0; font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -801,7 +940,7 @@ button svg { display: block; }
   display: grid;
   place-items: center;
   color: var(--muted);
-  transition: color .15s;
+  transition: color var(--t-press) var(--ease);
 }
 #go svg { width: 22px; height: 22px; }
 #go button:hover { color: #e2e8f0; }
