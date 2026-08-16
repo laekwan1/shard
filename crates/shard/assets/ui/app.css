@@ -39,8 +39,12 @@
   --t-swap: 200ms;    /* a chip taking force, a pill sliding */
   --t-screen: 350ms;  /* a screen arriving or leaving */
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --ease-out: cubic-bezier(0.3, 0, 0.8, 0.15);
+  /* Named for the event, not the shape. In CSS "ease-in" means slow at the
+     start, and these are the other way round — the arriving one decelerates,
+     the leaving one accelerates — so the CSS names would have been a standing
+     invitation to reach for the wrong one. */
+  --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
   /*
       Overshoot is for position, size and radius only, and only on the two
       things that are meant to feel physical: the power switch and the stage.
@@ -890,7 +894,8 @@ button svg { display: block; }
     The slider goes first instead. It is the one control that needs width to be
     worth having, and it is not the only way to the sound: the mute button is
     beside it and the wheel over the picture works. With it gone the buttons hold
-    44 at the narrowest, which is a target rather than a guess.
+    41 at the narrowest — measured, not estimated — which is a target rather
+    than a guess, and 48 at every width the window is normally used at.
 */
 @media (max-width: 720px) {
   #volume { display: none; }

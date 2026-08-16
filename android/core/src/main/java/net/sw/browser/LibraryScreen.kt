@@ -470,10 +470,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     // shell keeps in `app.css`, read from resources so there is one place to
     // change them. See `res/values/motion.xml`.
     private val tSwap = activity.resources.getInteger(R.integer.t_swap).toLong()
-    private val easeIn =
-        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_in)
-    private val easeOut =
-        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_out)
+    private val easeEnter =
+        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_enter)
+    private val easeExit =
+        android.view.animation.AnimationUtils.loadInterpolator(activity, R.interpolator.ease_exit)
 
     /**
      * Bring a control in, or take it out, on the shared curve.
@@ -489,13 +489,13 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (on) {
             if (view.visibility != View.VISIBLE) view.alpha = 0f
             view.visibility = View.VISIBLE
-            view.animate().alpha(1f).setDuration(tSwap).setInterpolator(easeIn).start()
+            view.animate().alpha(1f).setDuration(tSwap).setInterpolator(easeEnter).start()
         } else {
             if (view.visibility != View.VISIBLE) {
                 view.alpha = 0f
                 return
             }
-            view.animate().alpha(0f).setDuration(tSwap).setInterpolator(easeOut)
+            view.animate().alpha(0f).setDuration(tSwap).setInterpolator(easeExit)
                 .withEndAction { view.visibility = View.GONE }.start()
         }
     }
@@ -511,12 +511,24 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      */
     private val hideControls = Runnable { showControls(false) }
 
-    /** Start the countdown over, and redraw what the press just changed. */
+    /**
+     * Start the countdown over, and redraw what the press just changed.
+     *
+     * A press can land on the bar while it is fading out. Alpha does not stop
+     * touches, so for the 200ms the fade takes, the buttons are still there to
+     * be hit — and `controlsShown` has already been cleared. Bailing on that
+     * flag meant such a press toggled playback but left the glyph showing the
+     * old state, did not stop the fade, and let the bar vanish out from under
+     * the finger that had just used it.
+     *
+     * So the question is not "is the flag set" but "is the bar still on
+     * screen". If it is, a press is a request to have it back.
+     */
     private fun keepControlsUp() {
-        if (!controlsShown) return
-        updateVideoBar()
-        ui.removeCallbacks(hideControls)
-        ui.postDelayed(hideControls, CONTROLS_MS.toLong())
+        if (!controlsShown && videoBar.visibility != View.VISIBLE) return
+        // Cancels the fade, puts the alpha back, repaints, and restarts the
+        // countdown — everything this has to do is what showing it does.
+        showControls(true)
     }
 
     /**
@@ -746,8 +758,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
             override fun onStartTrackingTouch(bar: android.widget.SeekBar) {
                 vbSeeking = true
-                // No countdown while a finger is on the scrubber, or the bar
-                // goes out from under the thumb being dragged.
+                // The drag may have begun while the bar was fading out, in
+                // which case bringing it back is what stops the fade — removing
+                // the callback alone would leave the animation running and take
+                // the line away mid-drag. Order matters: showing reposts the
+                // countdown, and a finger on the line should have none.
+                showControls(true)
                 ui.removeCallbacks(hideControls)
             }
             override fun onStopTrackingTouch(bar: android.widget.SeekBar) {
@@ -1617,7 +1633,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private fun stageHeight(): Int {
         if (expanded) return ViewGroup.LayoutParams.MATCH_PARENT
         val metrics = activity.resources.displayMetrics
-        return minOf(metrics.widthPixels * 9 / 16, metrics.heightPixels / 2)
+        // A song's bar is three rows deep — what is playing, the line, the
+        // transport — where a video's sits over the picture and costs nothing.
+        // Half the screen plus that bar is more than a phone held sideways has,
+        // and the transport went off the bottom edge with no way to reach it.
+        // Only music is held back; a video keeps the half it always had.
+        val cap =
+            if (playing?.kind == Library.Kind.MUSIC) metrics.heightPixels / 3
+            else metrics.heightPixels / 2
+        return minOf(metrics.widthPixels * 9 / 16, cap)
     }
 
     /**

@@ -163,7 +163,14 @@ class PullToRefresh(
         indicator.animate()
             .translationY(-indicator.height.toFloat())
             .alpha(0f)
-            .setDuration(180)
+            // The shared "swap" duration, on the leaving curve — see
+            // res/values/motion.xml. It was 180ms on the platform default.
+            .setDuration(indicator.resources.getInteger(R.integer.t_swap).toLong())
+            .setInterpolator(
+                android.view.animation.AnimationUtils.loadInterpolator(
+                    indicator.context, R.interpolator.ease_exit
+                )
+            )
             .withEndAction { if (!refreshing) park() }
             .start()
     }

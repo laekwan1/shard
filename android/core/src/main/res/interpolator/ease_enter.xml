@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- For something arriving. Matches the shell's ease-in curve. -->
+<!-- For something arriving: fast away, slow to settle. Paired with ease_exit. -->
 <pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
     android:controlX1="0.05"
     android:controlY1="0.7"

@@ -471,7 +471,7 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_close"
                     android:scaleType="fitCenter"
-                    android:padding="9dp"
+                    android:padding="14dp"
                     android:contentDescription="@string/stop_download_description" />
             </LinearLayout>
 
@@ -644,7 +644,7 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_new_folder"
                     android:scaleType="fitCenter"
-                    android:padding="8dp"
+                    android:padding="13dp"
                     android:contentDescription="@string/library_new_folder" />
             </LinearLayout>
 

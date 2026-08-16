@@ -682,11 +682,24 @@ abstract class BrowserActivity : AppCompatActivity() {
         binding.handleArea.setOnClickListener { if (panelShown) hidePanel() else showPanel() }
     }
 
+    // The shared motion ladder, the same one the library reads and the same
+    // numbers the desktop shell keeps. A panel sliding is a "swap": longer than
+    // a tint, shorter than a screen. It was 180ms on the platform's default
+    // curve, which is a number nothing else in either app uses.
+    private val tSwap by lazy { resources.getInteger(R.integer.t_swap).toLong() }
+    private val easeEnter by lazy {
+        android.view.animation.AnimationUtils.loadInterpolator(this, R.interpolator.ease_enter)
+    }
+    private val easeExit by lazy {
+        android.view.animation.AnimationUtils.loadInterpolator(this, R.interpolator.ease_exit)
+    }
+
     /** Slides in from the left edge, where the handle is. */
     private fun showPanel() {
         if (panelShown) return
         panelShown = true
-        binding.bar.animate().translationX(0f).setDuration(180).start()
+        binding.bar.animate().translationX(0f)
+            .setDuration(tSwap).setInterpolator(easeEnter).start()
     }
 
     private fun hidePanel(animate: Boolean = true) {
@@ -694,7 +707,8 @@ abstract class BrowserActivity : AppCompatActivity() {
         dismissKeyboard()
         val offset = -binding.bar.width.toFloat()
         if (animate) {
-            binding.bar.animate().translationX(offset).setDuration(180).start()
+            binding.bar.animate().translationX(offset)
+                .setDuration(tSwap).setInterpolator(easeExit).start()
         } else {
             binding.bar.translationX = offset
         }
