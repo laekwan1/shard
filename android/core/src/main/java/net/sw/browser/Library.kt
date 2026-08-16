@@ -72,6 +72,15 @@ object Library {
         val bytes: Long,
         /** When it was saved, in seconds since the epoch. */
         val addedAt: Long,
+        /**
+         * How long it runs, in milliseconds, or 0 when nothing knows.
+         *
+         * The store has this already and it is the one fact about a saved file
+         * that says whether it is worth opening now. Zero from the disk path —
+         * reading a duration there means opening every file in the folder — and
+         * the badge simply does not appear.
+         */
+        val durationMs: Long = 0,
         /** Video or music — what shelf it belongs on. */
         val kind: Kind = Kind.VIDEO,
     ) {
@@ -398,6 +407,7 @@ object Library {
             MediaStore.MediaColumns.RELATIVE_PATH,
             MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DURATION,
         )
         val where = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
         val args = arrayOf(like)
@@ -411,6 +421,10 @@ object Library {
                 val path = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
                 val size = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
                 val added = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_ADDED)
+                // Not `OrThrow`: the column is answered by the video and audio
+                // collections but is not promised by every provider, and a
+                // missing length should cost a badge, not the whole list.
+                val length = cursor.getColumnIndex(MediaStore.MediaColumns.DURATION)
                 while (cursor.moveToNext()) {
                     val row = cursor.getLong(id)
                     found += Item(
@@ -420,6 +434,7 @@ object Library {
                         folder = folderIn(cursor.getString(path).orEmpty(), kind),
                         bytes = cursor.getLong(size),
                         addedAt = cursor.getLong(added),
+                        durationMs = if (length >= 0) cursor.getLong(length) else 0,
                         kind = kind,
                     )
                 }

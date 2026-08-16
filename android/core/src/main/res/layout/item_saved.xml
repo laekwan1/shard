@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    One saved item. A thumbnail leads — a video's own frame with a play mark, or
-    a music tile with a note — so the list is scanned by eye rather than read
-    line by line. Then the name and the two facts worth knowing about a kept
-    file: how large it is and when it arrived.
+    One saved item, on one line.
+
+    A frame out of the film at the head of the row, in the shape the film is —
+    sixteen by nine. It was a 52dp square with the picture shrunk inside it,
+    which is the shape of nothing this library holds: a video put in a square is
+    a video with its sides thrown away, and the eye cannot tell two of them
+    apart from the letterboxed sliver that survives.
+
+    Everything on one line, as the desktop window does it: the name takes what
+    is left, the facts sit at the end, and the running time rides in the corner
+    of the frame rather than taking a second line of its own. Two lines per row
+    halves how much of the library is on screen and the second line was never
+    the reason anyone was looking.
 
     `blocksDescendants` is what makes tapping the row work at all. A row holding
     anything focusable — the menu button here — has its own click swallowed by
@@ -18,11 +27,13 @@
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
-    android:paddingVertical="8dp">
+    android:paddingVertical="10dp">
 
+    <!-- 64 by 36 is sixteen by nine exactly, and with the padding makes a 56dp
+         row — the least a line meant to be tapped should be. -->
     <FrameLayout
-        android:layout_width="52dp"
-        android:layout_height="52dp"
+        android:layout_width="64dp"
+        android:layout_height="36dp"
         android:layout_marginEnd="12dp">
 
         <com.google.android.material.imageview.ShapeableImageView
@@ -31,46 +42,61 @@
             android:layout_height="match_parent"
             android:background="@drawable/tile"
             android:scaleType="centerInside"
-            android:padding="14dp"
+            android:padding="8dp"
             android:contentDescription="@null" />
 
         <!-- Laid over a video frame; hidden for music. -->
         <ImageView
             android:id="@+id/playBadge"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
             android:layout_gravity="center"
             android:src="@drawable/ic_play_badge"
             android:visibility="gone"
             android:contentDescription="@null" />
+
+        <!--
+            The running time, bottom right of the frame, where every video app
+            puts it. Only when something knows it — a file whose length is
+            unread shows no badge rather than a zero.
+        -->
+        <TextView
+            android:id="@+id/length"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|end"
+            android:layout_margin="3dp"
+            android:background="@drawable/duration_badge"
+            android:paddingHorizontal="4dp"
+            android:paddingVertical="1dp"
+            android:textColor="#FFFFFF"
+            android:textSize="10sp"
+            android:fontFeatureSettings="tnum"
+            android:visibility="gone" />
     </FrameLayout>
 
-    <LinearLayout
+    <TextView
+        android:id="@+id/name"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical">
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:ellipsize="end" />
 
-        <TextView
-            android:id="@+id/name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/on_surface"
-            android:textSize="13.5sp"
-            android:textStyle="bold"
-            android:maxLines="2"
-            android:ellipsize="end" />
-
-        <TextView
-            android:id="@+id/detail"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:textColor="@color/muted"
-            android:textSize="12sp"
-            android:maxLines="1"
-            android:ellipsize="end" />
-    </LinearLayout>
+    <!-- Never squeezed: the name gives way first, because a name is the one
+         thing here that can be cut and still read. -->
+    <TextView
+        android:id="@+id/detail"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="10dp"
+        android:textColor="@color/muted"
+        android:textSize="11sp"
+        android:maxLines="1"
+        android:singleLine="true" />
 
     <ImageButton
         android:id="@+id/more"
@@ -78,7 +104,7 @@
         android:focusableInTouchMode="false"
         android:layout_width="@dimen/target"
         android:layout_height="@dimen/target"
-        android:layout_marginStart="6dp"
+        android:layout_marginStart="2dp"
         android:background="?attr/selectableItemBackgroundBorderless"
         android:src="@drawable/ic_more"
         android:scaleType="fitCenter"

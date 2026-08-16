@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The pill the running time sits in, in the corner of a frame.
+
+    Nearly opaque black rather than a tint: it lies on a corner of the picture,
+    and a picture can be any colour. The same lesson the player bar's scrim
+    taught — what is drawn over a frame has to be measured against the frame,
+    not against the panel it was designed on.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="@dimen/r_xs" />
+    <solid android:color="#D9000000" />
+</shape>

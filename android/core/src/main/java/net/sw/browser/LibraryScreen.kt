@@ -143,6 +143,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             val item = shown()[at]
             view.findViewById<TextView>(R.id.name).text = item.title
             view.findViewById<TextView>(R.id.detail).text = describe(item)
+            // The one fact that says whether a file is worth opening now. Zero
+            // means nothing read it — a badge saying 0:00 would be a lie, so
+            // there is no badge.
+            val length = view.findViewById<TextView>(R.id.length)
+            if (item.durationMs > 0) {
+                length.text = clock(item.durationMs.toInt())
+                length.visibility = View.VISIBLE
+            } else {
+                length.visibility = View.GONE
+            }
             bindArt(
                 view.findViewById(R.id.art),
                 view.findViewById(R.id.playBadge),
@@ -212,7 +222,20 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     // again: this one is applied in code because a ShapeableImageView takes its
     // shape from a model, not from a background drawable.
     private val tileCorner = activity.resources.getDimension(R.dimen.r_md)
-    private val tilePad = (14 * activity.resources.displayMetrics.density).toInt()
+
+    /**
+     * The corner on the list row's frame, which is a rung below the tile's.
+     *
+     * A radius is only right against the side it is cut from. 12 on the 46dp
+     * square in the music bar reads as a rounded tile; the same 12 on a frame
+     * 36 tall is a third of its height, and the row came out holding lozenges
+     * rather than pictures. The desktop's own 26px frame uses the bottom rung
+     * for the same reason.
+     */
+    private val shotCorner = activity.resources.getDimension(R.dimen.r_sm)
+    // Sized to the shorter side of the 64x36 frame. At the 14dp it was drawn for
+    // — a 52dp square — the glyph came out taller than the frame it sits in.
+    private val tilePad = (8 * activity.resources.displayMetrics.density).toInt()
     private val mutedTint =
         android.content.res.ColorStateList.valueOf(activity.getColor(R.color.muted))
 
@@ -220,7 +243,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private fun roundArt(row: View) {
         val art = row.findViewById<com.google.android.material.imageview.ShapeableImageView>(R.id.art)
         art.shapeAppearanceModel =
-            art.shapeAppearanceModel.toBuilder().setAllCornerSizes(tileCorner).build()
+            art.shapeAppearanceModel.toBuilder().setAllCornerSizes(shotCorner).build()
     }
 
     private fun bindArt(
@@ -251,7 +274,13 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             if (bmp == null && music) bmp = Covers.load(activity, Covers.keyFor(item.name))
             if (bmp == null) {
                 bmp = runCatching {
-                    activity.contentResolver.loadThumbnail(item.uri, android.util.Size(200, 200), null)
+                    // Asked for in the shape it will be drawn in. A square
+                    // request makes the store hand back a square, and cropping
+                    // that to 16:9 throws away the part of the frame that was
+                    // paid for.
+                    activity.contentResolver.loadThumbnail(
+                        item.uri, android.util.Size(320, 180), null
+                    )
                 }.getOrNull()
             }
             if (bmp == null) return@execute
