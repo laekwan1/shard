@@ -26,6 +26,105 @@
         android:orientation="vertical">
 
         <!--
+            The header: the way back, and the two shelves.
+
+            Above the picture, not below it. It says which screen this is and
+            which shelf is open, and a heading that appears under the thing it
+            heads is not a heading — the picture was reading as the top of the
+            screen and the switch as something floating between the video and
+            the list. Order down the screen is now: what this is, what is
+            playing, what there is.
+
+            A back arrow at the left, where every screen on this phone puts it.
+            A cross at the right would read as "dismiss this thing", and the
+            library is not a thing on top of a screen — it is the screen.
+        -->
+        <LinearLayout
+            android:id="@+id/libraryHeader"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="2dp"
+            android:paddingEnd="10dp"
+            android:paddingVertical="6dp">
+
+            <ImageButton
+                android:id="@+id/backFromLibrary"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_back"
+                android:scaleType="fitCenter"
+                android:padding="8dp"
+                android:contentDescription="@string/library_back" />
+
+            <LinearLayout
+                android:id="@+id/kinds"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:background="@drawable/segment_track"
+                android:layout_marginStart="4dp"
+                android:padding="4dp">
+
+                <LinearLayout
+                    android:id="@+id/tabVideo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:background="@drawable/segment_pill">
+
+                    <ImageView
+                        android:id="@+id/tabVideoIcon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="8dp"
+                        android:src="@drawable/ic_video"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/tabVideoText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/library_tab_video"
+                        android:textSize="14sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/tabMusic"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:orientation="horizontal"
+                    android:gravity="center"
+                    android:paddingVertical="9dp"
+                    android:background="@drawable/segment_pill">
+
+                    <ImageView
+                        android:id="@+id/tabMusicIcon"
+                        android:layout_width="18dp"
+                        android:layout_height="18dp"
+                        android:layout_marginEnd="8dp"
+                        android:src="@drawable/ic_music"
+                        android:contentDescription="@null" />
+
+                    <TextView
+                        android:id="@+id/tabMusicText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/library_tab_music"
+                        android:textSize="14sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!--
             The stage. Sixteen by nine while the list is showing; the whole
             screen once expanded, which is done by changing this height.
         -->
@@ -185,7 +284,7 @@
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_onward"
                         android:scaleType="fitCenter"
-                        android:padding="9dp"
+                        android:padding="11dp"
                         android:contentDescription="@string/library_end_next" />
 
                     <ImageButton
@@ -195,7 +294,7 @@
                         android:background="?attr/selectableItemBackgroundBorderless"
                         android:src="@drawable/ic_shuffle"
                         android:scaleType="fitCenter"
-                        android:padding="9dp"
+                        android:padding="11dp"
                         android:contentDescription="@string/library_end_shuffle" />
 
                     <ImageButton
@@ -203,9 +302,9 @@
                         android:layout_width="38dp"
                         android:layout_height="38dp"
                         android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_headphones"
+                        android:src="@drawable/ic_offscreen"
                         android:scaleType="fitCenter"
-                        android:padding="9dp"
+                        android:padding="11dp"
                         android:contentDescription="@string/library_background" />
 
                     <TextView
@@ -435,7 +534,7 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_onward"
                     android:scaleType="fitCenter"
-                    android:padding="9dp"
+                    android:padding="11dp"
                     android:contentDescription="@string/library_end_next" />
 
                 <ImageButton
@@ -445,7 +544,7 @@
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_shuffle"
                     android:scaleType="fitCenter"
-                    android:padding="9dp"
+                    android:padding="11dp"
                     android:contentDescription="@string/library_end_shuffle" />
 
                 <ImageButton
@@ -453,9 +552,9 @@
                     android:layout_width="38dp"
                     android:layout_height="38dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_headphones"
+                    android:src="@drawable/ic_offscreen"
                     android:scaleType="fitCenter"
-                    android:padding="9dp"
+                    android:padding="11dp"
                     android:contentDescription="@string/library_background" />
             </LinearLayout>
         </LinearLayout>
@@ -467,102 +566,6 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:orientation="vertical">
-
-            <!--
-                Leaving is a back arrow at the left, where every screen on this
-                phone puts it. A cross at the right reads as "dismiss this
-                thing", and the library is not a thing on top of a screen — it
-                is the screen, and what is behind it is where back goes.
-            -->
-            <!--
-                Two shelves: videos and music. A segmented control at the very
-                top, because it is the first thing a hand reaches for, and beside
-                it the way back — which is all the room a title was taking. What
-                screen this is is never in doubt once it is on it.
-            -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingStart="2dp"
-                android:paddingEnd="10dp"
-                android:paddingVertical="6dp">
-
-                <ImageButton
-                    android:id="@+id/backFromLibrary"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_back"
-                    android:scaleType="fitCenter"
-                    android:padding="8dp"
-                    android:contentDescription="@string/library_back" />
-
-            <LinearLayout
-                android:id="@+id/kinds"
-                android:layout_width="0dp"
-                android:layout_weight="1"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:background="@drawable/segment_track"
-                android:layout_marginStart="4dp"
-                android:padding="4dp">
-
-                <LinearLayout
-                    android:id="@+id/tabVideo"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:paddingVertical="9dp"
-                    android:background="@drawable/segment_pill">
-
-                    <ImageView
-                        android:id="@+id/tabVideoIcon"
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:layout_marginEnd="8dp"
-                        android:src="@drawable/ic_video"
-                        android:contentDescription="@null" />
-
-                    <TextView
-                        android:id="@+id/tabVideoText"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/library_tab_video"
-                        android:textSize="14sp" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/tabMusic"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:layout_marginStart="4dp"
-                    android:orientation="horizontal"
-                    android:gravity="center"
-                    android:paddingVertical="9dp"
-                    android:background="@drawable/segment_pill">
-
-                    <ImageView
-                        android:id="@+id/tabMusicIcon"
-                        android:layout_width="18dp"
-                        android:layout_height="18dp"
-                        android:layout_marginEnd="8dp"
-                        android:src="@drawable/ic_music"
-                        android:contentDescription="@null" />
-
-                    <TextView
-                        android:id="@+id/tabMusicText"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/library_tab_music"
-                        android:textSize="14sp" />
-                </LinearLayout>
-            </LinearLayout>
-            </LinearLayout>
 
             <!--
                 One row of folders, scrolled sideways, with the folder-making

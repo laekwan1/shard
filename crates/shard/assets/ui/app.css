@@ -1,5 +1,5 @@
 /*
-    The shell's look: the same dark ground and cyan accent the program has worn
+    The shell's look: the same dark ground and teal accent the program has worn
     since it was two windows, so nothing about the move reads as a different
     program. Everything here is drawn by us — there is no system title bar left
     to match against.
@@ -17,7 +17,7 @@
   --divider: #232833;
   --on-surface: #f0f0f0;    /* TEXT        0x00F0F0F0 */
   --muted: #8a92a2;          /* MUTED       rgb(138, 146, 162) */
-  --accent: #22d3ee;         /* ACCENT      rgb(34, 211, 238)  */
+  --accent: #2dd4bf;         /* ACCENT      rgb(45, 212, 191)  */
   --good: #34d399;
   --warn: #fbbf24;
   --bad: #f87171;
@@ -264,7 +264,7 @@ button svg { display: block; }
   transition: stroke .35s;
 }
 #power:hover .halo { opacity: .06; }
-#power[aria-pressed="true"] .body { fill: #192e36; }
+#power[aria-pressed="true"] .body { fill: #16302b; }
 #power[aria-pressed="true"] .ring { stroke: var(--accent); stroke-width: 3; }
 #power[aria-pressed="true"] .glyph { stroke: var(--accent); }
 #power[aria-pressed="true"] .halo { opacity: .10; }
@@ -399,7 +399,7 @@ button svg { display: block; }
 .folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
 .folder.on { color: #fff; background: #34343b; border-color: #ffffffa6; }
 /* Lit while a file is held over it, so a drop is never a guess. */
-.folder.over { background: #22d3ee26; border-color: var(--accent); color: #fff; }
+.folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip
    is: it does the same thing a row further down. */
 .folder.add {
@@ -571,7 +571,7 @@ button svg { display: block; }
   background: var(--muted);
   transition: transform .16s, background .16s;
 }
-.switch.on { background: #22d3ee3d; }
+.switch.on { background: #2dd4bf3d; }
 .switch.on span { transform: translateX(18px); background: var(--accent); }
 
 .choice { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }

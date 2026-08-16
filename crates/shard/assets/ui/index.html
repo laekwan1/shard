@@ -151,7 +151,17 @@
           <button id="prev" title="이전 (PageUp)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M12 3v10L5 8z" fill="currentColor"/><rect x="3" y="3" width="1.8" height="10" rx=".9" fill="currentColor"/></svg></button>
           <button id="play" title="재생/일시정지"></button>
           <button id="next" title="다음 (PageDown)"><svg viewBox="0 0 16 16" width="14" height="14"><path d="M4 3v10l7-5z" fill="currentColor"/><rect x="11.2" y="3" width="1.8" height="10" rx=".9" fill="currentColor"/></svg></button>
-          <button id="onward" title="순서대로"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.6 6.4A5 5 0 0 1 13 5.6"/><path d="M13.4 9.6A5 5 0 0 1 3 10.4"/><path d="M13.4 2.6v3h-3"/><path d="M2.6 13.4v-3h3"/></svg></button>
+          <!--
+              Two arcs of one circle — centre (8,8), r 5 — each ending in an
+              arrow head. The first drawing asked for r 5 between two points
+              10.43 apart, and a chord cannot be longer than the diameter it
+              spans: the renderer answers by inflating the radius until the arc
+              fits, which is why the loop sat flattened and leaning sideways.
+              Every endpoint is now computed on the circle, so nothing is
+              stretched. The heads are two barbs at ±35° off the tangent, so
+              they point the way the arc is actually travelling.
+          -->
+          <button id="onward" title="순서대로"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8A5 5 0 0 1 12.7 6.29"/><path d="M13.3 4.07 12.7 6.29 10.82 4.97"/><path d="M13 8A5 5 0 0 1 3.3 9.71"/><path d="M2.7 11.93 3.3 9.71 5.18 11.03"/></svg></button>
           <button id="shuffle" title="무작위"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4h2.6l6.2 8H14"/><path d="M2 12h2.6l6.2-8H14"/><path d="M11.9 1.9 14 4l-2.1 2.1"/><path d="M11.9 9.9 14 12l-2.1 2.1"/></svg></button>
           <span id="title"></span>
           <span id="clock">0:00 / 0:00</span>

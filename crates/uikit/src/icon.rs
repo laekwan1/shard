@@ -15,7 +15,7 @@ const SIZE: u32 = 64;
 /// Samples per axis. 3x3 is enough to hide staircasing at 16px tray scale.
 const SUPERSAMPLE: u32 = 3;
 
-pub const CYAN: [u8; 3] = [34, 211, 238];
+pub const CYAN: [u8; 3] = [45, 212, 191];
 pub const VIOLET: [u8; 3] = [167, 139, 250];
 pub const GREY: [u8; 3] = [113, 121, 136];
 pub const AMBER: [u8; 3] = [251, 191, 36];

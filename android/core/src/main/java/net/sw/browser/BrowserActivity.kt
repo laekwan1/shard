@@ -201,7 +201,16 @@ abstract class BrowserActivity : AppCompatActivity() {
     /** Whether to bring the engine up as soon as the app opens. */
     protected open val autoStart: Boolean get() = true
 
-    protected open val homeUrl: String get() = "https://www.google.com/"
+    /**
+     * Where the browser opens.
+     *
+     * YouTube rather than a search box: this browser exists to save video, and
+     * the page it is nearly always pointed at is the one it can save from. What
+     * is typed into the address bar is still answered by Google — see [asUrl].
+     * The two are separate questions and the earlier code answered both with
+     * one URL.
+     */
+    protected open val homeUrl: String get() = "https://m.youtube.com/"
 
     // ---- lifecycle ---------------------------------------------------------
 
@@ -1125,14 +1134,33 @@ abstract class BrowserActivity : AppCompatActivity() {
             return "$bytes B"
         }
 
-        /** Treat input with a dot and no space as an address, else a search. */
+        /**
+         * Whether what was typed is meant as an address rather than as words to
+         * search for: a dot and no space.
+         *
+         * Split out from [asUrl] so it can be tested. The decision is the part
+         * that can be got wrong; the rest is a string join and a call into
+         * `Uri`, which does not exist off a phone and so takes the whole
+         * function out of reach of a plain unit test.
+         */
+        fun looksLikeAddress(input: String): Boolean {
+            val text = input.trim()
+            return !text.contains(' ') && text.contains('.')
+        }
+
+        /**
+         * What to load for what was typed.
+         *
+         * Search goes to Google. That is a different question from where the
+         * browser opens — see `homeUrl`, which is YouTube — and the two were
+         * once one value.
+         */
         fun asUrl(input: String): String {
             val text = input.trim()
             return when {
                 text.startsWith("http://") || text.startsWith("https://") -> text
-                text.contains(' ') || !text.contains('.') ->
-                    "https://www.google.com/search?q=" + android.net.Uri.encode(text)
-                else -> "https://$text"
+                looksLikeAddress(text) -> "https://$text"
+                else -> "https://www.google.com/search?q=" + android.net.Uri.encode(text)
             }
         }
     }

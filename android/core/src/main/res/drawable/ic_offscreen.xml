@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background playback: what is playing keeps going outside this screen.
+
+    A frame with its bottom-right corner left open, and an arrow leaving through
+    the gap. Headphones were the first attempt and read as "listen on
+    headphones" sitting among the transport buttons — a way of listening rather
+    than a setting. Content leaving the frame says what the setting does.
+
+    The frame is deliberately small (2 to 11.5 of a 16 box) and the arrow runs
+    well past it, to 14. Drawn to the same size as the frame the arrow finished
+    inside the corner it was supposed to be escaping, and at 16dp the whole
+    thing read as a square with a nick in it.
+
+    The outline is one path with a gap rather than a closed rectangle with the
+    arrow drawn over it, so the arrow passes through the frame instead of across
+    it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16"
+    android:tint="@color/on_surface">
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M8.2,11.5 L4.4,11.5 A2.4,2.4 0 0 1 2,9.1 L2,4.4 A2.4,2.4 0 0 1 4.4,2 L9.1,2 A2.4,2.4 0 0 1 11.5,4.4 L11.5,8.2" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M6.6,6.6 L14,14" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M14,10.3 L14,14 L10.3,14" />
+</vector>

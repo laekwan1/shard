@@ -17,7 +17,7 @@ use uikit::tray::{self, CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, TrayE
 use uikit::widgets;
 use uikit::{icon, tray_icon::TrayIcon};
 
-const ACCENT: Color32 = Color32::from_rgb(34, 211, 238);
+const ACCENT: Color32 = Color32::from_rgb(45, 212, 191);
 
 /// Languages worth offering by name. Anything else the video has is still
 /// reachable through its own default track.

@@ -25,5 +25,5 @@
         shared, so the only thing that can tell the two apps apart is a resource
         the app module replaces.
     -->
-    <color name="notification_tint">#22D3EE</color>
+    <color name="notification_tint">#2DD4BF</color>
 </resources>

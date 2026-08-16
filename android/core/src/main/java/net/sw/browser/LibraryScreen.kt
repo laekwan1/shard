@@ -59,6 +59,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val expand: ImageButton = root.findViewById(R.id.expand)
     private val leaveFullScreen: ImageButton = root.findViewById(R.id.leaveFullScreen)
     private val chrome: View = root.findViewById(R.id.libraryChrome)
+    private val header: View = root.findViewById(R.id.libraryHeader)
     private val folderRow: LinearLayout = root.findViewById(R.id.folders)
     private val folderScroll: View = root.findViewById(R.id.folderScroll)
     private val newFolder: ImageButton = root.findViewById(R.id.newFolder)
@@ -1055,10 +1056,24 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: android.view.MotionEvent) = true
 
-            // Confirmed rather than raw, so the first tap of a double tap does
-            // not flash the controls on its way to a seek.
+            /**
+             * First tap brings the bar up; the next one plays or pauses.
+             *
+             * Confirmed rather than raw, so the first tap of a double tap does
+             * not flash the controls on its way to a seek.
+             *
+             * The bar is not dismissed by tapping. It puts itself away after a
+             * few seconds, and taking the second tap for "hide" would mean the
+             * commonest thing anyone wants from a picture — stop it — needs a
+             * small button while the whole picture does nothing.
+             */
             override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                showControls(!controlsShown)
+                if (controlsShown) {
+                    togglePlayPause()
+                    keepControlsUp()
+                } else {
+                    showControls(true)
+                }
                 return true
             }
 
@@ -1463,6 +1478,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         expanded = false
         activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         chrome.visibility = View.VISIBLE
+        header.visibility = View.VISIBLE
         stage.visibility = View.GONE
         // The cover goes with the song. Left in place it would be handed back
         // to the next song by `showCover`, which skips a cover it thinks is
@@ -1583,7 +1599,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // this catches the swipe-up as well as the (hidden) button, so a flick on
         // the note cannot drop into a black full screen with nothing in it.
         expanded = on && playing?.kind == Library.Kind.VIDEO
+        // The header goes with the list. It sits above the picture now, so full
+        // screen has to put both away or the picture would start a bar's height
+        // down the screen.
         chrome.visibility = if (expanded) View.GONE else View.VISIBLE
+        header.visibility = if (expanded) View.GONE else View.VISIBLE
         stage.layoutParams = stage.layoutParams.apply { height = stageHeight() }
         if (!expanded) {
             zoom = 1f

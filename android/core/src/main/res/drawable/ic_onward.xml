@@ -1,8 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    In order — two arcs chasing each other with an arrow head on each, copied
-    path for path from the desktop player so the two apps do not draw the same
-    idea two ways.
+    In order — two arcs of one circle, each ending in an arrow head.
+
+    Drawn to real geometry this time. The first version asked for a radius of 5
+    between two points 10.43 apart, and a chord cannot be longer than the
+    diameter it spans: SVG and Android both answer by quietly inflating the
+    radius until the arc fits, which is why the loop came out flattened and
+    leaning to one side. Both arcs now sit on one circle — centre (8,8),
+    r = 5 — and every endpoint is computed on it, so the chords are 9.85 and
+    nothing has to be stretched.
+
+    Top arc runs 180° to 340°, bottom arc 0° to 160°, leaving two gaps for the
+    heads. Each head is two barbs 2.3 long at ±35° off the tangent, so it points
+    the way the arc is actually travelling rather than at a guessed angle.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -15,23 +25,23 @@
         android:strokeWidth="1.4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M2.6,6.4 A5,5 0 0 1 13,5.6" />
+        android:pathData="M3,8 A5,5 0 0 1 12.7,6.29" />
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="1.4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M13.4,9.6 A5,5 0 0 1 3,10.4" />
+        android:pathData="M13.3,4.07 L12.7,6.29 L10.82,4.97" />
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="1.4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M13.4,2.6 L13.4,5.6 L10.4,5.6" />
+        android:pathData="M13,8 A5,5 0 0 1 3.3,9.71" />
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="1.4"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M2.6,13.4 L2.6,10.4 L5.6,10.4" />
+        android:pathData="M2.7,11.93 L3.3,9.71 L5.18,11.03" />
 </vector>
