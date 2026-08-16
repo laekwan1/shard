@@ -2,21 +2,22 @@
 <!--
     Back: an outlined triangle with rounded corners, pointing the way out.
 
-    The user's own choice of mark. Drawn as one closed stroke with the corners
-    cut by quadratics — a stroked triangle with sharp vertices reads as a play
-    button turned around, and the rounding is what separates "back" from
-    "rewind". Grey-white through the same tint every other glyph wears.
+    The user's own choice of mark, twice adjusted to their eye: taller than it
+    is wide (4.4 to 19.6 against 6.6 to 16.9), and grey rather than the
+    near-white the other glyphs wear — this one is furniture, not content.
+    Drawn as one closed stroke with the corners cut by quadratics; sharp
+    vertices would read as a rewind button.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24"
-    android:tint="@color/on_surface">
+    android:tint="@color/muted">
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8.07,10.73 L14.93,6.87 Q17.2,5.6 17.2,8.2 L17.2,15.8 Q17.2,18.4 14.93,17.13 L8.07,13.27 Q5.8,12 8.07,10.73 Z" />
+        android:pathData="M8.69,10.46 L14.81,5.94 Q16.9,4.4 16.9,7.0 L16.9,17.0 Q16.9,19.6 14.81,18.06 L8.69,13.54 Q6.6,12 8.69,10.46 Z" />
 </vector>
