@@ -175,35 +175,26 @@
             android:visibility="invisible" />
 
         <!--
-            The way into the address panel: a pill naming the site, top left.
+            Always-visible handle, top-left and the same height as the address
+            bar it opens onto — so the panel appears to slide out from under it
+            rather than from somewhere unrelated. Tap it, or swipe right.
 
-            It used to be a 4px bar that only someone who had already found it
-            could find — a browser whose address bar cannot be discovered is a
-            browser with no address bar. The pill says where you are and is
-            visibly a thing to press. Tap it, or swipe right, as before; it
-            steps aside while the page is being scrolled down and returns on
-            the first scroll up, so reading is never done around it.
+            A pill naming the site was tried here and taken out again: whatever
+            it said about discoverability, it sat on the page's own header and
+            covered it. The page wins.
         -->
         <FrameLayout
             android:id="@+id/handleArea"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="30dp"
+            android:layout_height="38dp"
             android:layout_gravity="start|top"
-            android:layout_marginStart="8dp"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="12dp">
 
-            <TextView
-                android:id="@+id/handleLabel"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxWidth="170dp"
-                android:background="@drawable/handle_pill"
-                android:paddingHorizontal="13dp"
-                android:paddingVertical="7dp"
-                android:textColor="@color/on_surface"
-                android:textSize="12sp"
-                android:singleLine="true"
-                android:ellipsize="end" />
+            <View
+                android:layout_width="4dp"
+                android:layout_height="24dp"
+                android:layout_gravity="center"
+                android:background="@drawable/handle" />
         </FrameLayout>
     </FrameLayout>
 

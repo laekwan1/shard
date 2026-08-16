@@ -27,10 +27,13 @@
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
-    android:paddingVertical="10dp">
+    android:paddingVertical="5dp">
 
-    <!-- 64 by 36 is sixteen by nine exactly, and with the padding makes a 56dp
-         row — the least a line meant to be tapped should be. -->
+    <!-- 64 by 36 is sixteen by nine exactly. With the padding the row is 46dp
+         — under the 48 a lone control would need, but a list row is not a lone
+         control: its neighbours are the same target, so a miss by a hair still
+         lands on a row, and the tighter rows put half again as many files on
+         one screen. -->
     <FrameLayout
         android:layout_width="64dp"
         android:layout_height="36dp"
