@@ -62,7 +62,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val header: View = root.findViewById(R.id.libraryHeader)
     private val folderRow: LinearLayout = root.findViewById(R.id.folders)
     private val folderScroll: View = root.findViewById(R.id.folderScroll)
-    private val newFolder: ImageButton = root.findViewById(R.id.newFolder)
     private val kinds: android.widget.FrameLayout = root.findViewById(R.id.kinds)
     private val shelfThumb: View = root.findViewById(R.id.shelfThumb)
     private val tabVideo: View = root.findViewById(R.id.tabVideo)
@@ -744,7 +743,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // The notification's play/pause button reaches the player through here.
         EngineControl.togglePlayback = toggleHook
         root.findViewById<ImageButton>(R.id.backFromLibrary).setOnClickListener { back() }
-        newFolder.setOnClickListener { askForFolder() }
         expand.setOnClickListener { setExpanded(!expanded) }
         leaveFullScreen.setOnClickListener { setExpanded(false) }
         tabVideo.setOnClickListener { selectTab(Library.Kind.VIDEO) }
@@ -926,7 +924,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** The empty note, worded and marked for the shelf, shown only when it has nothing. */
     private fun showEmpty() {
         val music = tab == Library.Kind.MUSIC
-        emptyText.setText(if (music) R.string.library_empty_music else R.string.library_empty)
+        // A filtered view that is empty is not an empty library, and saying
+        // "nothing is saved" while a folder is in force is a lie the user can
+        // see through — the shelf said there were files a moment ago.
+        emptyText.setText(
+            when {
+                showing != null -> R.string.library_empty_folder
+                music -> R.string.library_empty_music
+                else -> R.string.library_empty
+            }
+        )
         emptyIcon.setImageResource(if (music) R.drawable.ic_music else R.drawable.ic_video)
         empty.visibility = if (shown().isEmpty()) View.VISIBLE else View.GONE
     }
@@ -1879,6 +1886,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
             folderRow.addView(chip)
         }
+        // The way to make a folder, as the last chip in the row of folders —
+        // where the folder it makes will appear, so cause and effect share an
+        // address. It used to be an icon button pinned past the row's end,
+        // which was the heaviest thing on the line and spoke a different
+        // language from the chips beside it.
+        folderRow.addView(
+            chip("+ " + activity.getString(R.string.library_new_folder), false, "") {
+                askForFolder()
+            }
+        )
     }
 
     /**

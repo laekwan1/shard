@@ -27,16 +27,15 @@
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
-    android:paddingVertical="5dp">
+    android:paddingVertical="3dp">
 
-    <!-- 64 by 36 is sixteen by nine exactly. With the padding the row is 46dp
-         — under the 48 a lone control would need, but a list row is not a lone
-         control: its neighbours are the same target, so a miss by a hair still
-         lands on a row, and the tighter rows put half again as many files on
-         one screen. -->
+    <!-- 80 by 45 is sixteen by nine exactly. With the padding the row is 51dp:
+         the frame is the reason the row exists, so it takes the room, and the
+         padding gives back what the frame took — a list row's neighbours are
+         the same target, so it needs no 48 of its own. -->
     <FrameLayout
-        android:layout_width="64dp"
-        android:layout_height="36dp"
+        android:layout_width="80dp"
+        android:layout_height="45dp"
         android:layout_marginEnd="12dp">
 
         <com.google.android.material.imageview.ShapeableImageView

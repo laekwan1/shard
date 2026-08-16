@@ -69,14 +69,17 @@
                 android:paddingHorizontal="10dp">
 
                 <!-- The same amber toggle the desktop build uses. -->
+                <!-- 40, like everything else on this row: three heights on
+                     one line read as three rows squeezed into one. The glyph
+                     keeps its size; the padding absorbs the change. -->
                 <ImageButton
                     android:id="@+id/power"
-                    android:layout_width="42dp"
-                    android:layout_height="42dp"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
                     android:background="@drawable/power_backdrop"
                     android:src="@drawable/ic_power"
                     android:scaleType="fitCenter"
-                    android:padding="11dp"
+                    android:padding="10dp"
                     android:contentDescription="@string/on" />
 
                 <EditText
@@ -138,7 +141,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:textSize="10sp"
+                    android:textSize="11sp"
                     android:textColor="@color/muted"
                     android:maxLines="1"
                     android:ellipsize="end"

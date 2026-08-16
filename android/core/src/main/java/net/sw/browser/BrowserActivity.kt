@@ -763,7 +763,7 @@ abstract class BrowserActivity : AppCompatActivity() {
                 distanceY: Float,
             ): Boolean {
                 val start = down ?: return false
-                if (panelShown || !startsAtLeftEdge(start.rawX)) return false
+                if (panelShown || !startsAtTopLeft(start.rawX, start.rawY)) return false
 
                 val dx = current.rawX - start.rawX
                 val dy = current.rawY - start.rawY
@@ -806,15 +806,22 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
-     * The band a swipe may start in — any height, near the left edge.
+     * The band a swipe may start in — near the left edge, and only the top
+     * third of it, where the handle is.
+     *
+     * It used to be the whole height, and the whole height belongs to pages:
+     * a carousel dragged rightward from the left half kept opening the panel
+     * instead. The panel slides out from under the handle, so the gesture
+     * starts where the handle is.
      *
      * The outermost strip is skipped: a swipe starting there is the system's
      * back gesture and never reaches the app, so aiming at the very edge made
      * this *less* likely to work.
      */
-    private fun startsAtLeftEdge(x: Float): Boolean {
+    private fun startsAtTopLeft(x: Float, y: Float): Boolean {
         val density = resources.displayMetrics.density
-        return x > 24 * density && x < resources.displayMetrics.widthPixels * 0.22f
+        return x > 24 * density && x < resources.displayMetrics.widthPixels * 0.22f &&
+            y < resources.displayMetrics.heightPixels * 0.33f
     }
 
     private fun swipeThreshold() = 36 * resources.displayMetrics.density

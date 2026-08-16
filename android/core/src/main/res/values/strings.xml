@@ -38,7 +38,8 @@
     <string name="library_empty">저장한 영상이 없습니다. 영상을 내려받으면 여기에 모입니다.</string>
     <string name="library_expand">전체화면</string>
     <string name="library_collapse">전체화면 끄기</string>
-    <string name="library_new_folder">폴더 추가</string>
+    <string name="library_new_folder">새 폴더</string>
+    <string name="library_empty_folder">이 폴더에는 아직 없습니다.</string>
     <string name="library_folder_name">폴더 이름</string>
     <string name="library_all">전체</string>
     <string name="library_tab_video">영상</string>

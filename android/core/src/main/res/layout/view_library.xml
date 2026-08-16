@@ -39,15 +39,24 @@
             A cross at the right would read as "dismiss this thing", and the
             library is not a thing on top of a screen — it is the screen.
         -->
+        <!--
+            The header wears the chrome colour and the folders and the list
+            below keep the darker surface — the same grammar the desktop
+            window uses, where the switch sits on the toolbar and opens onto a
+            darker sheet that holds the folders and the files. Without the two
+            grounds the folder row floated: nothing said which layer it
+            belonged to.
+        -->
         <LinearLayout
             android:id="@+id/libraryHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
+            android:background="@color/chrome"
             android:paddingStart="2dp"
             android:paddingEnd="10dp"
-            android:paddingVertical="6dp">
+            android:paddingVertical="4dp">
 
             <ImageButton
                 android:id="@+id/backFromLibrary"
@@ -101,7 +110,7 @@
                         android:layout_weight="1"
                         android:orientation="horizontal"
                         android:gravity="center"
-                        android:paddingVertical="9dp">
+                        android:paddingVertical="7dp">
 
                         <ImageView
                             android:id="@+id/tabVideoIcon"
@@ -127,7 +136,7 @@
                         android:layout_marginStart="4dp"
                         android:orientation="horizontal"
                         android:gravity="center"
-                        android:paddingVertical="9dp">
+                        android:paddingVertical="7dp">
 
                         <ImageView
                             android:id="@+id/tabMusicIcon"
@@ -661,17 +670,6 @@
                         android:layout_height="wrap_content"
                         android:orientation="horizontal" />
                 </HorizontalScrollView>
-
-                <ImageButton
-                    android:id="@+id/newFolder"
-                    android:layout_width="@dimen/target"
-                    android:layout_height="@dimen/target"
-                    android:layout_marginEnd="6dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_new_folder"
-                    android:scaleType="fitCenter"
-                    android:padding="13dp"
-                    android:contentDescription="@string/library_new_folder" />
             </LinearLayout>
 
             <View
