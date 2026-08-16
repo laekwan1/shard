@@ -142,6 +142,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             val view = reuse ?: LayoutInflater.from(activity)
                 .inflate(R.layout.item_saved, parent, false).also { roundArt(it) }
             val item = shown()[at]
+            // The separator lives in the row, so the last row hides its own —
+            // a line under the final item rules the list into a table.
+            view.findViewById<View>(R.id.rowLine).visibility =
+                if (at == shown().size - 1) View.INVISIBLE else View.VISIBLE
             view.findViewById<TextView>(R.id.name).text = item.title
             view.findViewById<TextView>(R.id.detail).text = describe(item)
             // The one fact that says whether a file is worth opening now. Zero

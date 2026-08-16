@@ -698,9 +698,7 @@
                     android:id="@+id/saved"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:divider="@drawable/list_divider"
-                    android:dividerHeight="1dp"
-                    android:footerDividersEnabled="false"
+                    android:divider="@null"
                     android:scrollbarStyle="outsideOverlay" />
 
                 <LinearLayout

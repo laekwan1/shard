@@ -2,5 +2,9 @@
 <!-- The track a segmented control sits in: a rounded, slightly raised well. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <corners android:radius="@dimen/r_lg" />
-    <solid android:color="@color/raised" />
+    <!-- The list's own colour, not a raised grey: the unselected half of the
+         switch and the sheet below are the same "not chosen" ground, and two
+         darks that almost match read as a mistake. The desktop's track makes
+         the same choice against its toolbar. -->
+    <solid android:color="@color/surface" />
 </shape>

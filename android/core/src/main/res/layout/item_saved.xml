@@ -19,15 +19,43 @@
     that child, so the list appeared dead while the menu on it worked perfectly:
     every way into a file except the obvious one.
 -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!--
+    A frame around the row so the separator can live INSIDE it: a ListView's
+    own divider is drawn between rows, which put the line half a step below
+    the thumbnail's bottom edge. Here it is a child pinned to the content's
+    bottom — the frame is the tallest child, so the content's bottom IS the
+    frame's bottom edge, and the two lines are level by construction.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
     android:paddingVertical="0.5dp">
+
+    <!-- Starts at the frame's right edge — 80dp, no gap — so it reads as the
+         frame's own bottom line carrying on across the row.
+
+         The bottom margin is not decoration, it is arithmetic: the row's
+         height comes from the 48dp menu button, not the 45dp frame, and the
+         frame sits centred in that — (48 − 45) / 2 above the row's floor. A
+         line on the floor itself ran 1.5dp below the picture it claims to
+         continue. If either height changes, this number changes with it. -->
+    <View
+        android:id="@+id/rowLine"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="80dp"
+        android:layout_marginBottom="1.5dp"
+        android:background="@color/state_hover" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
     <!-- 80 by 45 is sixteen by nine exactly. With the padding the row is 51dp:
          the frame is the reason the row exists, so it takes the room, and the
@@ -112,4 +140,5 @@
         android:scaleType="fitCenter"
         android:padding="14dp"
         android:contentDescription="@string/menu" />
-</LinearLayout>
+    </LinearLayout>
+</FrameLayout>
