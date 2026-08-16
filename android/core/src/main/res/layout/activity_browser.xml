@@ -22,6 +22,27 @@
             android:background="@color/surface" />
 
         <!--
+            The reload arrow, for a drag down from the top of the page. It comes
+            from above the top edge, so it is parked outside the view rather
+            than merely hidden — hidden and then moved would appear at rest and
+            then jump. Elevation puts it over the page and under the panel: the
+            panel is what the handle opens onto and nothing belongs on top of it.
+        -->
+        <ImageView
+            android:id="@+id/pull"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_gravity="top|center_horizontal"
+            android:background="@drawable/pull_backdrop"
+            android:src="@drawable/ic_refresh"
+            android:tint="@color/accent"
+            android:scaleType="fitCenter"
+            android:padding="9dp"
+            android:elevation="6dp"
+            android:visibility="gone"
+            android:contentDescription="@string/menu_reload" />
+
+        <!--
             The pull-down panel. Height is set at runtime to a tenth of the
             screen; it starts translated out of view.
         -->

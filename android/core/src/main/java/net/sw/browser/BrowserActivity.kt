@@ -65,6 +65,21 @@ abstract class BrowserActivity : AppCompatActivity() {
     private var panelShown = false
 
     /**
+     * Drag down from the top of a page to reload it.
+     *
+     * Made after the layout exists, since it parks its own indicator.
+     */
+    private val pull by lazy {
+        PullToRefresh(
+            indicator = binding.pull,
+            // The page's own scroll position, not a gesture's: a drag that
+            // starts partway down a page is a scroll and must stay one.
+            atTop = { binding.web.scrollY == 0 },
+            onRefresh = { binding.web.reload() },
+        )
+    }
+
+    /**
      * What has been saved, as a screen of its own over the browser.
      *
      * Made once and kept: it holds a player, and building one per opening would
@@ -509,6 +524,8 @@ abstract class BrowserActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                // Whatever the reload was started by, this is where it ends.
+                pull.finished()
                 view.evaluateJavascript(VideoHook.SCRIPT, null)
                 // Only where the document-start injection is unavailable. Where
                 // it works it has already run, and running the recorder again
@@ -598,6 +615,9 @@ abstract class BrowserActivity : AppCompatActivity() {
             }
 
             override fun onProgressChanged(view: WebView, newProgress: Int) {
+                // A single-page site answers a reload without ever finishing a
+                // page, so `onPageFinished` alone would leave the arrow turning.
+                if (newProgress >= 100) pull.finished()
                 binding.progress.progress = newProgress
                 binding.progress.visibility =
                     if (newProgress in 1..99) View.VISIBLE else View.INVISIBLE
@@ -738,6 +758,13 @@ abstract class BrowserActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (this::binding.isInitialized) {
             swipeDetector.onTouchEvent(event)
+
+            // Only while the page is the screen. The library covers it, the
+            // panel is furniture over it, and full screen is a player — a drag
+            // in any of those belongs to what is in front, not to the page.
+            pull.enabled = !panelShown && customView == null &&
+                !(libraryMade && library.isOpen)
+            pull.onTouch(event)
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
