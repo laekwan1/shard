@@ -17,7 +17,6 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ListView
-import android.widget.MediaController
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
@@ -72,7 +71,22 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val gauge: View = root.findViewById(R.id.gauge)
     private val gaugeIcon: android.widget.ImageView = root.findViewById(R.id.gaugeIcon)
     private val gaugeBar: android.widget.ProgressBar = root.findViewById(R.id.gaugeBar)
+    private val stageArt: android.widget.ImageView = root.findViewById(R.id.stageArt)
+    private val videoBar: View = root.findViewById(R.id.videoBar)
+    private val vbSeek: android.widget.SeekBar = root.findViewById(R.id.vbSeek)
+    private val vbPrev: ImageButton = root.findViewById(R.id.vbPrev)
+    private val vbToggle: ImageButton = root.findViewById(R.id.vbToggle)
+    private val vbNext: ImageButton = root.findViewById(R.id.vbNext)
+    private val vbOnward: ImageButton = root.findViewById(R.id.vbOnward)
+    private val vbShuffle: ImageButton = root.findViewById(R.id.vbShuffle)
+    private val vbBackground: ImageButton = root.findViewById(R.id.vbBackground)
+    private val vbClock: TextView = root.findViewById(R.id.vbClock)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
+    private val npPrev: ImageButton = root.findViewById(R.id.npPrev)
+    private val npNext: ImageButton = root.findViewById(R.id.npNext)
+    private val npOnward: ImageButton = root.findViewById(R.id.npOnward)
+    private val npShuffle: ImageButton = root.findViewById(R.id.npShuffle)
+    private val npBackground: ImageButton = root.findViewById(R.id.npBackground)
     private val npArt: com.google.android.material.imageview.ShapeableImageView =
         root.findViewById(R.id.npArt)
     private val npTitle: TextView = root.findViewById(R.id.npTitle)
@@ -115,7 +129,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val adapter = object : BaseAdapter() {
         override fun getCount() = shown().size
         override fun getItem(at: Int) = shown()[at]
-        override fun getItemId(at: Int) = shown()[at].id
+        // Asked for rows that have just gone. Between a shelf changing and the
+        // view laying itself out again, the ListView still believes the old
+        // count and asks about positions the new shelf does not have. The list
+        // is the truth; a missing row answers with no id rather than throwing.
+        override fun getItemId(at: Int) = shown().getOrNull(at)?.id ?: -1L
 
         override fun getView(at: Int, reuse: View?, parent: ViewGroup): View {
             val view = reuse ?: LayoutInflater.from(activity)
@@ -434,47 +452,149 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val stopHook: () -> Unit = { ui.post { if (!released) stopPlaying() } }
     private val toggleHook: () -> Unit = { ui.post { if (!released) togglePlayPause() } }
 
-    private val controls = MediaController(activity).apply {
-        setMediaPlayer(object : MediaController.MediaPlayerControl {
-            // The on-screen scrub bar and the notification are two faces of one
-            // player, so a press on either has to move the intent and redraw the
-            // other. Going straight to the player here — as the first version
-            // did — left `wantsPlay` and the notification untouched, so pausing
-            // from the screen showed the wrong button in the shade.
-            override fun start() {
-                player?.play()
-                wantsPlay = true
-                refreshMediaNotification()
+    // ---- the video bar -----------------------------------------------------
+    //
+    // In place of the framework's MediaController, which drew white-and-lavender
+    // Material defaults over a screen that is black and cyan everywhere else and
+    // offers no way to restyle it — it builds its own views. It also had room
+    // for nothing but play and seek, which is what pushed the rest of a player's
+    // controls into a menu beside the new-folder button and a button floating
+    // over the corner of the picture.
+
+    /** Whether the bar over the picture is up. */
+    private var controlsShown = false
+
+    /** True while the video scrubber is under a finger, so the ticker leaves it. */
+    private var vbSeeking = false
+
+    /**
+     * Put the bar away again after a while.
+     *
+     * The bar covers the bottom of the picture, so it goes on its own — the
+     * same as the framework's controller did, and the same as every video app.
+     */
+    private val hideControls = Runnable { showControls(false) }
+
+    /** Start the countdown over, and redraw what the press just changed. */
+    private fun keepControlsUp() {
+        if (!controlsShown) return
+        updateVideoBar()
+        ui.removeCallbacks(hideControls)
+        ui.postDelayed(hideControls, CONTROLS_MS.toLong())
+    }
+
+    /**
+     * Show or hide the bar, and with it the way out of full screen.
+     *
+     * The back arrow at the top left travels with the bar rather than standing
+     * there always: full screen is a picture, and a pair of buttons parked over
+     * the corners of it are two things permanently in the way.
+     */
+    private fun showControls(on: Boolean) {
+        // Only a video has this bar. A song is driven from the bar under its
+        // cover, and putting this one over the cover as well would be two sets
+        // of the same buttons on one screen.
+        if (on && playing?.kind != Library.Kind.VIDEO) return
+        controlsShown = on
+        ui.removeCallbacks(hideControls)
+        videoBar.visibility = if (on) View.VISIBLE else View.GONE
+        leaveFullScreen.visibility = if (on && expanded) View.VISIBLE else View.GONE
+        if (on) {
+            updateVideoBar()
+            ui.removeCallbacks(vbTick)
+            ui.post(vbTick)
+            ui.postDelayed(hideControls, CONTROLS_MS.toLong())
+        } else {
+            ui.removeCallbacks(vbTick)
+        }
+    }
+
+    /** Move the video scrubber and clock along while the bar is up. */
+    private val vbTick = object : Runnable {
+        override fun run() {
+            val exo = player
+            if (exo != null && prepared && playing?.kind == Library.Kind.VIDEO) {
+                val duration = exo.duration.coerceAtLeast(1)
+                val position = exo.currentPosition.coerceIn(0, duration)
+                if (!vbSeeking) vbSeek.progress = (position * 1000 / duration).toInt()
+                vbClock.text = "${clock(position.toInt())} / ${clock(duration.toInt())}"
             }
+            ui.postDelayed(this, TICK_MS)
+        }
+    }
 
-            override fun pause() {
-                player?.pause()
-                wantsPlay = false
-                refreshMediaNotification()
-            }
+    /**
+     * Redraw the bar's buttons from the state they stand for.
+     *
+     * The play glyph follows the intent, not the instant — the same value the
+     * notification's button is drawn from. Reading the player's transient state
+     * would let the button flicker, or read as paused for as long as a seek
+     * takes.
+     */
+    private fun updateVideoBar() {
+        vbToggle.setImageResource(
+            if (prepared && wantsPlay) R.drawable.ic_pb_pause else R.drawable.ic_pb_play
+        )
+        paintPlaybackToggles()
+    }
 
-            override fun getDuration() = player?.duration?.takeIf { it > 0 }?.toInt() ?: 0
-            override fun getCurrentPosition() = player?.currentPosition?.toInt() ?: 0
+    /**
+     * The three settings that used to live behind the menu, lit when on.
+     *
+     * Colour is the whole of the state here, so it has to be the difference
+     * between on and off rather than a shade of it: the accent against the
+     * muted grey the rest of the bar is drawn in.
+     */
+    private fun paintPlaybackToggles() {
+        val end = Library.playbackEnd(activity)
+        val background = Library.backgroundPlayback(activity)
+        for ((button, on) in listOf(
+            vbOnward to (end == Library.PlaybackEnd.NEXT),
+            npOnward to (end == Library.PlaybackEnd.NEXT),
+            vbShuffle to (end == Library.PlaybackEnd.SHUFFLE),
+            npShuffle to (end == Library.PlaybackEnd.SHUFFLE),
+            vbBackground to background,
+            npBackground to background,
+        )) {
+            button.imageTintList = android.content.res.ColorStateList.valueOf(
+                activity.getColor(if (on) R.color.accent else R.color.muted)
+            )
+        }
+    }
 
-            override fun seekTo(where: Int) {
-                // ExoPlayer is set to seek to the exact frame, so this lands where
-                // the finger let go rather than on the previous keyframe.
-                player?.seekTo(where.toLong())
-            }
+    /**
+     * Turn one of the end-of-file settings on, or off again.
+     *
+     * They are one setting with three values, so lighting one puts the other
+     * out and pressing the lit one goes back to stopping. Two switches over a
+     * single choice have to say so, or turning on "in order" would leave "at
+     * random" looking on as well.
+     */
+    private fun chooseEnd(want: Library.PlaybackEnd) {
+        val now = Library.playbackEnd(activity)
+        Library.setPlaybackEnd(activity, if (now == want) Library.PlaybackEnd.STOP else want)
+        paintPlaybackToggles()
+    }
 
-            // The intent, not the instant — the same value the notification's
-            // button is drawn from. The controller picks its own play/pause
-            // glyph and decides which way to toggle from this, so reading the
-            // player's transient state here would let the on-screen button
-            // flicker or fire the wrong way during a seek or just after a start.
-            override fun isPlaying() = prepared && wantsPlay
-            override fun getBufferPercentage() = player?.bufferedPercentage ?: 0
-            override fun canPause() = true
-            override fun canSeekBackward() = true
-            override fun canSeekForward() = true
-            override fun getAudioSessionId() = 0
-        })
-        setAnchorView(stage)
+    /**
+     * Step through the queue by hand.
+     *
+     * Back means "start this one again" once it is under way, and only reaches
+     * the one before when it has barely begun — what every player does, and
+     * what a hand reaching for it without looking expects.
+     */
+    private fun step(forward: Boolean) {
+        val current = playing ?: return
+        val exo = player
+        if (!forward && exo != null && prepared && exo.currentPosition > RESTART_MS) {
+            exo.seekTo(0)
+            return
+        }
+        val list = queueFor(current)
+        val at = list.indexOfFirst { it.id == current.id }
+        if (at < 0) return
+        val next = list.getOrNull(if (forward) at + 1 else at - 1) ?: return
+        play(next)
     }
 
     init {
@@ -536,7 +656,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         EngineControl.togglePlayback = toggleHook
         root.findViewById<ImageButton>(R.id.backFromLibrary).setOnClickListener { back() }
         newFolder.setOnClickListener { askForFolder() }
-        root.findViewById<ImageButton>(R.id.librarySettings).setOnClickListener { showSettings() }
         expand.setOnClickListener { setExpanded(!expanded) }
         leaveFullScreen.setOnClickListener { setExpanded(false) }
         tabVideo.setOnClickListener { selectTab(Library.Kind.VIDEO) }
@@ -555,6 +674,52 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             override fun onStartTrackingTouch(bar: android.widget.SeekBar) { npSeeking = true }
             override fun onStopTrackingTouch(bar: android.widget.SeekBar) { npSeeking = false }
         })
+
+        // The video bar. Every press that changes something puts its countdown
+        // back to the start — a button pressed and the bar vanishing half a
+        // second later reads as the press having dismissed it.
+        vbToggle.setOnClickListener { togglePlayPause(); keepControlsUp() }
+        vbPrev.setOnClickListener { step(forward = false); keepControlsUp() }
+        vbNext.setOnClickListener { step(forward = true); keepControlsUp() }
+        npPrev.setOnClickListener { step(forward = false) }
+        npNext.setOnClickListener { step(forward = true) }
+        // One handler for each pair: the video bar and the music bar carry the
+        // same three switches over the same three settings, and two copies of
+        // the decision is one copy too many.
+        for (button in listOf(vbOnward, npOnward)) {
+            button.setOnClickListener { chooseEnd(Library.PlaybackEnd.NEXT); keepControlsUp() }
+        }
+        for (button in listOf(vbShuffle, npShuffle)) {
+            button.setOnClickListener { chooseEnd(Library.PlaybackEnd.SHUFFLE); keepControlsUp() }
+        }
+        for (button in listOf(vbBackground, npBackground)) {
+            button.setOnClickListener {
+                Library.setBackgroundPlayback(activity, !Library.backgroundPlayback(activity))
+                paintPlaybackToggles()
+                keepControlsUp()
+            }
+        }
+        vbSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
+                if (!fromUser || !prepared) return
+                val duration = player?.duration ?: return
+                val at = progress.toLong() * duration / 1000
+                player?.seekTo(at)
+                vbClock.text = "${clock(at.toInt())} / ${clock(duration.toInt())}"
+            }
+            override fun onStartTrackingTouch(bar: android.widget.SeekBar) {
+                vbSeeking = true
+                // No countdown while a finger is on the scrubber, or the bar
+                // goes out from under the thumb being dragged.
+                ui.removeCallbacks(hideControls)
+            }
+            override fun onStopTrackingTouch(bar: android.widget.SeekBar) {
+                vbSeeking = false
+                keepControlsUp()
+            }
+        })
+        paintPlaybackToggles()
+
         list.adapter = adapter
         // Rows carry their own click; see `getView`.
         selectTab(Library.Kind.VIDEO)
@@ -589,7 +754,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         folders = runCatching { Library.folders(activity, items, kind) }.getOrDefault(emptyList())
         drawFolders()
         adapter.notifyDataSetChanged()
-        list.setSelection(0)
+        // Back to the top of the new shelf — but only if it has a top.
+        //
+        // A ListView told to select row 0 asks the adapter for row 0's id even
+        // when the shelf is empty, and the adapter answers by reading the list,
+        // which throws and takes the app with it. It only happens leaving a
+        // shelf that had rows for one that has none, because the view's own
+        // count is a layout behind the adapter's — which is why an empty
+        // library opens fine and tapping 음악 on it does not.
+        if (shown().isNotEmpty()) list.setSelection(0)
         showEmpty()
     }
 
@@ -649,22 +822,67 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         val onItsShelf = item != null && player != null && item.kind == tab
 
         if (onItsShelf && item!!.kind == Library.Kind.VIDEO) {
+            stageArt.visibility = View.GONE
+            surface.visibility = View.VISIBLE
             stage.visibility = View.VISIBLE
             stage.layoutParams = stage.layoutParams.apply { height = stageHeight() }
-            expand.visibility = View.VISIBLE
             // The surface went with the stage when it was hidden, so the player
             // is handed it again — otherwise the sound plays on over a picture
             // that never comes back.
             player?.setVideoSurfaceView(surface)
             stage.post { fitSurface() }
+        } else if (onItsShelf && item!!.kind == Library.Kind.MUSIC) {
+            showCover(item)
         } else {
             stage.visibility = View.GONE
             // The scrub bar belongs to the picture; leaving it up over another
             // shelf is what made it linger and then vanish on its own.
-            controls.hide()
+            showControls(false)
         }
 
         if (onItsShelf && item!!.kind == Library.Kind.MUSIC) showNowPlaying(item) else hideNowPlaying()
+    }
+
+    /** Which song the cover on the stage belongs to, so it is read only once. */
+    private var coverFor: android.net.Uri? = null
+
+    /**
+     * Put a song's own cover where a video's picture goes.
+     *
+     * Whole rather than cropped, as the desktop does it. The stage stays away
+     * until there is something to put in it: a black block the height of a
+     * video, over a song with no artwork, reads as a picture missing rather
+     * than a song without one. Read off the main thread — the reader opens the
+     * file — and checked again on the way back, because the song can be changed
+     * while the last one's cover is still being fetched.
+     */
+    private fun showCover(item: Library.Item) {
+        if (coverFor == item.uri) return
+        coverFor = item.uri
+        stageArt.setImageDrawable(null)
+        stage.visibility = View.GONE
+        // Back in the bar until we know there is a bigger one to replace it.
+        npArt.visibility = View.VISIBLE
+        work.execute {
+            // The picture in the file first, then the one remembered beside it —
+            // the same order the rows use, so a song does not show one cover in
+            // the list and a different one on the stage.
+            val bmp = embeddedArt(item) ?: Covers.load(activity, Covers.keyFor(item.name))
+            ui.post {
+                if (bmp == null || coverFor != item.uri || playing?.uri != item.uri) return@post
+                stageArt.setImageBitmap(bmp)
+                stageArt.visibility = View.VISIBLE
+                // The bar's own thumbnail is the same picture a few times
+                // smaller, directly underneath. One of them is enough, and the
+                // large one is the point.
+                npArt.visibility = View.GONE
+                // A song needs no surface, and one left up behind the cover
+                // would hold the last video's frame under it.
+                surface.visibility = View.GONE
+                stage.visibility = View.VISIBLE
+                stage.layoutParams = stage.layoutParams.apply { height = stageHeight() }
+            }
+        }
     }
 
     /**
@@ -790,7 +1008,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         mp.seekTo(target.toLong())
         ui.removeCallbacks(forgetSeek)
         ui.postDelayed(forgetSeek, SEEK_SETTLE_MS)
-        controls.show(CONTROLS_MS)
+        showControls(true)
         refreshMediaNotification()
     }
 
@@ -840,7 +1058,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // Confirmed rather than raw, so the first tap of a double tap does
             // not flash the controls on its way to a seek.
             override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                if (controls.isShowing) controls.hide() else controls.show(CONTROLS_MS)
+                showControls(!controlsShown)
                 return true
             }
 
@@ -1064,12 +1282,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // A new video: any pending seek run belongs to the last one.
         seekTarget = -1
         ui.removeCallbacks(forgetSeek)
-        // A song has no picture. It plays in the bar at the top, and the video
-        // stage — its surface, its frame, its full screen — is left out of it
-        // entirely, so the last video's frame never shows behind a note and the
-        // player never touches the machinery a picture needs.
+        // A song has no picture of its own to decode. It plays in the bar at the
+        // top under its cover, and the surface and the frame fitting are left
+        // out of it, so the last video's frame never shows behind a song.
         npFor = null
-        syncPlayerView()
 
         player?.release()
 
@@ -1082,6 +1298,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // Land on the exact frame a seek asks for, not the nearest keyframe.
         exo.setSeekParameters(SeekParameters.EXACT)
         player = exo
+
+        // After the player is in the field, not before it. `syncPlayerView`
+        // asks whether there is a player at all to decide whether there is
+        // anything to show, so asking on the way in — while the field still
+        // held the last one, or nothing — left the first video of a session
+        // playing its sound with the stage still hidden. Nothing called this
+        // again until a shelf was switched or something else was played, so the
+        // picture only turned up on the second attempt.
+        syncPlayerView()
 
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
@@ -1128,7 +1353,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (item.kind == Library.Kind.MUSIC) {
             updateNowPlaying()
         } else {
-            controls.show(CONTROLS_MS)
+            showControls(true)
             fitSurface()
             applyOrientation()
         }
@@ -1145,7 +1370,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // and restarting when pressed, is the wrong thing on the one surface
             // left while the app is in the background. Pressing play replays it.
             wantsPlay = false
-            controls.show(CONTROLS_MS)
+            showControls(true)
             refreshMediaNotification()
         }
     }
@@ -1186,7 +1411,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (next == null) {
             // Nothing to go to: leave the last frame up with the controls, the
             // same as a video ending with autoplay off.
-            controls.show(CONTROLS_MS)
+            showControls(true)
             refreshMediaNotification()
             return
         }
@@ -1233,13 +1458,17 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         player = null
         prepared = false
         wantsPlay = false
-        controls.hide()
+        showControls(false)
         playing = null
         expanded = false
         activity.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         chrome.visibility = View.VISIBLE
         stage.visibility = View.GONE
-        expand.visibility = View.VISIBLE
+        // The cover goes with the song. Left in place it would be handed back
+        // to the next song by `showCover`, which skips a cover it thinks is
+        // already up.
+        coverFor = null
+        stageArt.setImageDrawable(null)
         npFor = null
         hideNowPlaying()
         clearMediaControls()
@@ -1583,52 +1812,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             .show()
     }
 
-    /**
-     * The library's own settings.
-     *
-     * A dialog rather than a menu, because a menu closes on the first thing
-     * pressed — and a switch that puts its own panel away as it is switched
-     * gives no chance to see what it did. This one stays until it is stepped
-     * away from.
-     */
-    private fun showSettings() {
-        val view = LayoutInflater.from(activity)
-            .inflate(R.layout.dialog_library_settings, null)
-
-        val background = view.findViewById<android.widget.CompoundButton>(R.id.settingBackground)
-        background.isChecked = Library.backgroundPlayback(activity)
-        // Applied as it is toggled, so the dialog has no OK button to forget to
-        // press — the settings are the state, not a form to submit.
-        background.setOnCheckedChangeListener { _, checked ->
-            Library.setBackgroundPlayback(activity, checked)
-        }
-
-        val group = view.findViewById<android.widget.RadioGroup>(R.id.settingEnd)
-        group.check(
-            when (Library.playbackEnd(activity)) {
-                Library.PlaybackEnd.STOP -> R.id.endStop
-                Library.PlaybackEnd.NEXT -> R.id.endNext
-                Library.PlaybackEnd.SHUFFLE -> R.id.endShuffle
-            }
-        )
-        group.setOnCheckedChangeListener { _, checkedId ->
-            Library.setPlaybackEnd(
-                activity,
-                when (checkedId) {
-                    R.id.endNext -> Library.PlaybackEnd.NEXT
-                    R.id.endShuffle -> Library.PlaybackEnd.SHUFFLE
-                    else -> Library.PlaybackEnd.STOP
-                },
-            )
-        }
-
-        MaterialAlertDialogBuilder(activity)
-            .setTitle(R.string.library_settings)
-            .setView(view)
-            .setPositiveButton(R.string.close, null)
-            .show()
-    }
-
     private fun toast(text: String) {
         Toast.makeText(activity, text, Toast.LENGTH_SHORT).show()
     }
@@ -1643,6 +1826,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
 
         /** How long the controls stay up after being asked for. */
         const val CONTROLS_MS = 3_000
+
+        /** How often the bar's scrubber and clock are moved along. */
+        const val TICK_MS = 500L
+
+        /**
+         * How far in "previous" stops meaning the one before and starts meaning
+         * this one from the top.
+         */
+        const val RESTART_MS = 3_000
 
         /** How far a swipe has to travel, in density-independent pixels. */
         const val SWIPE_DP = 60

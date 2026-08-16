@@ -72,4 +72,6 @@
     <string name="library_end_next">다음 영상 재생</string>
     <string name="library_end_shuffle">폴더 내 무작위 재생</string>
     <string name="library_playing">재생 중</string>
+    <string name="library_previous">이전</string>
+    <string name="library_next">다음</string>
 </resources>

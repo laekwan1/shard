@@ -51,9 +51,31 @@
                 android:layout_gravity="center" />
 
             <!--
+                A song's cover, in the space a video's picture would fill.
+                Whole rather than cropped to the shape of the stage: a cover is
+                square and the stage is not, and a cover with its edges cut off
+                is somebody's artwork with its edges cut off. Only up when the
+                file actually carries one — an empty black block over a song
+                that has no art says less than no block at all.
+            -->
+            <ImageView
+                android:id="@+id/stageArt"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitCenter"
+                android:visibility="gone"
+                android:contentDescription="@null" />
+
+            <!--
                 The way out of full screen, top left, where every screen keeps
                 it. Only shown while full screen, because the header carries it
                 the rest of the time.
+            -->
+            <!--
+                On a disc of its own. The bar at the foot of the picture has a
+                scrim under it; this one stands alone at the top, and a white
+                arrow on a sunlit frame is not an arrow. The ripple moves to the
+                foreground so the backdrop can have the background.
             -->
             <ImageButton
                 android:id="@+id/leaveFullScreen"
@@ -61,25 +83,155 @@
                 android:layout_height="42dp"
                 android:layout_gravity="top|start"
                 android:layout_margin="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/pull_backdrop"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_back"
                 android:scaleType="fitCenter"
                 android:padding="9dp"
                 android:visibility="gone"
                 android:contentDescription="@string/library_back" />
 
-            <!-- Sits over the video, bottom right, out of the picture's way. -->
-            <ImageButton
-                android:id="@+id/expand"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_gravity="bottom|end"
-                android:layout_margin="6dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_expand"
-                android:scaleType="fitCenter"
-                android:padding="9dp"
-                android:contentDescription="@string/library_expand" />
+            <!--
+                The player's own bar, in place of the framework's
+                MediaController.
+
+                That one drew white-and-lavender Material defaults over a screen
+                that is black and cyan everywhere else, and there is no way to
+                restyle it — it builds its own views. It also had room for
+                nothing but play and seek, which left the things that belong on
+                a player (what happens at the end, whether the sound carries on
+                without the screen, the way out of full screen) scattered into a
+                menu and a floating button.
+
+                Drawn to the desktop player's shape: the scrubber on its own
+                line, then one row of controls with the clock in it.
+            -->
+            <LinearLayout
+                android:id="@+id/videoBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:orientation="vertical"
+                android:background="@drawable/player_scrim"
+                android:paddingTop="26dp"
+                android:paddingHorizontal="4dp"
+                android:paddingBottom="2dp"
+                android:visibility="gone">
+
+                <!--
+                    Tinted by hand. A SeekBar is a platform widget and takes its
+                    colour from `android:colorControlActivated`, which the
+                    Material theme sets to its own lavender — setting
+                    `colorPrimary` to the app's accent, as the theme does, never
+                    reaches it. So the scrubber came out a colour that appears
+                    nowhere else in either app.
+                -->
+                <SeekBar
+                    android:id="@+id/vbSeek"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:progressTint="@color/accent"
+                    android:thumbTint="@color/accent"
+                    android:progressBackgroundTint="@color/muted"
+                    android:max="1000" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <ImageButton
+                        android:id="@+id/vbPrev"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_pb_prev"
+                        android:scaleType="fitCenter"
+                        android:padding="10dp"
+                        android:contentDescription="@string/library_previous" />
+
+                    <ImageButton
+                        android:id="@+id/vbToggle"
+                        android:layout_width="46dp"
+                        android:layout_height="46dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_pb_pause"
+                        android:scaleType="fitCenter"
+                        android:padding="10dp"
+                        android:contentDescription="@string/library_playing" />
+
+                    <ImageButton
+                        android:id="@+id/vbNext"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_pb_next"
+                        android:scaleType="fitCenter"
+                        android:padding="10dp"
+                        android:contentDescription="@string/library_next" />
+
+                    <!--
+                        What happens when this one ends, and whether the sound
+                        survives leaving the app. On the bar rather than behind
+                        the menu beside the new-folder button: they are about
+                        what is playing, and what is playing is right here.
+                    -->
+                    <ImageButton
+                        android:id="@+id/vbOnward"
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:layout_marginStart="4dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_onward"
+                        android:scaleType="fitCenter"
+                        android:padding="9dp"
+                        android:contentDescription="@string/library_end_next" />
+
+                    <ImageButton
+                        android:id="@+id/vbShuffle"
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_shuffle"
+                        android:scaleType="fitCenter"
+                        android:padding="9dp"
+                        android:contentDescription="@string/library_end_shuffle" />
+
+                    <ImageButton
+                        android:id="@+id/vbBackground"
+                        android:layout_width="38dp"
+                        android:layout_height="38dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_headphones"
+                        android:scaleType="fitCenter"
+                        android:padding="9dp"
+                        android:contentDescription="@string/library_background" />
+
+                    <TextView
+                        android:id="@+id/vbClock"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:gravity="end"
+                        android:paddingHorizontal="6dp"
+                        android:textColor="@color/on_surface"
+                        android:textSize="11sp"
+                        android:maxLines="1"
+                        android:fontFeatureSettings="tnum"
+                        android:text="0:00 / 0:00" />
+
+                    <ImageButton
+                        android:id="@+id/expand"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_expand"
+                        android:scaleType="fitCenter"
+                        android:padding="10dp"
+                        android:contentDescription="@string/library_expand" />
+                </LinearLayout>
+            </LinearLayout>
 
             <!--
                 The brightness/volume gauge. Shown for a moment while the sides of
@@ -179,16 +331,6 @@
                 </LinearLayout>
 
                 <ImageButton
-                    android:id="@+id/npToggle"
-                    android:layout_width="42dp"
-                    android:layout_height="42dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_pb_pause"
-                    android:scaleType="fitCenter"
-                    android:padding="9dp"
-                    android:contentDescription="@string/library_playing" />
-
-                <ImageButton
                     android:id="@+id/npStop"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
@@ -217,11 +359,15 @@
                     android:fontFeatureSettings="tnum"
                     android:text="0:00" />
 
+                <!-- Tinted by hand for the same reason as the video's; see there. -->
                 <SeekBar
                     android:id="@+id/npSeek"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:progressTint="@color/accent"
+                    android:thumbTint="@color/accent"
+                    android:progressBackgroundTint="@color/muted"
                     android:max="1000" />
 
                 <TextView
@@ -234,6 +380,83 @@
                     android:textSize="10sp"
                     android:fontFeatureSettings="tnum"
                     android:text="0:00" />
+            </LinearLayout>
+
+            <!--
+                The same controls the video bar carries, in the same order. A
+                song and a video are the same player with a different picture,
+                and two orders for one set of buttons is two things to learn.
+            -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <ImageButton
+                    android:id="@+id/npPrev"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_pb_prev"
+                    android:scaleType="fitCenter"
+                    android:padding="10dp"
+                    android:contentDescription="@string/library_previous" />
+
+                <ImageButton
+                    android:id="@+id/npToggle"
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_pb_pause"
+                    android:scaleType="fitCenter"
+                    android:padding="10dp"
+                    android:contentDescription="@string/library_playing" />
+
+                <ImageButton
+                    android:id="@+id/npNext"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_pb_next"
+                    android:scaleType="fitCenter"
+                    android:padding="10dp"
+                    android:contentDescription="@string/library_next" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <ImageButton
+                    android:id="@+id/npOnward"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_onward"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_end_next" />
+
+                <ImageButton
+                    android:id="@+id/npShuffle"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_shuffle"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_end_shuffle" />
+
+                <ImageButton
+                    android:id="@+id/npBackground"
+                    android:layout_width="38dp"
+                    android:layout_height="38dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_headphones"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_background" />
             </LinearLayout>
         </LinearLayout>
 
@@ -342,10 +565,15 @@
             </LinearLayout>
 
             <!--
-                One row of folders, scrolled sideways, with the folder-making and
-                settings buttons pinned to its right end — on the same line as the
-                tabs they belong beside, not up in the title bar. A folder is a
-                filter over the list below, not a place to navigate into.
+                One row of folders, scrolled sideways, with the folder-making
+                button pinned to its right end — on the same line as the tabs it
+                belongs beside, not up in the title bar. A folder is a filter
+                over the list below, not a place to navigate into.
+
+                The menu that used to sit here is gone: everything it held was
+                about what is playing, and it is all on the player bar now. It
+                was removed once before while it was still the only way to reach
+                those settings, which locked them away — hence the order.
             -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -373,22 +601,12 @@
                     android:id="@+id/newFolder"
                     android:layout_width="38dp"
                     android:layout_height="38dp"
+                    android:layout_marginEnd="6dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:src="@drawable/ic_new_folder"
                     android:scaleType="fitCenter"
                     android:padding="8dp"
                     android:contentDescription="@string/library_new_folder" />
-
-                <ImageButton
-                    android:id="@+id/librarySettings"
-                    android:layout_width="38dp"
-                    android:layout_height="38dp"
-                    android:layout_marginEnd="6dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_more"
-                    android:scaleType="fitCenter"
-                    android:padding="9dp"
-                    android:contentDescription="@string/library_settings" />
             </LinearLayout>
 
             <View

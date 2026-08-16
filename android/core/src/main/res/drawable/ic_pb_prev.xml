@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Previous. The same drawing the desktop player uses, to the same numbers: a
+    triangle pointing back and a bar at the left. The bar is a round-capped
+    stroke rather than a rounded rectangle — one path instead of two shapes,
+    and the cap is exactly the radius the desktop's `rx` gives it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16"
+    android:tint="@color/on_surface">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,3 L12,13 L5,8 Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M3.9,3.9 L3.9,12.1" />
+</vector>

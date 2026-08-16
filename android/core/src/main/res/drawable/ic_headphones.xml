@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Background playback. Headphones rather than a screen or a moon: what the
+    setting keeps is the sound, and the sound is the thing being drawn. No
+    desktop equivalent to copy — the desktop has no notion of leaving the app.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16"
+    android:tint="@color/on_surface">
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3.2,10.4 L3.2,8.8 A4.8,4.8 0 0 1 12.8,8.8 L12.8,10.4" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:pathData="M3.2,10.9 L3.2,12.9" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.6"
+        android:strokeLineCap="round"
+        android:pathData="M12.8,10.9 L12.8,12.9" />
+</vector>

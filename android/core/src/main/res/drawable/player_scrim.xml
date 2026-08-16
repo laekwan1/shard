@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The dark under the player bar. The bar lies over the picture, and a picture
+    can be any colour — a grey glyph on sunlit grass is no glyph at all, which
+    is exactly what the first, politer version of this gradient gave.
+
+    A gradient rather than a panel so the picture is not cut in half by a hard
+    edge partway up it, but a heavy one: almost opaque under the buttons, still
+    a definite wash at the scrubber, fading out only at the very top.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <!-- 90° runs bottom to top, so `startColor` is the darkest end and it lands
+         under the buttons. -->
+    <!-- The top end is fully clear, not merely faint. At 15% it stopped rather
+         than faded, and the edge of the scrim drew a line across the picture. -->
+    <gradient
+        android:angle="90"
+        android:startColor="#F2000000"
+        android:centerColor="#A6000000"
+        android:endColor="#00000000" />
+</shape>
