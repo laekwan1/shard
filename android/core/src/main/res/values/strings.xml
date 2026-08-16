@@ -18,6 +18,11 @@
     <string name="menu_forward">앞으로</string>
     <string name="hint_long_press">영상을 길게 누르면 저장할 수 있습니다</string>
     <string name="close">닫기</string>
+    <!-- Our own words for the dialog pair. The platform's android.R strings
+         follow the SYSTEM language, so on an English phone every dialog said
+         Cancel/OK under a Korean question. -->
+    <string name="cancel">취소</string>
+    <string name="confirm">확인</string>
     <string name="download_already_saved">이미 보관함에 있습니다. 다시 받을까요?</string>
     <string name="download_again">다시 받기</string>
     <string name="downloading">내려받는 중…</string>
@@ -52,15 +57,15 @@
     <string name="library_hold_saved">%1$s 부터 다시 재생합니다</string>
     <string name="library_hold_cleared">처음부터 재생합니다</string>
     <string name="library_hold_needs_playing">재생 중일 때 저장할 수 있습니다</string>
-    <string name="library_rename">이름 바꾸기</string>
+    <string name="library_rename">이름 변경</string>
     <string name="library_rename_failed">이름을 바꾸지 못했습니다</string>
     <string name="library_delete">삭제</string>
     <string name="library_delete_ask">%1$s 을(를) 삭제할까요? 되돌릴 수 없습니다.</string>
     <string name="library_deleted">삭제했습니다</string>
     <string name="library_delete_failed">삭제하지 못했습니다</string>
     <string name="library_move_failed">옮기지 못했습니다</string>
-    <string name="library_folder_remove">폴더 없애기</string>
-    <string name="library_folder_remove_ask">폴더 \"%1$s\" 을(를) 없앱니다. 안의 영상은 지워지지 않고 보관함 맨 위로 옮겨집니다.</string>
+    <string name="library_folder_remove">폴더 삭제</string>
+    <string name="library_folder_remove_ask">폴더 \"%1$s\" 을(를) 삭제합니다. 안의 영상은 지워지지 않고 보관함 맨 위로 옮겨집니다.</string>
     <string name="library_cannot_play">이 영상을 재생하지 못했습니다</string>
     <string name="library_back">뒤로</string>
     <string name="library_settings">보관함 설정</string>

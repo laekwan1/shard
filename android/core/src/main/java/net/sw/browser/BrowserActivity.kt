@@ -1059,7 +1059,7 @@ abstract class BrowserActivity : AppCompatActivity() {
     private fun askToDownloadAgain(media: Media, expectedBytes: Long) {
         MaterialAlertDialogBuilder(this)
             .setMessage(getString(R.string.download_already_saved))
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.download_again) { _, _ -> hand(media, expectedBytes) }
             .show()
     }

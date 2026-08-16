@@ -301,8 +301,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         MaterialAlertDialogBuilder(activity)
             .setTitle(R.string.library_rename)
             .setView(box)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.confirm) { _, _ ->
                 val wanted = box.text.toString()
                 work.execute {
                     val done = Library.rename(activity, item, wanted)
@@ -1844,7 +1844,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private fun confirmDelete(item: Library.Item) {
         MaterialAlertDialogBuilder(activity)
             .setMessage(activity.getString(R.string.library_delete_ask, item.title))
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.library_delete) { _, _ ->
                 work.execute {
                     val done = Library.delete(activity, item)
@@ -1981,8 +1981,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         MaterialAlertDialogBuilder(activity)
             .setTitle(R.string.library_new_folder)
             .setView(field)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.confirm) { _, _ ->
                 val name = Library.clean(field.text.toString())
                 if (name.isBlank()) return@setPositiveButton
                 work.execute {
@@ -2012,8 +2012,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         MaterialAlertDialogBuilder(activity)
             .setTitle(R.string.library_rename)
             .setView(field)
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(android.R.string.ok) { _, _ ->
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.confirm) { _, _ ->
                 val fresh = Library.clean(field.text.toString())
                 if (fresh.isBlank() || fresh == name) return@setPositiveButton
                 work.execute {
@@ -2031,7 +2031,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private fun confirmRemoveFolder(name: String) {
         MaterialAlertDialogBuilder(activity)
             .setMessage(activity.getString(R.string.library_folder_remove_ask, name))
-            .setNegativeButton(android.R.string.cancel, null)
+            .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(R.string.library_folder_remove) { _, _ ->
                 work.execute {
                     Library.removeFolder(activity, name, items, tab)
