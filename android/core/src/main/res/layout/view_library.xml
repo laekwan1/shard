@@ -62,7 +62,7 @@
                 android:id="@+id/backFromLibrary"
                 android:layout_width="@dimen/target"
                 android:layout_height="@dimen/target"
-                android:background="?attr/selectableItemBackgroundBorderless"
+                android:background="@drawable/press_soft"
                 android:src="@drawable/ic_back"
                 android:scaleType="fitCenter"
                 android:padding="12dp"
@@ -698,7 +698,9 @@
                     android:id="@+id/saved"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:divider="@null"
+                    android:divider="@drawable/list_divider"
+                    android:dividerHeight="1dp"
+                    android:footerDividersEnabled="false"
                     android:scrollbarStyle="outsideOverlay" />
 
                 <LinearLayout

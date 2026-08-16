@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The pressed state for an icon button: a soft rounded square, bounded to
+    the button.
+
+    The borderless ripple these buttons wore grows past the glyph into a
+    circle the size of the whole touch target, which on a 48dp button reads
+    as the row lighting up rather than the button being pressed. Bounded and
+    rounded, the light stays on the thing that was touched.
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/state_drag">
+    <item android:id="@android:id/mask">
+        <shape android:shape="rectangle">
+            <corners android:radius="@dimen/r_md" />
+            <solid android:color="#FFFFFF" />
+        </shape>
+    </item>
+</ripple>

@@ -1954,20 +1954,21 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         val density = activity.resources.displayMetrics.density
         val add = TextView(activity)
         add.text = "+"
-        add.textSize = 17f
+        add.textSize = 15f
         add.setTextColor(activity.getColor(R.color.muted))
         add.gravity = android.view.Gravity.CENTER
         add.includeFontPadding = false
         add.setBackgroundResource(R.drawable.new_tab)
+        // A shade smaller than the tabs (26 against their ~36), so the row
+        // reads as tabs-plus-a-button rather than as one more tab shape.
         add.layoutParams = LinearLayout.LayoutParams(
-            (30 * density).toInt(),
-            (30 * density).toInt(),
+            (26 * density).toInt(),
+            (26 * density).toInt(),
         ).apply {
             gravity = android.view.Gravity.BOTTOM
             marginStart = (6 * density).toInt()
-            // Half the difference between the tab's height (~36dp) and this
-            // button's 30, so the + floats centred on the tab beside it.
-            bottomMargin = (3 * density).toInt()
+            // Half the height difference, so it floats centred on the tab.
+            bottomMargin = (5 * density).toInt()
         }
         add.setOnClickListener { askForFolder() }
         folderRow.addView(add)

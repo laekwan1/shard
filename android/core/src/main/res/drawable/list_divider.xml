@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The hair between one row and the next, as the desktop list draws it: held
+    off both walls so it reads as a division inside the list rather than the
+    list being ruled into a table, and faint — white at 8%, the hover rung of
+    the state ladder, because a divider is furniture at its quietest.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetLeft="12dp"
+    android:insetRight="12dp">
+    <shape android:shape="rectangle">
+        <size android:height="1dp" />
+        <solid android:color="@color/state_hover" />
+    </shape>
+</inset>

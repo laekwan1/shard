@@ -27,7 +27,7 @@
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
-    android:paddingVertical="2dp">
+    android:paddingVertical="1dp">
 
     <!-- 80 by 45 is sixteen by nine exactly. With the padding the row is 51dp:
          the frame is the reason the row exists, so it takes the room, and the
@@ -107,7 +107,7 @@
         android:layout_width="@dimen/target"
         android:layout_height="@dimen/target"
         android:layout_marginStart="2dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
+        android:background="@drawable/press_soft"
         android:src="@drawable/ic_more"
         android:scaleType="fitCenter"
         android:padding="14dp"
