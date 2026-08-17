@@ -1,0 +1,45 @@
+# Prove the Rust core builds for a real iPhone.
+#
+# This is the step Windows cannot do: shard-mobile pulls in `ring` (rustls's
+# crypto, for the encrypted DNS resolver), which compiles C and needs Apple's
+# clang/xcrun — present only on macOS. A macOS runner has the full toolchain,
+# so this both verifies the port and gives us the .a to link into an iOS app.
+name: iOS build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain + iOS targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          # Device (arm64) and the simulator on Apple-silicon runners.
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ios-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build shard-mobile for iPhone (device)
+        run: cargo build -p shard-mobile --target aarch64-apple-ios --release
+
+      - name: Build shard-mobile for the simulator
+        run: cargo build -p shard-mobile --target aarch64-apple-ios-sim --release
+
+      - name: Show the static library that an iOS app would link
+        run: ls -la target/aarch64-apple-ios/release/libshard_mobile.a
