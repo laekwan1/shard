@@ -268,21 +268,23 @@
                 android:layout_gravity="bottom"
                 android:orientation="vertical"
                 android:background="@drawable/player_scrim"
-                android:paddingTop="26dp"
+                android:paddingTop="12dp"
                 android:paddingHorizontal="4dp"
-                android:paddingBottom="2dp"
+                android:paddingBottom="4dp"
                 android:visibility="gone">
 
                 <!--
                     The line sits right on top of the transport now, so the eye
                     goes from the play button straight to where it is. The times
                     ride its ends; the title moved up onto the picture, and the
-                    end-of-file switches moved to the gear on the folder row.
+                    end-of-file switches moved to the gear on the folder row. A
+                    little margin drops it clear of the top of the scrim.
                 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
+                    android:layout_marginTop="6dp"
                     android:gravity="center_vertical">
 
                     <TextView
@@ -332,7 +334,7 @@
                         android:id="@+id/vbPrev"
                         android:layout_width="@dimen/target"
                         android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:src="@drawable/ic_pb_prev"
                         android:scaleType="fitCenter"
                         android:padding="14dp"
@@ -342,7 +344,7 @@
                         android:id="@+id/vbToggle"
                         android:layout_width="@dimen/target"
                         android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:src="@drawable/ic_pb_pause"
                         android:scaleType="fitCenter"
                         android:padding="11dp"
@@ -352,7 +354,7 @@
                         android:id="@+id/vbNext"
                         android:layout_width="@dimen/target"
                         android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:src="@drawable/ic_pb_next"
                         android:scaleType="fitCenter"
                         android:padding="14dp"
@@ -372,7 +374,7 @@
                         android:minWidth="44dp"
                         android:gravity="center"
                         android:paddingHorizontal="8dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:textColor="@color/on_surface"
                         android:textSize="14sp"
                         android:maxLines="1"
@@ -387,7 +389,7 @@
                         android:id="@+id/vbMute"
                         android:layout_width="@dimen/target"
                         android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:src="@drawable/ic_volume"
                         android:scaleType="fitCenter"
                         android:padding="13dp"
@@ -397,7 +399,7 @@
                         android:id="@+id/expand"
                         android:layout_width="@dimen/target"
                         android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:background="@drawable/press_square"
                         android:src="@drawable/ic_expand"
                         android:scaleType="fitCenter"
                         android:padding="14dp"
@@ -506,7 +508,7 @@
                     android:id="@+id/npStop"
                     android:layout_width="@dimen/target"
                     android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/press_square"
                     android:src="@drawable/ic_close"
                     android:scaleType="fitCenter"
                     android:padding="14dp"
@@ -561,76 +563,43 @@
                 song and a video are the same player with a different picture,
                 and two orders for one set of buttons is two things to learn.
             -->
+            <!-- Just the transport, centred: in order, at random and background
+                 moved to the folder-row gear, the same as the video bar. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:gravity="center_vertical">
+                android:gravity="center">
 
                 <ImageButton
                     android:id="@+id/npPrev"
                     android:layout_width="@dimen/target"
                     android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/press_square"
                     android:src="@drawable/ic_pb_prev"
                     android:scaleType="fitCenter"
-                    android:padding="14dp"
+                    android:padding="13dp"
                     android:contentDescription="@string/library_previous" />
 
                 <ImageButton
                     android:id="@+id/npToggle"
                     android:layout_width="@dimen/target"
                     android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/press_square"
                     android:src="@drawable/ic_pb_pause"
                     android:scaleType="fitCenter"
-                    android:padding="11dp"
+                    android:padding="10dp"
                     android:contentDescription="@string/library_playing" />
 
                 <ImageButton
                     android:id="@+id/npNext"
                     android:layout_width="@dimen/target"
                     android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/press_square"
                     android:src="@drawable/ic_pb_next"
                     android:scaleType="fitCenter"
-                    android:padding="14dp"
+                    android:padding="13dp"
                     android:contentDescription="@string/library_next" />
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <ImageButton
-                    android:id="@+id/npOnward"
-                    android:layout_width="@dimen/target"
-                    android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_onward"
-                    android:scaleType="fitCenter"
-                    android:padding="16dp"
-                    android:contentDescription="@string/library_end_next" />
-
-                <ImageButton
-                    android:id="@+id/npShuffle"
-                    android:layout_width="@dimen/target"
-                    android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_shuffle"
-                    android:scaleType="fitCenter"
-                    android:padding="16dp"
-                    android:contentDescription="@string/library_end_shuffle" />
-
-                <ImageButton
-                    android:id="@+id/npBackground"
-                    android:layout_width="@dimen/target"
-                    android:layout_height="@dimen/target"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_offscreen"
-                    android:scaleType="fitCenter"
-                    android:padding="16dp"
-                    android:contentDescription="@string/library_background" />
             </LinearLayout>
         </LinearLayout>
 
@@ -704,7 +673,7 @@
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:layout_marginEnd="6dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/press_square"
                     android:src="@drawable/ic_settings"
                     android:scaleType="fitCenter"
                     android:padding="9dp"

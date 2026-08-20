@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The volume, as a slider off the sound icon. A tap on the icon brings it up;
+    dragging the thumb sets the level, and all the way to the low end is zero —
+    mute, with nothing else to press. Horizontal rather than turned on its side:
+    a rotated SeekBar fights the popup's own measuring, and the plain one is the
+    one that behaves.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/menu_backdrop"
+    android:paddingHorizontal="12dp"
+    android:paddingVertical="4dp">
+
+    <ImageView
+        android:layout_width="18dp"
+        android:layout_height="18dp"
+        android:layout_marginEnd="8dp"
+        android:src="@drawable/ic_volume"
+        android:contentDescription="@null" />
+
+    <SeekBar
+        android:id="@+id/volumeSlider"
+        android:layout_width="150dp"
+        android:layout_height="40dp"
+        android:progressDrawable="@drawable/scrub_track"
+        android:thumb="@drawable/scrub_thumb"
+        android:splitTrack="false"
+        android:maxHeight="3dp"
+        android:max="1000" />
+</LinearLayout>

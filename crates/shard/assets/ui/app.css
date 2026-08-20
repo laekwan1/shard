@@ -447,36 +447,30 @@ button svg { display: block; }
   display: flex;
   align-items: center;
   gap: 4px;
-  /* The same air on every side of the row, and the folders starting where the
-     panel does rather than a step in from it. */
   padding: 8px;
   flex-wrap: wrap;
   flex: none;
-  background: var(--surface);
-  /* Only a line below, dividing the folders from the files. The rule that used
-     to sit above them belonged to a switch pressed flush against this panel;
-     the switch is detached now, so the top of the panel is its own edge. */
+  /* No dark band of its own: the folder row sits on the library's own ground,
+     the same colour as everything around it, rather than on a near-black panel
+     that read as a block cut into the page. The chips keep their own shapes. */
+  background: transparent;
   border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
    above is drawn with, so one row does not answer differently from the other. */
-/* No fill, no outline: a folder is named by its colour alone now. Chosen wears
-   the list's own bright ink; the rest are the muted grey — the reverse of it —
-   so the row reads as one lit label among dim ones rather than a strip of
-   boxes. Background chips were removed at the user's ask. */
 .folder {
-  padding: 5px 12px;
+  padding: 5px 15px;
   font-size: 11.5px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid #ffffff1c;
   border-radius: var(--r-sm);
-  transition: color var(--t-press) var(--ease);
+  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
-.folder:hover { color: var(--on-surface); }
-/* Chosen says so by weight and the bright colour, not by growing. A label that
-   changes size when picked reflows the row and it jumps under the pointer. */
-.folder.on { color: var(--on-surface); background: transparent; font-weight: 700; }
+.folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
+/* Chosen is said by the fill and the weight; the outline belongs to idle
+   chips, where it is the only thing marking the pressable area. */
+.folder.on { color: #fff; background: #34343b; border-color: transparent; font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip
@@ -849,6 +843,11 @@ button svg { display: block; }
 }
 #queue.open #queuePanel { width: 264px; pointer-events: auto; }
 
+/* Not on the full screen. The queue is a way to pick the next thing without
+   leaving the library's frame; full screen is the frame gone, and a tab hanging
+   on the edge of a filling picture is furniture where none was asked for. */
+#stage:fullscreen #queue { display: none; }
+
 #queueShelves {
   display: flex;
   gap: 4px;
@@ -874,8 +873,16 @@ button svg { display: block; }
   display: flex;
   flex-direction: column;
   gap: 1px;
+  /* Centred when they fit, top-aligned when they do not: `safe` keeps the top
+     rows reachable instead of clipping them off the top when the list is longer
+     than the panel. */
+  justify-content: safe center;
 }
 .qrow {
+  /* Keep their height: as flex children they were shrinking to fit, so a long
+     shelf was squashed into the panel instead of scrolling — which is why not
+     all of it showed. */
+  flex: none;
   display: block;
   width: 100%;
   text-align: left;
@@ -1028,11 +1035,14 @@ button svg { display: block; }
     without looking.
 */
 #row button {
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-pill);
+  /* A soft square, not a full circle: the round fill spread the whole 48 and
+     read as a big blot under the pointer. A smaller rounded-rect is the shape
+     the rest of the program's pressables wear. */
+  border-radius: var(--r-sm);
   color: var(--muted);
   font-size: 13px;
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease);

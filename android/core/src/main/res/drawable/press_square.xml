@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A press that is a soft square, not a circle: the borderless ripple spread a
+    round blot the whole width of the button, the same complaint the desktop
+    had. Inset a few dp so the pressed shape is smaller than the touch target
+    and rounded rather than round.
+-->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="?android:attr/colorControlHighlight">
+    <item android:id="@android:id/mask">
+        <inset
+            android:insetLeft="5dp"
+            android:insetRight="5dp"
+            android:insetTop="5dp"
+            android:insetBottom="5dp">
+            <shape android:shape="rectangle">
+                <solid android:color="#FFFFFFFF" />
+                <corners android:radius="10dp" />
+            </shape>
+        </inset>
+    </item>
+</ripple>
