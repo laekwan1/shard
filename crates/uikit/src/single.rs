@@ -25,6 +25,35 @@ impl Drop for Claim {
     }
 }
 
+/// The claim this process holds, when it wants to be able to let go of it
+/// without exiting — the elevate-on-demand path drops it so the elevated copy
+/// can take it, and takes it back if the prompt is declined.
+static HELD: std::sync::Mutex<Option<Claim>> = std::sync::Mutex::new(None);
+static APP: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Keep a claim here so it can be released and retaken later.
+pub fn hold(app: &str, claim: Claim) {
+    let _ = APP.set(app.to_string());
+    *HELD.lock().expect("the claim lock is never poisoned") = Some(claim);
+}
+
+/// Let the claim go, so another copy of the program can take it.
+pub fn release() {
+    *HELD.lock().expect("the claim lock is never poisoned") = None;
+}
+
+/// Take the claim back, after a release that came to nothing.
+pub fn reclaim() -> bool {
+    let Some(app) = APP.get() else { return false };
+    match claim(app) {
+        Some(again) => {
+            *HELD.lock().expect("the claim lock is never poisoned") = Some(again);
+            true
+        }
+        None => false,
+    }
+}
+
 /// Claim the machine for `app`, or report that someone else already has it.
 ///
 /// The name is prefixed `Global\` so the claim spans sessions: the program runs

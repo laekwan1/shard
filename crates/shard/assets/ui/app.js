@@ -721,6 +721,27 @@ function play(item) {
   paintQueue();
 }
 
+// A file opened from outside the library — Shard being the program a video or a
+// song opens with. It is not on any shelf, so there is nothing to step through:
+// the player just shows, pointed at `/external`, with the queue put away.
+function playExternal(name) {
+  show("library");
+  playing = null;
+  player.hidden = false;
+  const queue = document.getElementById("queue");
+  if (queue) { queue.hidden = true; queue.classList.remove("open"); }
+  art.hidden = true;
+  video.style.visibility = "visible";
+  nowLine.textContent = name;
+  titleLine.textContent = name;
+  // A cache-buster, so opening a second file replaces the first rather than
+  // being served the one the view already has.
+  video.src = "/external?t=" + Date.now();
+  video.play().catch(() => {});
+  syncPlayer();
+  paintTime();
+}
+
 function shutPlayer() {
   video.pause();
   video.removeAttribute("src");
@@ -1479,6 +1500,12 @@ window.__shard = {
         // Something new landed on a shelf. Read it again if the library is
         // being looked at; otherwise it will be read on the way in.
         if (here === "library") send("library.list", { kind: shelf.kind });
+        break;
+      case "external":
+        // A file opened from outside the library — a double-click on a video or
+        // a song. It is not a shelf item, so it plays on its own: the player
+        // shows over whatever is up, pointed at `/external`.
+        playExternal(message.name || "");
         break;
     }
   },

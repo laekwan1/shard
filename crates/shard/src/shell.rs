@@ -94,6 +94,126 @@ const CLASS: &[u16] = &[
     b'e' as u16, b'l' as u16, b'l' as u16, 0,
 ];
 
+/// The `dwData` tag on the `WM_COPYDATA` a second copy sends to hand the running
+/// one a file path to play. A fixed private number, so a stray copy-data from
+/// somewhere else is not mistaken for one of ours.
+const SHARD_OPEN_FILE: usize = 0x5348_4446; // "SHDF"
+
+/// `COPYDATASTRUCT`, defined here rather than imported: the windows-sys build in
+/// use does not expose it, and it is three fields.
+#[cfg(windows)]
+#[repr(C)]
+struct CopyData {
+    kind: usize,
+    len: u32,
+    data: *const std::ffi::c_void,
+}
+
+/// A media file opened from outside the library, kept for `/external` to serve
+/// and for the run loop to notice and hand to the page to play.
+static EXTERNAL: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+static EXTERNAL_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Remember a file to play, from a double-click on it. The run loop picks it up.
+pub fn set_opened_file(path: std::path::PathBuf) {
+    if let Ok(mut held) = EXTERNAL.lock() {
+        *held = Some(path);
+    }
+    EXTERNAL_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The file name to play, once, if a newly opened file is waiting.
+fn take_opened_file() -> Option<String> {
+    if !EXTERNAL_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    EXTERNAL.lock().ok().and_then(|held| {
+        held.as_ref()
+            .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("video").to_string())
+    })
+}
+
+/// Hand a file path to the copy already running, so it plays it and this copy
+/// can exit. Sent with `WM_COPYDATA` to the shell window, found by its class.
+pub fn send_file_to_running_copy(path: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{HWND, LPARAM, WPARAM};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowW, SendMessageW, WM_COPYDATA};
+        let hwnd: HWND = unsafe { FindWindowW(CLASS.as_ptr(), std::ptr::null()) };
+        if hwnd.is_null() {
+            // The other copy is not up yet — at least raise it.
+            uikit::single::wake_the_running_copy(crate::config::APP_NAME);
+            return;
+        }
+        let wide: Vec<u16> =
+            path.as_os_str().to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+        let data = CopyData {
+            kind: SHARD_OPEN_FILE,
+            len: (wide.len() * 2) as u32,
+            data: wide.as_ptr().cast(),
+        };
+        unsafe {
+            SendMessageW(
+                hwnd,
+                WM_COPYDATA,
+                0 as WPARAM,
+                (&data as *const CopyData) as LPARAM,
+            )
+        };
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+}
+
+/// The media kinds Shard can open, offered to Windows as things it plays.
+#[cfg(windows)]
+const OPENABLE: &[&str] =
+    &["mp4", "mkv", "webm", "mov", "m4v", "mp3", "m4a", "aac", "flac", "wav", "opus", "ogg"];
+
+/// Make Shard a program these files can be opened with.
+///
+/// Under `HKCU\Software\Classes`, so it needs no elevation and touches only this
+/// user's settings. It registers a ProgID and adds it to each extension's
+/// "open with" list — which puts Shard in the *연결 프로그램* menu without
+/// seizing the default. The user chooses to make it the default themselves, the
+/// one change Windows will not let a program make for itself.
+pub fn register_file_types() {
+    #[cfg(windows)]
+    {
+        let Ok(exe) = std::env::current_exe() else { return };
+        let exe = exe.to_string_lossy().to_string();
+        let command = format!("\"{exe}\" \"%1\"");
+        let icon = format!("\"{exe}\",0");
+        reg_set("Software\\Classes\\Shard.Media", None, "Shard 미디어");
+        reg_set("Software\\Classes\\Shard.Media\\DefaultIcon", None, &icon);
+        reg_set("Software\\Classes\\Shard.Media\\shell\\open\\command", None, &command);
+        for ext in OPENABLE {
+            reg_set(&format!("Software\\Classes\\.{ext}\\OpenWithProgids"), Some("Shard.Media"), "");
+        }
+    }
+}
+
+/// Write one `REG_SZ` under `HKEY_CURRENT_USER`, creating the key if need be.
+#[cfg(windows)]
+fn reg_set(subkey: &str, value: Option<&str>, data: &str) -> bool {
+    use windows_sys::Win32::System::Registry::{RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ};
+    let sub: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+    let val: Option<Vec<u16>> = value.map(|v| v.encode_utf16().chain(std::iter::once(0)).collect());
+    let dat: Vec<u16> = data.encode_utf16().chain(std::iter::once(0)).collect();
+    let status = unsafe {
+        RegSetKeyValueW(
+            HKEY_CURRENT_USER,
+            sub.as_ptr(),
+            val.as_ref().map(|v| v.as_ptr()).unwrap_or(std::ptr::null()),
+            REG_SZ,
+            dat.as_ptr().cast(),
+            (dat.len() * 2) as u32,
+        )
+    };
+    status == 0
+}
+
 thread_local! {
     /// The shell's web view, for the window procedure to resize as the window
     /// changes. Held here rather than passed through `SetWindowLongPtr` because
@@ -640,6 +760,38 @@ pub fn respond(uri: &str, range: Option<&str>) -> http::Response<std::borrow::Co
             .unwrap_or_else(|_| not_found());
     }
 
+    // A file opened from outside the library — the one Explorer handed us when
+    // Shard is the program a media file opens with. Served from the path kept in
+    // `EXTERNAL`, with the same range handling a library file gets so seeking
+    // works. The query after it is only a cache-buster.
+    if path == "/external" || path.starts_with("/external?") {
+        let Some(file) = EXTERNAL.lock().ok().and_then(|g| g.clone()) else {
+            return not_found();
+        };
+        let Ok(mut handle) = std::fs::File::open(&file) else { return not_found() };
+        let len = handle.metadata().map(|m| m.len()).unwrap_or(0);
+        if len == 0 {
+            return not_found();
+        }
+        let (start, end) = wanted_range(range, len);
+        let mut body = vec![0u8; (end - start + 1) as usize];
+        use std::io::{Read, Seek};
+        if handle.seek(std::io::SeekFrom::Start(start)).is_err()
+            || handle.read_exact(&mut body).is_err()
+        {
+            return not_found();
+        }
+        return build
+            .status(206)
+            .header("Content-Type", media_mime(&file))
+            .header("Accept-Ranges", "bytes")
+            .header("Content-Range", format!("bytes {start}-{end}/{len}"))
+            .header("Content-Length", (end - start + 1).to_string())
+            .header("Cache-Control", "no-store")
+            .body(std::borrow::Cow::Owned(body))
+            .unwrap_or_else(|_| not_found());
+    }
+
     if let Some(rest) = path.strip_prefix("/media/") {
         let id = rest.split('/').next().unwrap_or("").parse::<u64>().unwrap_or(0);
         let Some(file) = media_path(id) else { return not_found() };
@@ -809,7 +961,13 @@ pub fn preview() -> Result<()> {
 
     // Honoured here as it is in the settled window: the setting is offered on
     // the settings screen, so a build that ignored it would be lying.
-    if core.borrow().shared.config.read().start_engine_on_launch {
+    //
+    // `--engine` starts it too: that is the flag the unelevated copy passes when
+    // it relaunches itself elevated to switch the engine on, so the elevated one
+    // comes up with the engine already running rather than waiting for a second
+    // press.
+    let asked_engine = std::env::args().any(|arg| arg == "--engine");
+    if asked_engine || core.borrow().shared.config.read().start_engine_on_launch {
         core.borrow_mut().start();
     }
 
@@ -838,8 +996,25 @@ pub fn preview() -> Result<()> {
             shell.say_tabs();
         }
         Ask::EngineToggle => {
-            engine.borrow_mut().toggle();
-            shell.say_engine(&engine.borrow());
+            // The engine needs the WinDivert driver, and the driver needs an
+            // elevated token; nothing else in the program does. So the program
+            // runs unelevated, and the first time the engine is switched on
+            // without a token it hands off to an elevated copy of itself that
+            // starts the engine, rather than failing inside WinDivertOpen. The
+            // claim is let go first so the elevated copy can take it, and taken
+            // back if the prompt is declined.
+            if !engine.borrow().running() && !uikit::elevation::is_elevated() {
+                uikit::single::release();
+                if uikit::elevation::relaunch_elevated("--engine") {
+                    shell.quit();
+                } else {
+                    uikit::single::reclaim();
+                    shell.say_engine(&engine.borrow());
+                }
+            } else {
+                engine.borrow_mut().toggle();
+                shell.say_engine(&engine.borrow());
+            }
         }
         // Going to the browser opens a tab the first time and comes back to
         // what was left the rest of the time; going anywhere else hides it,
@@ -1008,6 +1183,15 @@ pub fn preview() -> Result<()> {
     // window's own messages: they finish on their own threads, and the page
     // learns about it here.
     shell.run(|shell| {
+        // A file was double-clicked, on start-up or handed over by a second
+        // copy while this one ran. Bring the window up and tell the page to play
+        // it — the file itself is served from `/external`.
+        if let Some(name) = take_opened_file() {
+            shell.show();
+            let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+            shell.tell(&format!(r#"{{"t":"external","name":"{escaped}"}}"#));
+        }
+
         // The tray, first: it is how the window comes back once it has been put
         // away, so it has to be answered even while nothing else is happening.
         while let Ok(event) = tray.events.tray.try_recv() {
@@ -1884,6 +2068,28 @@ unsafe extern "system" fn procedure(
             SetForegroundWindow(hwnd);
         }
         return 0;
+    }
+
+    // A second copy handed us a media file to play (a double-click while this
+    // one was already running). Take the path out of the copy-data, remember it
+    // for `/external`, and come to the front; the run loop plays it.
+    if message == WM_COPYDATA {
+        let data = lparam as *const CopyData;
+        if !data.is_null() && unsafe { (*data).kind } == SHARD_OPEN_FILE {
+            let bytes = unsafe { (*data).len } as usize;
+            let ptr = unsafe { (*data).data } as *const u16;
+            if !ptr.is_null() && bytes >= 2 {
+                let units = std::slice::from_raw_parts(ptr, bytes / 2);
+                let end = units.iter().position(|&c| c == 0).unwrap_or(units.len());
+                let path = String::from_utf16_lossy(&units[..end]);
+                set_opened_file(std::path::PathBuf::from(path));
+                unsafe {
+                    ShowWindow(hwnd, SW_SHOW);
+                    SetForegroundWindow(hwnd);
+                }
+            }
+        }
+        return 1;
     }
 
     match message {

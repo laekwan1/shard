@@ -42,8 +42,12 @@ fn main() {
 /// loaded from a file, so the two cannot drift apart — the moment an icon is a
 /// checked-in image it is a second place to remember to edit.
 ///
-/// Opening the WinDivert driver requires an elevated token, so the manifest
-/// asks for it up front rather than failing at engine start.
+/// Opening the WinDivert driver requires an elevated token, but only the engine
+/// needs it — the browser, downloads, library and player do not. So the
+/// manifest asks for no elevation up front (`asInvoker`): the program opens
+/// without a UAC prompt, and only when the engine is switched on does it
+/// relaunch itself elevated. This is also what lets it be a file handler for
+/// media without a prompt on every double-click.
 fn embed_resources() {
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
     let icon = out.join("shard.ico");
@@ -54,14 +58,7 @@ fn embed_resources() {
     let mut resource = winresource::WindowsResource::new();
     resource.set_icon(icon.to_str().expect("the path is UTF-8"));
 
-    // Release only, because the resource lands on every executable the crate
-    // produces — test harnesses included, and Windows refuses to launch one
-    // that demands elevation. That made `cargo test` impossible to run at all.
-    // Debug builds of the app therefore need an elevated terminal to open the
-    // driver, which is where they are run from anyway.
-    if std::env::var("PROFILE").as_deref() == Ok("release") {
-        resource.set_manifest(MANIFEST);
-    }
+    resource.set_manifest(MANIFEST);
     resource.compile().expect("embedding icon and manifest");
 }
 
@@ -70,7 +67,7 @@ const MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
