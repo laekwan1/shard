@@ -786,16 +786,13 @@ function another() {
 
 document.getElementById("shut").addEventListener("click", shutPlayer);
 playButton.addEventListener("click", () => (video.paused ? video.play() : video.pause()));
-// A click on the picture plays or pauses — but only a real click.
-//
-// A touch also arrives here as a click, and on a touch screen the picture is
-// what a finger lands on to bring the controls up. Answering both with a pause
-// means the controls cannot be reached without stopping what they are for.
-// The phone draws its own conclusion from the same rule: there, a tap shows the
-// bar first and only the next one pauses.
-video.addEventListener("click", (e) => {
-  if (e.pointerType && e.pointerType !== "mouse") return;
-  video.paused ? video.play() : video.pause();
+// A click on the picture no longer pauses. The whole picture is a press-and-
+// hold surface now — the right half runs at 2×, the left half rewinds — and a
+// click that also toggled play would fire on the way into every hold. Play and
+// pause are the button and the spacebar; the picture is for the hold.
+video.addEventListener("dblclick", (e) => {
+  e.preventDefault();
+  toggleFullscreen();
 });
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
 video.addEventListener("pause", () => (playButton.innerHTML = PLAY));
@@ -941,11 +938,7 @@ muteButton.addEventListener("click", () => {
   video.muted = !video.muted;
   muteButton.innerHTML = video.muted ? QUIET : LOUD;
 });
-volume.addEventListener("input", () => {
-  video.volume = Number(volume.value);
-  video.muted = false;
-  muteButton.innerHTML = video.volume ? LOUD : QUIET;
-});
+volume.addEventListener("input", () => setVolume(Number(volume.value)));
 
 // A word on the picture, said and gone.
 function flash(text) {
@@ -963,10 +956,98 @@ document.getElementById("stage").addEventListener("contextmenu", (e) => {
   openMenu(e.clientX, e.clientY, { spot: true });
 });
 
-document.getElementById("full").addEventListener("click", () => {
+function toggleFullscreen() {
   if (document.fullscreenElement) document.exitFullscreen();
   else document.getElementById("stage").requestFullscreen().catch(() => {});
+}
+document.getElementById("full").addEventListener("click", toggleFullscreen);
+
+// ---- press-and-hold on the picture: right runs fast, left rewinds ----------
+//
+// The gesture every long-form player has settled on. Which half decides the
+// direction, so it works the same whether the picture is full screen or a
+// pane in the library. A hold is a mouse held down here, a touch held down on
+// the phone; a quick press does nothing, since a click no longer pauses.
+const stage = document.getElementById("stage");
+let heldRate = null;
+let rewindTimer = null;
+// Whether the film was paused when a left-rewind began, kept out here because a
+// timer id is a number in a browser and will not hold a property of its own.
+let rewindWasPaused = false;
+
+function startHold(clientX) {
+  if (!video.duration) return;
+  const box = stage.getBoundingClientRect();
+  const third = box.width / 3;
+  const x = clientX - box.left;
+  if (x > third * 2) {
+    // Right: run at double speed until let go.
+    heldRate = video.playbackRate;
+    video.playbackRate = 2;
+    flash("2× 재생");
+  } else if (x < third) {
+    // Left: rewind continuously — about four seconds a second — until let go.
+    if (rewindTimer) return;
+    rewindWasPaused = video.paused;
+    video.pause();
+    rewindTimer = setInterval(() => {
+      video.currentTime = Math.max(0, video.currentTime - 0.2);
+      paintTime();
+      if (video.currentTime <= 0) endHold();
+    }, 50);
+    flash("◀◀ 되감기");
+  }
+}
+
+function endHold() {
+  if (heldRate !== null) {
+    video.playbackRate = heldRate;
+    heldRate = null;
+  }
+  if (rewindTimer) {
+    clearInterval(rewindTimer);
+    rewindTimer = null;
+    // Leave it as it was found: playing on if it was playing, still if it was
+    // paused — a rewind should not start playback nobody asked to resume.
+    if (!rewindWasPaused) video.play().catch(() => {});
+  }
+}
+
+stage.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  startHold(e.clientX);
 });
+stage.addEventListener("mouseup", () => endHold());
+stage.addEventListener("mouseleave", () => endHold());
+// Touch, for the same picture on a touch screen.
+stage.addEventListener("touchstart", (e) => {
+  if (e.touches.length === 1) startHold(e.touches[0].clientX);
+}, { passive: true });
+stage.addEventListener("touchend", () => endHold());
+stage.addEventListener("touchcancel", () => endHold());
+
+// ---- the sound follows the wheel over the picture --------------------------
+stage.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  // Up is louder. A notch is 5%, the same step the arrow keys take.
+  const next = Math.min(1, Math.max(0, video.volume - Math.sign(e.deltaY) * 0.05));
+  setVolume(next);
+}, { passive: false });
+
+// One place sets the sound, so the slider, the wheel, the keys and the saved
+// value never disagree. The level is remembered across sessions — a player
+// that forgets how loud you had it is a player you set every time.
+function setVolume(v) {
+  video.volume = v;
+  video.muted = false;
+  volume.value = String(v);
+  muteButton.innerHTML = v ? LOUD : QUIET;
+  localStorage.setItem("volume", String(v));
+}
+{
+  const saved = Number(localStorage.getItem("volume"));
+  if (localStorage.getItem("volume") !== null) setVolume(saved);
+}
 
 // The keys every player has, while one is open.
 document.addEventListener("keydown", (e) => {
@@ -1003,16 +1084,33 @@ document.addEventListener("keydown", (e) => {
       step(1);
       break;
     case "ArrowUp":
-      video.volume = Math.min(1, video.volume + 0.05);
-      volume.value = String(video.volume);
+      setVolume(Math.min(1, video.volume + 0.05));
       break;
     case "ArrowDown":
-      video.volume = Math.max(0, video.volume - 0.05);
-      volume.value = String(video.volume);
+      setVolume(Math.max(0, video.volume - 0.05));
+      break;
+    // Enter and F both toggle full screen — Enter because it is the largest key
+    // and the one a hand rests near, F because every other player uses it.
+    case "Enter":
+    case "f":
+    case "F":
+      e.preventDefault();
+      toggleFullscreen();
+      break;
+    case "m":
+    case "M":
+      video.muted = !video.muted;
+      muteButton.innerHTML = video.muted ? QUIET : LOUD;
       break;
     case "Escape":
       if (!document.fullscreenElement) shutPlayer();
       break;
+    default:
+      // A number is a jump to that tenth of the film: 1 → 10%, 5 → 50%, 0 → 0.
+      if (e.key >= "0" && e.key <= "9" && video.duration) {
+        video.currentTime = video.duration * (Number(e.key) / 10);
+        paintTime();
+      }
   }
 });
 

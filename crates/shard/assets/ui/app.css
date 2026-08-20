@@ -898,7 +898,11 @@ button svg { display: block; }
 #player.mini #full { display: none; }
 /* Only on the strip. Full height the way out is the screen behind it or Esc;
    on the strip there is no screen behind, so there has to be one here. */
-#shut { display: none; }
+/* No close on the full player bar. `#row button { display:grid }` was
+   beating a bare `#shut { display:none }` on specificity and the button
+   showed through — `#row #shut` outranks it. The strip still needs its
+   close, so the mini rule, of equal specificity, wins by coming after. */
+#row #shut { display: none; }
 #shut svg { width: 11px; height: 11px; }
 #player.mini #shut { display: grid; }
 /* The name goes on the strip's own line, where the note was. */
@@ -946,9 +950,8 @@ button svg { display: block; }
     41 at the narrowest — measured, not estimated — which is a target rather
     than a guess, and 48 at every width the window is normally used at.
 */
-@media (max-width: 720px) {
-  #volume { display: none; }
-}
+/* The sound stays on the bar at every width now — the user asked for it
+   always visible. When the row is tight it gives up the title first. */
 
 #play { color: #fff !important; }
 #clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
