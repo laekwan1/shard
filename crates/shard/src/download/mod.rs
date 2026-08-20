@@ -19,6 +19,7 @@
 #[cfg(all(feature = "desktop", windows))]
 pub mod browser;
 pub mod ebml;
+pub mod hls;
 pub mod mkv;
 pub mod mp4;
 pub mod pull;
