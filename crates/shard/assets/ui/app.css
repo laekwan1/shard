@@ -386,12 +386,13 @@ button svg { display: block; }
   /* The width of the list it opens onto, less the same hair on either side.
      Nothing under it, so the well sits straight on the panel and the rule
      between them is the only thing dividing the two — see `#folders`. */
-  margin: 4px 4px 0;
+  margin: 4px 4px 6px;
   padding: 3px;
   background: var(--surface);
-  /* Square where it meets the panel. Rounded, the two bottom corners would show
-     the chrome colour behind them as a pair of bright wedges on the rule. */
-  border-radius: var(--r-md) var(--r-md) 0 0;
+  /* Rounded all the way round again: it was squared at the bottom to sit flush
+     on the panel, which cut the well in half. Detached by the margin below, it
+     is a switch in its own right and keeps its whole shape. */
+  border-radius: var(--r-md);
 }
 .shelf {
   /* Half each of whatever the row is, standing above the sliding pill. */
@@ -452,37 +453,30 @@ button svg { display: block; }
   flex-wrap: wrap;
   flex: none;
   background: var(--surface);
-  /* A line above as well: the switch is a control, the panel below is a place,
-     and without it the two read as one block. Light rather than the usual
-     divider — that one is darker than the panel it would sit on, and a dark line
-     on a dark ground is not a line.
-
-     It was invisible before, and not because of the colour. The switch had a
-     4px margin under it, so the rule was drawn on a band of the chrome colour —
-     rgb(44,46,50) — and came out rgb(46,48,52). Two levels apart. A line has to
-     be measured against what is actually behind it, not against the panel it
-     is declared on. The margin is gone now, so it lies on the dark and reads. */
-  border-top: 1px solid #ffffff2e;
+  /* Only a line below, dividing the folders from the files. The rule that used
+     to sit above them belonged to a switch pressed flush against this panel;
+     the switch is detached now, so the top of the panel is its own edge. */
   border-bottom: 1px solid var(--divider);
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
    above is drawn with, so one row does not answer differently from the other. */
+/* No fill, no outline: a folder is named by its colour alone now. Chosen wears
+   the list's own bright ink; the rest are the muted grey — the reverse of it —
+   so the row reads as one lit label among dim ones rather than a strip of
+   boxes. Background chips were removed at the user's ask. */
 .folder {
-  padding: 5px 15px;
+  padding: 5px 12px;
   font-size: 11.5px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid #ffffff1c;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
-  transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
+  transition: color var(--t-press) var(--ease);
 }
-.folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
-/* Chosen says so by weight, not by growing. A label that changes size when it
-   is picked reflows the row it is in, and the row jumps under the pointer that
-   picked it. */
-/* Chosen is said by the fill and the weight; the outline belongs to idle
-   chips, where it is the only thing marking the pressable area. */
-.folder.on { color: #fff; background: #34343b; border-color: transparent; font-weight: 700; }
+.folder:hover { color: var(--on-surface); }
+/* Chosen says so by weight and the bright colour, not by growing. A label that
+   changes size when picked reflows the row and it jumps under the pointer. */
+.folder.on { color: var(--on-surface); background: transparent; font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip
