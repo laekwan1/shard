@@ -252,6 +252,22 @@
                 android:visibility="gone">
 
                 <!--
+                    The title, as the desktop shows it: what is playing, read
+                    right where it plays rather than only in the list behind.
+                -->
+                <TextView
+                    android:id="@+id/vbTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="10dp"
+                    android:paddingBottom="2dp"
+                    android:textColor="@color/on_surface"
+                    android:textSize="13sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:text="" />
+
+                <!--
                     The line, with the two times at its ends — the same shape
                     the music bar has, so a song and a video are not two things
                     to learn.
@@ -308,6 +324,56 @@
                         android:maxLines="1"
                         android:fontFeatureSettings="tnum"
                         android:text="0:00" />
+                </LinearLayout>
+
+                <!--
+                    The sound and the speed, on a row of their own. The desktop
+                    keeps the volume always in view; here a mute at the left, a
+                    slider across, and the speed at the right — a persistent bar
+                    rather than the side-drag alone, which is felt out blind.
+                -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="6dp">
+
+                    <ImageButton
+                        android:id="@+id/vbMute"
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_volume"
+                        android:scaleType="fitCenter"
+                        android:padding="7dp"
+                        android:contentDescription="@string/library_mute" />
+
+                    <SeekBar
+                        android:id="@+id/vbVolume"
+                        android:layout_width="0dp"
+                        android:layout_height="@dimen/target"
+                        android:layout_weight="1"
+                        android:layout_marginHorizontal="6dp"
+                        android:progressDrawable="@drawable/scrub_track"
+                        android:thumb="@drawable/scrub_thumb"
+                        android:background="@null"
+                        android:splitTrack="false"
+                        android:maxHeight="2dp"
+                        android:max="1000" />
+
+                    <TextView
+                        android:id="@+id/vbRate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:minWidth="44dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:background="?attr/selectableItemBackground"
+                        android:textColor="@color/on_surface"
+                        android:textSize="13sp"
+                        android:maxLines="1"
+                        android:text="1×" />
                 </LinearLayout>
 
                 <LinearLayout

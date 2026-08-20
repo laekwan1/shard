@@ -246,6 +246,7 @@ abstract class BrowserActivity : AppCompatActivity() {
         // seconds after the app did, which reads as it not working.
         DownloadService.showControls(applicationContext)
         askForNotifications()
+        askForMedia()
         warnIfNotificationsAreOff()
 
         if (autoStart) setEngine(true) else showEngineState(false)
@@ -268,6 +269,33 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
+     * Read back what earlier installs saved.
+     *
+     * Scoped storage lets an app read only its own media, and an uninstall
+     * makes the store forget who owned the old files — so a reinstall opens onto
+     * an empty library though the files are still there. This asks for the read
+     * that makes them visible again. Declining costs only the old files; new
+     * downloads still list, because the app can always read what it just made.
+     */
+    private val mediaPermissions: Array<String>
+        get() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                android.Manifest.permission.READ_MEDIA_VIDEO,
+                android.Manifest.permission.READ_MEDIA_AUDIO,
+            )
+        } else {
+            arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+        }
+
+    private fun askForMedia() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        val missing = mediaPermissions.filter {
+            checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 2)
+    }
+
+    /**
      * Put the switch up once permission arrives.
      *
      * It is asked for and the notification is posted in the same breath, so on
@@ -281,6 +309,16 @@ abstract class BrowserActivity : AppCompatActivity() {
         results: IntArray,
     ) {
         super.onRequestPermissionsResult(code, permissions, results)
+        if (code == 2) {
+            // A media read just arrived: the library, if it is open, was showing
+            // an empty or partial list built without it. Read the store again.
+            if (results.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED } &&
+                libraryMade
+            ) {
+                library.refresh()
+            }
+            return
+        }
         if (results.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED }) {
             DownloadService.showControls(applicationContext)
         }

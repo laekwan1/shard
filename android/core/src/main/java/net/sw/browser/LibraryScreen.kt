@@ -84,6 +84,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val vbBackground: ImageButton = root.findViewById(R.id.vbBackground)
     private val vbElapsed: TextView = root.findViewById(R.id.vbElapsed)
     private val vbTotal: TextView = root.findViewById(R.id.vbTotal)
+    private val vbTitle: TextView = root.findViewById(R.id.vbTitle)
+    private val vbMute: ImageButton = root.findViewById(R.id.vbMute)
+    private val vbVolume: android.widget.SeekBar = root.findViewById(R.id.vbVolume)
+    private val vbRate: TextView = root.findViewById(R.id.vbRate)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
     private val npPrev: ImageButton = root.findViewById(R.id.npPrev)
     private val npNext: ImageButton = root.findViewById(R.id.npNext)
@@ -541,6 +545,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** True while the video scrubber is under a finger, so the ticker leaves it. */
     private var vbSeeking = false
 
+    /** True while the volume slider is under a finger, so the sync leaves it. */
+    private var vbVolumeSeeking = false
+
+    /** The level to come back to when unmuting, kept so the tap need not guess. */
+    private var mutedFrom = 0
+
     /**
      * Put the bar away again after a while.
      *
@@ -627,8 +637,30 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         vbToggle.setImageResource(
             if (prepared && wantsPlay) R.drawable.ic_pb_pause else R.drawable.ic_pb_play
         )
+        vbTitle.text = playing?.title.orEmpty()
+        syncVolumeBar()
+        vbRate.text = rateLabel(player?.playbackParameters?.speed ?: 1f)
         paintPlaybackToggles()
     }
+
+    /** Draw the volume slider and mute glyph from the system music level. */
+    private fun syncVolumeBar() {
+        val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
+        val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+        val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+        if (!vbVolumeSeeking) vbVolume.progress = now * 1000 / most
+        vbMute.setImageResource(if (now == 0) R.drawable.ic_muted else R.drawable.ic_volume)
+    }
+
+    private fun rateLabel(rate: Float): String {
+        // No trailing zero: 1.5× not 1.50×, and 1× not 1.0×.
+        val s = if (rate == rate.toLong().toFloat()) rate.toLong().toString()
+        else rate.toString().trimEnd('0').trimEnd('.')
+        return s + "×"
+    }
+
+    /** The speeds the rate button steps through, the same set the desktop uses. */
+    private val rates = listOf(1f, 1.25f, 1.5f, 2f, 0.5f, 0.75f)
 
     /**
      * The three settings that used to live behind the menu, lit when on.
@@ -677,16 +709,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      */
     private fun step(forward: Boolean) {
         val current = playing ?: return
-        val exo = player
-        if (!forward && exo != null && prepared && exo.currentPosition > RESTART_MS) {
-            exo.seekTo(0)
-            return
-        }
         val list = queueFor(current)
         val at = list.indexOfFirst { it.id == current.id }
-        if (at < 0) return
-        val next = list.getOrNull(if (forward) at + 1 else at - 1) ?: return
-        play(next)
+        if (at < 0 || list.isEmpty()) return
+        // Wrap round at the ends, the same as the desktop does: 이전 on the first
+        // file goes to the last, 다음 on the last goes to the first. Previous
+        // means the previous file — it used to restart the current one after a
+        // few seconds, which read as the button being broken.
+        val to = ((if (forward) at + 1 else at - 1) + list.size) % list.size
+        play(list[to])
     }
 
     init {
@@ -817,6 +848,58 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 keepControlsUp()
             }
         })
+
+        // The sound slider, over the system music stream — the same level the
+        // side-drag and the hardware keys move, so the three never disagree.
+        vbVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
+                val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, progress * most / 1000, 0)
+                vbMute.setImageResource(if (progress == 0) R.drawable.ic_muted else R.drawable.ic_volume)
+                keepControlsUp()
+            }
+            override fun onStartTrackingTouch(bar: android.widget.SeekBar) {
+                vbVolumeSeeking = true
+                showControls(true)
+                ui.removeCallbacks(hideControls)
+            }
+            override fun onStopTrackingTouch(bar: android.widget.SeekBar) {
+                vbVolumeSeeking = false
+                keepControlsUp()
+            }
+        })
+        // Mute toggles: to silence, and back to where it was. A remembered level
+        // means the tap does not have to guess how loud to come back to.
+        vbMute.setOnClickListener {
+            val audio = activity.getSystemService(android.media.AudioManager::class.java)
+                ?: return@setOnClickListener
+            val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+            if (now > 0) {
+                mutedFrom = now
+                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
+            } else {
+                audio.setStreamVolume(
+                    android.media.AudioManager.STREAM_MUSIC,
+                    mutedFrom.coerceIn(1, most),
+                    0,
+                )
+            }
+            syncVolumeBar()
+            keepControlsUp()
+        }
+        // The speed, stepping through the same set the desktop offers. Not kept
+        // between files — a rate is for the thing being watched now.
+        vbRate.setOnClickListener {
+            val exo = player ?: return@setOnClickListener
+            val at = rates.indexOfFirst { kotlin.math.abs(it - exo.playbackParameters.speed) < 0.01f }
+            val next = rates[(at + 1).mod(rates.size)]
+            exo.setPlaybackSpeed(next)
+            vbRate.text = rateLabel(next)
+            keepControlsUp()
+        }
         paintPlaybackToggles()
 
         list.adapter = adapter
@@ -997,6 +1080,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (isOpen) shelfSwipe.onTouchEvent(event)
     }
 
+    /** Read the store again — used when a media permission has just arrived. */
+    fun refresh() {
+        if (isOpen) reload()
+    }
+
     fun open() {
         onOpen?.invoke()
         root.visibility = View.VISIBLE
@@ -1038,7 +1126,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             player?.setVideoSurfaceView(surface)
             stage.post { fitSurface() }
         } else if (onItsShelf && item!!.kind == Library.Kind.MUSIC) {
-            showCover(item)
+            // No picture on the whole screen for a song here — that is a desktop
+            // nicety. The bar at the top carries the tile, and the list keeps its
+            // covers as before; the stage just stays away.
+            stageArt.visibility = View.GONE
+            stage.visibility = View.GONE
         } else {
             stage.visibility = View.GONE
             // The scrub bar belongs to the picture; leaving it up over another
@@ -1049,47 +1141,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (onItsShelf && item!!.kind == Library.Kind.MUSIC) showNowPlaying(item) else hideNowPlaying()
     }
 
-    /** Which song the cover on the stage belongs to, so it is read only once. */
-    private var coverFor: android.net.Uri? = null
-
-    /**
-     * Put a song's own cover where a video's picture goes.
-     *
-     * Whole rather than cropped, as the desktop does it. The stage stays away
-     * until there is something to put in it: a black block the height of a
-     * video, over a song with no artwork, reads as a picture missing rather
-     * than a song without one. Read off the main thread — the reader opens the
-     * file — and checked again on the way back, because the song can be changed
-     * while the last one's cover is still being fetched.
-     */
-    private fun showCover(item: Library.Item) {
-        if (coverFor == item.uri) return
-        coverFor = item.uri
-        stageArt.setImageDrawable(null)
-        stage.visibility = View.GONE
-        // Back in the bar until we know there is a bigger one to replace it.
-        npArt.visibility = View.VISIBLE
-        work.execute {
-            // The picture in the file first, then the one remembered beside it —
-            // the same order the rows use, so a song does not show one cover in
-            // the list and a different one on the stage.
-            val bmp = embeddedArt(item) ?: Covers.load(activity, Covers.keyFor(item.name))
-            ui.post {
-                if (bmp == null || coverFor != item.uri || playing?.uri != item.uri) return@post
-                stageArt.setImageBitmap(bmp)
-                stageArt.visibility = View.VISIBLE
-                // The bar's own thumbnail is the same picture a few times
-                // smaller, directly underneath. One of them is enough, and the
-                // large one is the point.
-                npArt.visibility = View.GONE
-                // A song needs no surface, and one left up behind the cover
-                // would hold the last video's frame under it.
-                surface.visibility = View.GONE
-                stage.visibility = View.VISIBLE
-                stage.layoutParams = stage.layoutParams.apply { height = stageHeight() }
-            }
-        }
-    }
 
     /**
      * Keep looking, while the screen is open.
@@ -1271,23 +1322,17 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
 
             /**
-             * First tap brings the bar up; the next one plays or pauses.
+             * A tap shows the bar, and a tap while it is up puts it away.
              *
-             * Confirmed rather than raw, so the first tap of a double tap does
-             * not flash the controls on its way to a seek.
-             *
-             * The bar is not dismissed by tapping. It puts itself away after a
-             * few seconds, and taking the second tap for "hide" would mean the
-             * commonest thing anyone wants from a picture — stop it — needs a
-             * small button while the whole picture does nothing.
+             * It used to play or pause on the second tap. That is what the button
+             * and the spacebar are for; a whole picture that toggles playback
+             * fires on the way into every gesture and cannot be used just to see
+             * the controls. So a tap is only ever about the bar now — bring it
+             * up, or dismiss it. Confirmed rather than raw, so the first tap of a
+             * double tap does not flash the controls on its way to a seek.
              */
             override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                if (controlsShown) {
-                    togglePlayPause()
-                    keepControlsUp()
-                } else {
-                    showControls(true)
-                }
+                if (controlsShown) showControls(false) else showControls(true)
                 return true
             }
 
@@ -1434,6 +1479,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // brightness, and shown the instant the drag begins.
             audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, now, 0)
             showGauge(R.drawable.ic_volume, now.toFloat() / most)
+            // The bar's slider is the same level; keep it under the drag.
+            if (controlsShown) syncVolumeBar()
         } else {
             showGauge(R.drawable.ic_volume, current.toFloat() / most)
         }
@@ -1764,10 +1811,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         chrome.visibility = View.VISIBLE
         header.visibility = View.VISIBLE
         stage.visibility = View.GONE
-        // The cover goes with the song. Left in place it would be handed back
-        // to the next song by `showCover`, which skips a cover it thinks is
-        // already up.
-        coverFor = null
         stageArt.setImageDrawable(null)
         npFor = null
         hideNowPlaying()
@@ -2234,12 +2277,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
          * steps a fifth of a second wide while the film ran smoothly behind it.
          */
         const val TICK_MS = 200L
-
-        /**
-         * How far in "previous" stops meaning the one before and starts meaning
-         * this one from the top.
-         */
-        const val RESTART_MS = 3_000
 
         /** How far a swipe has to travel, in density-independent pixels. */
         const val SWIPE_DP = 60

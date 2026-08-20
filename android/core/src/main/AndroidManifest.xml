@@ -14,6 +14,20 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!--
+        Reading back what was saved before, even across a reinstall. Scoped
+        storage lets an app read only the media it created — but on uninstall
+        the store forgets who owned those files, so a fresh install sees an
+        empty library though the files are still under Movies/Shard and
+        Music/Shard. These let the library read them again. Media-type
+        permissions on 13+, the single storage read on 12 and below.
+    -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
     <!-- Downloads carry on when the browser is not on screen. Android allows
          that only for a foreground service, and the notification it obliges us
          to show is where the engine switch and the progress live. -->

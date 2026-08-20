@@ -30,7 +30,8 @@ object Covers {
         runCatching {
             // Decoded and re-encoded rather than stored raw: it caps the size a
             // huge source thumbnail would otherwise take, and a tile never needs
-            // more than a few hundred pixels.
+            // more than a few hundred pixels — the phone shows the cover only in
+            // the list now, never blown up to the whole screen.
             val full = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return
             val side = 320
             val scale = minOf(1f, side.toFloat() / maxOf(full.width, full.height))
