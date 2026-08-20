@@ -147,6 +147,24 @@
             <ellipse cx="20.8" cy="20.2" rx="4.3" ry="3.4" transform="rotate(-20 20.8 20.2)" fill="currentColor"/>
           </svg>
         </div>
+
+        <!--
+            The queue: a sliver on the player's right edge. Rest the pointer on
+            it for a moment, or click it, and a small copy of the library slides
+            out — the shelf switch and its list — so the next thing to play is
+            chosen without leaving the film. It lives inside the stage so it is
+            there full screen too. One click on a row picks it; two plays it.
+        -->
+        <aside id="queue" hidden>
+          <button id="queueTab" title="목록"><svg viewBox="0 0 12 16"><path d="M8 2 4 8l4 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div id="queuePanel">
+            <div id="queueShelves">
+              <button class="qshelf on" data-shelf="video">영상</button>
+              <button class="qshelf" data-shelf="music">음악</button>
+            </div>
+            <div id="queueList"></div>
+          </div>
+        </aside>
       </div>
 
       <div id="controls">

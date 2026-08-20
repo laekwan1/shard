@@ -47,10 +47,46 @@ pub fn claim(app: &str) -> Option<Claim> {
     Some(Claim(handle))
 }
 
+/// The window message the first copy watches for, so a second copy can ask it
+/// to come back to the front.
+///
+/// `RegisterWindowMessageW` returns the same value in every process for a given
+/// string, so the two copies agree on the number without sharing any state. The
+/// string carries the app name so Shard and Veil do not wake each other.
+#[cfg(windows)]
+pub fn wake_message(app: &str) -> u32 {
+    use windows_sys::Win32::UI::WindowsAndMessaging::RegisterWindowMessageW;
+    let mut name: Vec<u16> = format!("{app}-wake-single-instance").encode_utf16().collect();
+    name.push(0);
+    unsafe { RegisterWindowMessageW(name.as_ptr()) }
+}
+
+/// Bring the copy they already have to the front, then leave.
+///
+/// A tray program that exits silently looks broken, and a message box that only
+/// says "already running" makes the user hunt the tray for the window. Instead
+/// the first copy is told, through a message every top-level window on the
+/// desktop receives, to show itself — so double-clicking the icon a second time
+/// does the natural thing and raises the window that is already there.
+pub fn wake_the_running_copy(app: &str) {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, HWND_BROADCAST};
+        // Broadcast, not a targeted send: the first copy's window may be hidden
+        // in the tray, and finding it would mean sharing its class name here.
+        // The message id is app-specific, so only the running Shard answers.
+        let msg = wake_message(app);
+        unsafe { PostMessageW(HWND_BROADCAST, msg, 0, 0) };
+    }
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
 /// Tell the user where the copy they already have is, and leave.
 ///
-/// A tray program that exits silently looks broken: the icon is small and easy
-/// to miss, so someone who starts it twice has usually not seen the first one.
+/// The fallback for a window that does not answer [`wake_message`] (Veil's does
+/// not yet): a tray program that exits silently looks broken, so at least say
+/// why nothing opened.
 pub fn point_at_the_running_copy(app: &str) {
     #[cfg(windows)]
     {

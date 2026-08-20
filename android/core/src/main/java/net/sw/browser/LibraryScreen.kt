@@ -741,6 +741,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // reads as a swipe by whichever finger moved further.
             pinch.onTouchEvent(event)
             if (!pinch.isInProgress) gestures.onTouchEvent(event)
+            // The long-press starts a hold; the finger lifting is the only thing
+            // that ends it, and the gesture detector does not report the lift.
+            val a = event.actionMasked
+            if (a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL) endHold()
             true
         }
         EngineControl.stopPlayback = stopHook
@@ -1258,6 +1262,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             override fun onDown(e: android.view.MotionEvent) = true
 
             /**
+             * A held press runs the picture fast on the right, rewinds on the
+             * left. The middle is left alone — nothing there to hold. Ended by
+             * the touch listener when the finger lifts.
+             */
+            override fun onLongPress(e: android.view.MotionEvent) {
+                startHold(e.x)
+            }
+
+            /**
              * First tap brings the bar up; the next one plays or pauses.
              *
              * Confirmed rather than raw, so the first tap of a double tap does
@@ -1471,6 +1484,76 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      * the picture can go and the sound stay.
      */
     private var player: ExoPlayer? = null
+
+    // ---- press-and-hold on the picture: right runs fast, left rewinds --------
+    //
+    // The same gesture the desktop player has, and the one every long-form phone
+    // player has settled on: hold the right of the picture and it runs at 2×,
+    // hold the left and it rewinds continuously, let go and it is as it was. The
+    // hold is a long-press so a still finger starts it and a drag does not — a
+    // drag down the sides already means brightness and sound.
+
+    /** The speed to return to when a right-hold ends; null when not held. */
+    private var heldSpeed: Float? = null
+
+    /** Running while a left-hold rewinds; null when not. */
+    private var rewinding = false
+
+    /** Whether the film was playing when a left-rewind began. */
+    private var rewindWasPlaying = false
+
+    private val rewindStep = object : Runnable {
+        override fun run() {
+            val mp = player ?: return
+            val to = (mp.currentPosition - 200L).coerceAtLeast(0L)
+            mp.seekTo(to)
+            npElapsedFromHold(to)
+            if (to <= 0L) endHold() else ui.postDelayed(this, 50L)
+        }
+    }
+
+    private fun npElapsedFromHold(at: Long) {
+        // Keep the bar's reading honest while the hold moves the position under
+        // it; the periodic tick is paused for a paused player.
+        seekTarget = at.toInt()
+    }
+
+    private fun startHold(x: Float) {
+        val mp = player ?: return
+        if (!prepared) return
+        val third = stage.width / 3f
+        when {
+            x > third * 2 -> {
+                if (heldSpeed != null) return
+                heldSpeed = mp.playbackParameters.speed
+                mp.setPlaybackSpeed(2f)
+                Toast.makeText(activity, "2× 재생", Toast.LENGTH_SHORT).show()
+            }
+            x < third -> {
+                if (rewinding) return
+                rewinding = true
+                rewindWasPlaying = wantsPlay
+                mp.pause()
+                Toast.makeText(activity, "◀◀ 되감기", Toast.LENGTH_SHORT).show()
+                ui.post(rewindStep)
+            }
+        }
+    }
+
+    private fun endHold() {
+        val mp = player
+        heldSpeed?.let {
+            mp?.setPlaybackSpeed(it)
+            heldSpeed = null
+        }
+        if (rewinding) {
+            rewinding = false
+            ui.removeCallbacks(rewindStep)
+            // Left as it was found: playing on if it was playing, still if not —
+            // a rewind is not a request to start playback nobody asked to resume.
+            if (rewindWasPlaying) mp?.play()
+        }
+    }
 
     /**
      * Whether the player has finished preparing.

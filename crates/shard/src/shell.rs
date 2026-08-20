@@ -1871,6 +1871,21 @@ unsafe extern "system" fn procedure(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    // A second copy of the program, started while this one is in the tray, posts
+    // this to ask us to come to the front instead of putting up a message box.
+    // The id is handed out by RegisterWindowMessageW, so it is not a compile-time
+    // constant and cannot sit in the match below; it is cached because a value
+    // that never changes should not be re-registered on every message.
+    static WAKE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    let wake = *WAKE.get_or_init(|| uikit::single::wake_message(crate::config::APP_NAME));
+    if message == wake {
+        unsafe {
+            ShowWindow(hwnd, SW_SHOW);
+            SetForegroundWindow(hwnd);
+        }
+        return 0;
+    }
+
     match message {
         // The frame keeps its resizing grip but loses its caption: the client
         // area is the whole window, and the page draws the bar itself.

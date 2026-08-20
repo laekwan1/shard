@@ -715,6 +715,24 @@ abstract class BrowserActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Turn the browser a quarter, and pin it there.
+     *
+     * A page that only plays wide is watched sideways, but the auto-rotate
+     * sensor turns with every shift of the hand and cannot be asked to hold. So
+     * this is a switch, not a sensor: it toggles between the two fixed
+     * orientations from whichever one is showing now.
+     */
+    private fun rotateScreen() {
+        val portrait = resources.configuration.orientation ==
+            android.content.res.Configuration.ORIENTATION_PORTRAIT
+        requestedOrientation = if (portrait) {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+    }
+
     private fun wireControls() {
         binding.power.setOnClickListener { setEngine(!engineOn) }
         binding.openLibrary.setOnClickListener {
@@ -723,6 +741,7 @@ abstract class BrowserActivity : AppCompatActivity() {
             hidePanel()
             library.open()
         }
+        binding.rotate.setOnClickListener { rotateScreen() }
 
         // Tapping the address bar should replace what is there, not put a
         // cursor in the middle of a URL nobody wants to edit by hand.

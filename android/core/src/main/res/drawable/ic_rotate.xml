@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A phone with a curved arrow around it: turn the screen a quarter. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="@color/on_surface">
+    <!-- The device, upright. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9,3h6a2,2 0 0 1 2,2v14a2,2 0 0 1 -2,2H9a2,2 0 0 1 -2,-2V5a2,2 0 0 1 2,-2z M9,5v14h6V5z" />
+    <!-- The quarter-turn arrow riding the corner. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M18.4,4.2l2.4,0.6l-0.6,2.4l-0.9,-0.9a5,5 0 0 1 -0.6,4.1l-1.4,-0.9a3.4,3.4 0 0 0 0.3,-2.9z" />
+</vector>

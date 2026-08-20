@@ -287,6 +287,7 @@ function paintLibrary(message) {
   if (shelf.folder && !shelf.folders.includes(shelf.folder)) shelf.folder = null;
   paintFolders();
   paintFiles();
+  paintQueue();
 }
 
 function paintFolders() {
@@ -694,6 +695,10 @@ if (localStorage.getItem("at:byhand") !== "1") {
 function play(item) {
   playing = item;
   player.hidden = false;
+  // The queue rides with the film — hidden until there is one to play, and its
+  // marks redrawn so the row now playing shows it.
+  document.getElementById("queue").hidden = false;
+  queuePicked = item.id;
   const music = shelf.kind === "music";
   art.hidden = !music;
   // The picture the song was listed under, when the download kept one.
@@ -713,6 +718,7 @@ function play(item) {
   const at = Number(localStorage.getItem("at:" + item.key) || 0);
   if (at > 1) video.currentTime = at;
   syncPlayer();
+  paintQueue();
 }
 
 function shutPlayer() {
@@ -721,6 +727,8 @@ function shutPlayer() {
   video.load();
   player.hidden = true;
   playing = null;
+  document.getElementById("queue").hidden = true;
+  document.getElementById("queue").classList.remove("open");
   syncPlayer();
 }
 
@@ -961,6 +969,84 @@ function toggleFullscreen() {
   else document.getElementById("stage").requestFullscreen().catch(() => {});
 }
 document.getElementById("full").addEventListener("click", toggleFullscreen);
+
+// ---- the queue: a small library on the player's right edge -----------------
+//
+// A hover held on the tab, or a click, opens it; leaving the whole thing closes
+// it. Inside is the same shelf state the library shows, so switching video/music
+// here switches it there too — there is one library, not a copy of it. A single
+// click on a row marks it; a double plays it, the same as the list downstairs.
+const queue = document.getElementById("queue");
+const queuePanel = document.getElementById("queuePanel");
+const queueList = document.getElementById("queueList");
+const queueTab = document.getElementById("queueTab");
+let queueHoverTimer = null;
+let queuePicked = null;
+
+function markQueueShelf() {
+  for (const b of document.querySelectorAll(".qshelf")) {
+    b.classList.toggle("on", b.dataset.shelf === shelf.kind);
+  }
+}
+
+function paintQueue() {
+  markQueueShelf();
+  queueList.textContent = "";
+  for (const item of shown()) {
+    const row = document.createElement("button");
+    row.className =
+      "qrow" +
+      (playing && item.id === playing.id ? " playing" : "") +
+      (queuePicked === item.id ? " picked" : "");
+    row.textContent = item.title;
+    row.title = item.title;
+    row.addEventListener("click", () => {
+      queuePicked = item.id;
+      paintQueue();
+    });
+    row.addEventListener("dblclick", () => play(item));
+    queueList.appendChild(row);
+  }
+}
+
+// The mini switch drives the real one, so the list below and the panel here are
+// never two different shelves.
+for (const b of document.querySelectorAll(".qshelf")) {
+  b.addEventListener("click", () => {
+    if (shelf.kind === b.dataset.shelf) return;
+    document.querySelector('.shelf[data-shelf="' + b.dataset.shelf + '"]').click();
+  });
+}
+
+function openQueue() {
+  queue.classList.add("open");
+  paintQueue();
+}
+function closeQueue() {
+  queue.classList.remove("open");
+}
+
+queueTab.addEventListener("click", () =>
+  queue.classList.contains("open") ? closeQueue() : openQueue(),
+);
+// Rest on the tab for a moment and it opens on its own — the promised hover.
+queueTab.addEventListener("mouseenter", () => {
+  queueHoverTimer = setTimeout(openQueue, 1500);
+});
+queueTab.addEventListener("mouseleave", () => clearTimeout(queueHoverTimer));
+// Leaving the panel closes it, so it is not left hanging over the picture.
+queue.addEventListener("mouseleave", () => {
+  clearTimeout(queueHoverTimer);
+  closeQueue();
+});
+// A press inside the panel is for its rows, not the hold-to-scrub picture under
+// it, and a wheel there scrolls the list rather than moving the sound.
+queuePanel.addEventListener("mousedown", (e) => e.stopPropagation());
+queuePanel.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+queuePanel.addEventListener("wheel", (e) => e.stopPropagation());
+// The tab is not inside the panel, so it needs the same guard of its own.
+queueTab.addEventListener("mousedown", (e) => e.stopPropagation());
+queueTab.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
 
 // ---- press-and-hold on the picture: right runs fast, left rewinds ----------
 //

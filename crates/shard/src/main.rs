@@ -8,7 +8,7 @@ fn main() -> anyhow::Result<()> {
     // so every connection would be split and decoyed twice — more likely to
     // break a site than to bypass anything.
     let Some(_claim) = uikit::single::claim(shard::config::APP_NAME) else {
-        uikit::single::point_at_the_running_copy(shard::config::APP_NAME);
+        uikit::single::wake_the_running_copy(shard::config::APP_NAME);
         return Ok(());
     };
 

@@ -40,6 +40,7 @@
     <string name="download_joining">합치는 중</string>
     <string name="library_title">오프라인 보관함</string>
     <string name="library_open">오프라인 보관함</string>
+    <string name="rotate_screen">화면 회전</string>
     <string name="library_empty">저장한 영상이 없습니다. 영상을 내려받으면 여기에 모입니다.</string>
     <string name="library_expand">전체화면</string>
     <string name="library_collapse">전체화면 끄기</string>
