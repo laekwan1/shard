@@ -43,6 +43,12 @@
     <string name="rotate_screen">화면 회전</string>
     <string name="library_mute">음소거</string>
     <string name="library_rate">재생 속도</string>
+    <string name="library_playback_settings">재생 설정</string>
+    <!-- Short labels for the gear popup — the icons carry the meaning; these
+         only name it. -->
+    <string name="playback_order">순서대로</string>
+    <string name="playback_shuffle">무작위</string>
+    <string name="playback_background">백그라운드</string>
     <string name="library_empty">저장한 영상이 없습니다. 영상을 내려받으면 여기에 모입니다.</string>
     <string name="library_expand">전체화면</string>
     <string name="library_collapse">전체화면 끄기</string>

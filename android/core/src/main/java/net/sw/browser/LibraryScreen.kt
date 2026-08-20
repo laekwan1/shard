@@ -79,15 +79,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val vbPrev: ImageButton = root.findViewById(R.id.vbPrev)
     private val vbToggle: ImageButton = root.findViewById(R.id.vbToggle)
     private val vbNext: ImageButton = root.findViewById(R.id.vbNext)
-    private val vbOnward: ImageButton = root.findViewById(R.id.vbOnward)
-    private val vbShuffle: ImageButton = root.findViewById(R.id.vbShuffle)
-    private val vbBackground: ImageButton = root.findViewById(R.id.vbBackground)
     private val vbElapsed: TextView = root.findViewById(R.id.vbElapsed)
     private val vbTotal: TextView = root.findViewById(R.id.vbTotal)
-    private val vbTitle: TextView = root.findViewById(R.id.vbTitle)
+    private val stageTitle: TextView = root.findViewById(R.id.stageTitle)
     private val vbMute: ImageButton = root.findViewById(R.id.vbMute)
-    private val vbVolume: android.widget.SeekBar = root.findViewById(R.id.vbVolume)
     private val vbRate: TextView = root.findViewById(R.id.vbRate)
+    private val folderSettings: ImageButton = root.findViewById(R.id.folderSettings)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
     private val npPrev: ImageButton = root.findViewById(R.id.npPrev)
     private val npNext: ImageButton = root.findViewById(R.id.npNext)
@@ -545,9 +542,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** True while the video scrubber is under a finger, so the ticker leaves it. */
     private var vbSeeking = false
 
-    /** True while the volume slider is under a finger, so the sync leaves it. */
-    private var vbVolumeSeeking = false
-
     /** The level to come back to when unmuting, kept so the tap need not guess. */
     private var mutedFrom = 0
 
@@ -594,6 +588,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         controlsShown = on
         ui.removeCallbacks(hideControls)
         fade(videoBar, on)
+        // The title on the picture rides in and out with the bar below it.
+        fade(stageTitle, on)
         fade(leaveFullScreen, on && expanded)
         if (on) {
             updateVideoBar()
@@ -637,18 +633,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         vbToggle.setImageResource(
             if (prepared && wantsPlay) R.drawable.ic_pb_pause else R.drawable.ic_pb_play
         )
-        vbTitle.text = playing?.title.orEmpty()
+        stageTitle.text = playing?.title.orEmpty()
         syncVolumeBar()
         vbRate.text = rateLabel(player?.playbackParameters?.speed ?: 1f)
         paintPlaybackToggles()
     }
 
-    /** Draw the volume slider and mute glyph from the system music level. */
+    /** Draw the mute glyph from the system music level — crossed out at zero. */
     private fun syncVolumeBar() {
         val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
-        val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
         val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-        if (!vbVolumeSeeking) vbVolume.progress = now * 1000 / most
         vbMute.setImageResource(if (now == 0) R.drawable.ic_muted else R.drawable.ic_volume)
     }
 
@@ -673,17 +667,63 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         val end = Library.playbackEnd(activity)
         val background = Library.backgroundPlayback(activity)
         for ((button, on) in listOf(
-            vbOnward to (end == Library.PlaybackEnd.NEXT),
             npOnward to (end == Library.PlaybackEnd.NEXT),
-            vbShuffle to (end == Library.PlaybackEnd.SHUFFLE),
             npShuffle to (end == Library.PlaybackEnd.SHUFFLE),
-            vbBackground to background,
             npBackground to background,
         )) {
             button.imageTintList = android.content.res.ColorStateList.valueOf(
                 activity.getColor(if (on) R.color.accent else R.color.muted)
             )
         }
+        paintPlaybackPopup()
+    }
+
+    /** The gear popup's rows carry the same lit state, while it is open. */
+    private fun paintPlaybackPopup() {
+        val views = playbackPopup?.contentView ?: return
+        val end = Library.playbackEnd(activity)
+        val background = Library.backgroundPlayback(activity)
+        for ((id, on) in listOf(
+            R.id.pbOnwardIcon to (end == Library.PlaybackEnd.NEXT),
+            R.id.pbShuffleIcon to (end == Library.PlaybackEnd.SHUFFLE),
+            R.id.pbBackgroundIcon to background,
+        )) {
+            views.findViewById<android.widget.ImageView>(id).imageTintList =
+                android.content.res.ColorStateList.valueOf(
+                    activity.getColor(if (on) R.color.accent else R.color.muted)
+                )
+        }
+    }
+
+    /** The gear popup, kept so its icons can be re-tinted while it is open. */
+    private var playbackPopup: android.widget.PopupWindow? = null
+
+    /** Open the end-of-file settings off the folder-row gear. */
+    private fun showPlaybackSettings() {
+        val view = activity.layoutInflater.inflate(R.layout.popup_playback, null)
+        val popup = android.widget.PopupWindow(
+            view,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            true,
+        )
+        playbackPopup = popup
+        view.findViewById<View>(R.id.pbOnward).setOnClickListener {
+            chooseEnd(Library.PlaybackEnd.NEXT)
+        }
+        view.findViewById<View>(R.id.pbShuffle).setOnClickListener {
+            chooseEnd(Library.PlaybackEnd.SHUFFLE)
+        }
+        view.findViewById<View>(R.id.pbBackground).setOnClickListener {
+            Library.setBackgroundPlayback(activity, !Library.backgroundPlayback(activity))
+            paintPlaybackToggles()
+        }
+        popup.setOnDismissListener { playbackPopup = null }
+        popup.elevation = 12f
+        paintPlaybackPopup()
+        // Below the gear; the window nudges itself left to stay on screen since
+        // the gear sits at the right edge.
+        popup.showAsDropDown(folderSettings, 0, 8, android.view.Gravity.END)
     }
 
     /**
@@ -809,22 +849,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         vbNext.setOnClickListener { step(forward = true); keepControlsUp() }
         npPrev.setOnClickListener { step(forward = false) }
         npNext.setOnClickListener { step(forward = true) }
-        // One handler for each pair: the video bar and the music bar carry the
-        // same three switches over the same three settings, and two copies of
-        // the decision is one copy too many.
-        for (button in listOf(vbOnward, npOnward)) {
-            button.setOnClickListener { chooseEnd(Library.PlaybackEnd.NEXT); keepControlsUp() }
+        // The music bar keeps its three switches; the video bar's moved to the
+        // gear on the folder row (see `showPlaybackSettings`), which drives the
+        // same settings, so both players still answer to one decision.
+        npOnward.setOnClickListener { chooseEnd(Library.PlaybackEnd.NEXT) }
+        npShuffle.setOnClickListener { chooseEnd(Library.PlaybackEnd.SHUFFLE) }
+        npBackground.setOnClickListener {
+            Library.setBackgroundPlayback(activity, !Library.backgroundPlayback(activity))
+            paintPlaybackToggles()
         }
-        for (button in listOf(vbShuffle, npShuffle)) {
-            button.setOnClickListener { chooseEnd(Library.PlaybackEnd.SHUFFLE); keepControlsUp() }
-        }
-        for (button in listOf(vbBackground, npBackground)) {
-            button.setOnClickListener {
-                Library.setBackgroundPlayback(activity, !Library.backgroundPlayback(activity))
-                paintPlaybackToggles()
-                keepControlsUp()
-            }
-        }
+        folderSettings.setOnClickListener { showPlaybackSettings() }
         vbSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
                 if (!fromUser || !prepared) return
@@ -849,47 +883,65 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
         })
 
-        // The sound slider, over the system music stream — the same level the
-        // side-drag and the hardware keys move, so the three never disagree.
-        vbVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
-                val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, progress * most / 1000, 0)
-                vbMute.setImageResource(if (progress == 0) R.drawable.ic_muted else R.drawable.ic_volume)
-                keepControlsUp()
-            }
-            override fun onStartTrackingTouch(bar: android.widget.SeekBar) {
-                vbVolumeSeeking = true
-                showControls(true)
-                ui.removeCallbacks(hideControls)
-            }
-            override fun onStopTrackingTouch(bar: android.widget.SeekBar) {
-                vbVolumeSeeking = false
-                keepControlsUp()
+        // The sound is an icon, not a slider: touch it and drag up or down to
+        // set the level, tap it to mute. A drag past a small slop counts as a
+        // slide and the release does not also mute — so one gesture never does
+        // both. The level is the system music stream, the same one the side-drag
+        // and the hardware keys move.
+        vbMute.setOnTouchListener(object : View.OnTouchListener {
+            private var startY = 0f
+            private var startLevel = 0
+            private var slid = false
+            override fun onTouch(v: View, event: android.view.MotionEvent): Boolean {
+                val audio = activity.getSystemService(android.media.AudioManager::class.java)
+                    ?: return false
+                val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)
+                    .coerceAtLeast(1)
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        startY = event.rawY
+                        startLevel = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                        slid = false
+                        showControls(true)
+                        ui.removeCallbacks(hideControls)
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        // A full icon-height's travel is the whole range; up is
+                        // louder. Past a few pixels it is a slide, not a tap.
+                        val dy = startY - event.rawY
+                        if (kotlin.math.abs(dy) > 8f) slid = true
+                        if (slid) {
+                            val span = (v.height * 4).coerceAtLeast(1)
+                            val delta = (dy / span * most).toInt()
+                            val level = (startLevel + delta).coerceIn(0, most)
+                            audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, level, 0)
+                            syncVolumeBar()
+                        }
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        if (!slid) {
+                            // A tap mutes, or brings the sound back to where it was.
+                            val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
+                            if (now > 0) {
+                                mutedFrom = now
+                                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
+                            } else {
+                                audio.setStreamVolume(
+                                    android.media.AudioManager.STREAM_MUSIC,
+                                    mutedFrom.coerceIn(1, most),
+                                    0,
+                                )
+                            }
+                            syncVolumeBar()
+                            v.performClick()
+                        }
+                        keepControlsUp()
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> keepControlsUp()
+                }
+                return true
             }
         })
-        // Mute toggles: to silence, and back to where it was. A remembered level
-        // means the tap does not have to guess how loud to come back to.
-        vbMute.setOnClickListener {
-            val audio = activity.getSystemService(android.media.AudioManager::class.java)
-                ?: return@setOnClickListener
-            val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
-            val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-            if (now > 0) {
-                mutedFrom = now
-                audio.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-            } else {
-                audio.setStreamVolume(
-                    android.media.AudioManager.STREAM_MUSIC,
-                    mutedFrom.coerceIn(1, most),
-                    0,
-                )
-            }
-            syncVolumeBar()
-            keepControlsUp()
-        }
         // The speed, stepping through the same set the desktop offers. Not kept
         // between files — a rate is for the thing being watched now.
         vbRate.setOnClickListener {

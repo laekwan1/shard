@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The dark under the title at the top of the picture — the mirror of
+    `player_scrim`, which darkens the foot. Darkest at the very top where the
+    text sits, fading to clear below it, so white letters hold against a bright
+    frame without cutting the picture with a hard edge.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <!-- 270° runs top to bottom, so `startColor` is the darkest end and it
+         lands under the title. -->
+    <gradient
+        android:angle="270"
+        android:startColor="#CC000000"
+        android:centerColor="#66000000"
+        android:endColor="#00000000" />
+</shape>

@@ -210,6 +210,28 @@
                 arrow on a sunlit frame is not an arrow. The ripple moves to the
                 foreground so the backdrop can have the background.
             -->
+            <!--
+                The title, on the picture at the top — where the desktop shows
+                it and where a video app is expected to. Rides in and out with
+                the rest of the controls, over a soft scrim so white text holds
+                against a bright frame.
+            -->
+            <TextView
+                android:id="@+id/stageTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:background="@drawable/player_scrim_top"
+                android:paddingHorizontal="14dp"
+                android:paddingTop="10dp"
+                android:paddingBottom="18dp"
+                android:textColor="@color/on_surface"
+                android:textSize="14sp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:visibility="gone"
+                android:text="" />
+
             <ImageButton
                 android:id="@+id/leaveFullScreen"
                 android:layout_width="42dp"
@@ -252,36 +274,10 @@
                 android:visibility="gone">
 
                 <!--
-                    The title, as the desktop shows it: what is playing, read
-                    right where it plays rather than only in the list behind.
-                -->
-                <TextView
-                    android:id="@+id/vbTitle"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:paddingHorizontal="10dp"
-                    android:paddingBottom="2dp"
-                    android:textColor="@color/on_surface"
-                    android:textSize="13sp"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:text="" />
-
-                <!--
-                    The line, with the two times at its ends — the same shape
-                    the music bar has, so a song and a video are not two things
-                    to learn.
-
-                    The times used to sit in the button row. Once every button
-                    became 48 across, seven of them and a clock came to more
-                    than a 411dp phone has, and the total was clipped clean off:
-                    it read "0:01 /". Out here they cost no height at all, since
-                    the line is already 48 tall for the sake of the finger.
-
-                    The line itself is drawn by us. A SeekBar takes its colour
-                    from `android:colorControlActivated`, which the Material
-                    theme sets to its own lavender — setting `colorPrimary` to
-                    the app's accent, as the theme does, never reaches it.
+                    The line sits right on top of the transport now, so the eye
+                    goes from the play button straight to where it is. The times
+                    ride its ends; the title moved up onto the picture, and the
+                    end-of-file switches moved to the gear on the folder row.
                 -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -304,7 +300,7 @@
                     <SeekBar
                         android:id="@+id/vbSeek"
                         android:layout_width="0dp"
-                        android:layout_height="@dimen/target"
+                        android:layout_height="32dp"
                         android:layout_weight="1"
                         android:progressDrawable="@drawable/scrub_track"
                         android:thumb="@drawable/scrub_thumb"
@@ -324,56 +320,6 @@
                         android:maxLines="1"
                         android:fontFeatureSettings="tnum"
                         android:text="0:00" />
-                </LinearLayout>
-
-                <!--
-                    The sound and the speed, on a row of their own. The desktop
-                    keeps the volume always in view; here a mute at the left, a
-                    slider across, and the speed at the right — a persistent bar
-                    rather than the side-drag alone, which is felt out blind.
-                -->
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:paddingHorizontal="6dp">
-
-                    <ImageButton
-                        android:id="@+id/vbMute"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_volume"
-                        android:scaleType="fitCenter"
-                        android:padding="7dp"
-                        android:contentDescription="@string/library_mute" />
-
-                    <SeekBar
-                        android:id="@+id/vbVolume"
-                        android:layout_width="0dp"
-                        android:layout_height="@dimen/target"
-                        android:layout_weight="1"
-                        android:layout_marginHorizontal="6dp"
-                        android:progressDrawable="@drawable/scrub_track"
-                        android:thumb="@drawable/scrub_thumb"
-                        android:background="@null"
-                        android:splitTrack="false"
-                        android:maxHeight="2dp"
-                        android:max="1000" />
-
-                    <TextView
-                        android:id="@+id/vbRate"
-                        android:layout_width="wrap_content"
-                        android:layout_height="36dp"
-                        android:minWidth="44dp"
-                        android:gravity="center"
-                        android:paddingHorizontal="8dp"
-                        android:background="?attr/selectableItemBackground"
-                        android:textColor="@color/on_surface"
-                        android:textSize="13sp"
-                        android:maxLines="1"
-                        android:text="1×" />
                 </LinearLayout>
 
                 <LinearLayout
@@ -412,49 +358,40 @@
                         android:padding="14dp"
                         android:contentDescription="@string/library_next" />
 
-                    <!--
-                        What happens when this one ends, and whether the sound
-                        survives leaving the app. On the bar rather than behind
-                        the menu beside the new-folder button: they are about
-                        what is playing, and what is playing is right here.
-                    -->
-                    <ImageButton
-                        android:id="@+id/vbOnward"
-                        android:layout_width="@dimen/target"
-                        android:layout_height="@dimen/target"
-                        android:layout_marginStart="4dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_onward"
-                        android:scaleType="fitCenter"
-                        android:padding="16dp"
-                        android:contentDescription="@string/library_end_next" />
-
-                    <ImageButton
-                        android:id="@+id/vbShuffle"
-                        android:layout_width="@dimen/target"
-                        android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_shuffle"
-                        android:scaleType="fitCenter"
-                        android:padding="16dp"
-                        android:contentDescription="@string/library_end_shuffle" />
-
-                    <ImageButton
-                        android:id="@+id/vbBackground"
-                        android:layout_width="@dimen/target"
-                        android:layout_height="@dimen/target"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:src="@drawable/ic_offscreen"
-                        android:scaleType="fitCenter"
-                        android:padding="16dp"
-                        android:contentDescription="@string/library_background" />
-
-                    <!-- What is left over, between the settings and the way out
-                         of full screen. The times moved up to the line. -->
                     <View
                         android:layout_width="0dp"
                         android:layout_height="1dp"
                         android:layout_weight="1" />
+
+                    <!-- The speed, stepping through the same set the desktop
+                         offers. -->
+                    <TextView
+                        android:id="@+id/vbRate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="@dimen/target"
+                        android:minWidth="44dp"
+                        android:gravity="center"
+                        android:paddingHorizontal="8dp"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:textColor="@color/on_surface"
+                        android:textSize="14sp"
+                        android:maxLines="1"
+                        android:text="1×" />
+
+                    <!--
+                        The sound: an icon, not a slider. Touch it and drag up or
+                        down to set the level — the same as the side-drag, but
+                        with a handle to reach for. A tap mutes.
+                    -->
+                    <ImageButton
+                        android:id="@+id/vbMute"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:src="@drawable/ic_volume"
+                        android:scaleType="fitCenter"
+                        android:padding="13dp"
+                        android:contentDescription="@string/library_mute" />
 
                     <ImageButton
                         android:id="@+id/expand"
@@ -753,6 +690,25 @@
                         android:gravity="bottom"
                         android:baselineAligned="false" />
                 </HorizontalScrollView>
+
+                <!--
+                    The end-of-file switches, gathered under a gear at the end of
+                    the folder row: in order, at random, and whether the sound
+                    carries on off screen. They were three buttons on the video
+                    bar; here they are one, out of the way of the transport and
+                    shared with the music player, which answers to the same
+                    settings.
+                -->
+                <ImageButton
+                    android:id="@+id/folderSettings"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="6dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_settings"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/library_playback_settings" />
             </LinearLayout>
 
             <FrameLayout
