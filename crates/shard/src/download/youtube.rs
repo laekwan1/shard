@@ -131,6 +131,18 @@ pub struct Offer {
     /// Says which step failed when there is nothing to offer.
     #[serde(default)]
     pub reason: String,
+    /// A direct progressive media URL the page was seen fetching or listing —
+    /// the simple case, saved as-is with no muxing. Empty on YouTube, where the
+    /// SABR template above is used instead.
+    #[serde(default)]
+    pub media: String,
+    /// An HLS master or media playlist URL, for sites that stream over HLS.
+    #[serde(default)]
+    pub hls: String,
+    /// The address to send as `Referer` when fetching the two above: arbitrary
+    /// CDNs refuse a request that does not look like it came from the page.
+    #[serde(default)]
+    pub referer: String,
 }
 
 impl Offer {
@@ -298,12 +310,29 @@ pub const RECORDER: &str = r#"
   if (window.__shardSabrReady) { window.__shardSabr = null; return; }
   window.__shardSabrReady = true;
   window.__shardSabr = null;
+  // What the media capture holds for non-YouTube sites: the last progressive
+  // file and the last HLS playlist the page was seen asking the network for.
+  // A blob: src on the <video> is not a URL anything can fetch, so the real
+  // request underneath it — the .mp4 or the .m3u8 — is caught here instead.
+  window.__shardMedia = window.__shardMedia || { mp4: '', m3u8: '' };
+
+  function noteMedia(url) {
+    try {
+      if (typeof url !== 'string') return;
+      var bare = url.split('?')[0].toLowerCase();
+      // Skip tiny/streaming-ad fragments where we can: keep the last full file
+      // and the last playlist. The page usually fetches the real one last.
+      if (bare.indexOf('.m3u8') >= 0) window.__shardMedia.m3u8 = url;
+      else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) window.__shardMedia.mp4 = url;
+    } catch (e) {}
+  }
 
   var original = window.fetch;
   window.fetch = function (input, init) {
     try {
       var isRequest = (typeof Request !== 'undefined') && (input instanceof Request);
       var url = isRequest ? input.url : String(input);
+      noteMedia(url);
       if (url.indexOf('videoplayback') >= 0) {
         var method = (init && init.method) || (isRequest ? input.method : 'GET');
         if (method === 'POST') {
@@ -324,6 +353,16 @@ pub const RECORDER: &str = r#"
     } catch (e) {}
     return original.apply(this, arguments);
   };
+
+  // XHR too: hls.js and many players fetch the manifest and its segments over
+  // XMLHttpRequest rather than fetch, so a fetch-only hook would never see them.
+  try {
+    var openOriginal = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      try { noteMedia(String(url)); } catch (e) {}
+      return openOriginal.apply(this, arguments);
+    };
+  } catch (e) {}
 })();
 "#;
 
@@ -379,9 +418,40 @@ pub const ASK: &str = r#"
     }
   }
 
+  // Not YouTube: report whatever direct media the page was seen fetching, plus
+  // anything a plain <video> points straight at. A blob src is useless — it
+  // names memory, not a file — so it is passed over in favour of the captured
+  // request underneath it.
+  function fallback() {
+    var media = window.__shardMedia || { mp4: '', m3u8: '' };
+    var mp4 = media.mp4 || '';
+    var hls = media.m3u8 || '';
+    if (!mp4) {
+      var vids = document.getElementsByTagName('video');
+      for (var i = 0; i < vids.length; i++) {
+        var src = vids[i].currentSrc || vids[i].src || '';
+        if (src && src.indexOf('blob:') !== 0 && src.split('?')[0].toLowerCase().indexOf('.mp4') >= 0) {
+          mp4 = src; break;
+        }
+      }
+    }
+    var picture = '';
+    var og = document.querySelector('meta[property="og:image"]');
+    if (og) picture = og.getAttribute('content') || '';
+    return {
+      formats: [],
+      media: mp4,
+      hls: hls,
+      referer: location.href,
+      title: document.title || '',
+      thumb: picture,
+      reason: (mp4 || hls) ? '' : (player() ? 'no-streams' : 'no-player')
+    };
+  }
+
   var data = response();
   if (!data || !data.streamingData) {
-    send({ formats: [], reason: player() ? 'no-streams' : 'no-player' });
+    send(fallback());
     return;
   }
 

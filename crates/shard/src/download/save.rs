@@ -444,9 +444,297 @@ fn unused(mut file: File) -> std::io::Result<Vec<u8>> {
     Ok(out)
 }
 
+// ---- the non-YouTube paths: a direct file, or an HLS stream ----------------
+//
+// YouTube is a captured request replayed with a decoy; these two are the plain
+// cases everything else uses. A `Referer` that matches the page is the whole
+// trick to not being turned away by a CDN, so both send it.
+
+/// A browser-shaped user agent, so a CDN that sniffs for one is not surprised.
+const UA: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
+
+fn media_client() -> Result<reqwest::blocking::Client> {
+    Ok(reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .user_agent(UA)
+        .build()?)
+}
+
+/// GET, with the page as `Referer`. Returns the response for streaming.
+fn media_get(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    referer: &str,
+) -> Result<reqwest::blocking::Response> {
+    let mut request = client.get(url);
+    if !referer.is_empty() {
+        request = request.header("Referer", referer);
+    }
+    let response = request.send()?;
+    if !response.status().is_success() {
+        bail!("서버가 {} 로 응답했습니다", response.status().as_u16());
+    }
+    Ok(response)
+}
+
+/// Download a plain progressive file straight to disk.
+///
+/// The simplest case: one URL, one file, no muxing. The extension is taken from
+/// the URL where it has one, defaulting to mp4 — the only container a plain
+/// video download tends to be.
+pub fn run_direct(
+    url: &str,
+    referer: &str,
+    into: &Path,
+    title: &str,
+    on_progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PathBuf> {
+    std::fs::create_dir_all(into).ok();
+    let client = media_client()?;
+    let mut response = media_get(&client, url, referer)?;
+    let total = response.content_length().unwrap_or(0);
+
+    let extension = url_extension(url).unwrap_or("mp4");
+    let output = into.join(format!("{}.{extension}", safe_name(title)));
+    let mut file = File::create(&output)?;
+
+    let mut done: u64 = 0;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        if cancelled() {
+            let _ = std::fs::remove_file(&output);
+            bail!("취소되었습니다");
+        }
+        let read = response.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buffer[..read])?;
+        done += read as u64;
+        on_progress(done, total.max(done));
+    }
+    file.flush()?;
+    if done == 0 {
+        let _ = std::fs::remove_file(&output);
+        bail!("받은 내용이 없습니다");
+    }
+    Ok(output)
+}
+
+/// Download an HLS stream and join it into one file.
+///
+/// The master playlist's highest rendition is taken (the page's own player
+/// picks silently; here the best is the obvious want). fMP4 segments joined
+/// onto their init segment are already a playable MP4, so no muxing is needed
+/// for the common case; a stream of MPEG-TS segments is refused for now with a
+/// clear message rather than saving a file the in-app player cannot open.
+pub fn run_hls(
+    manifest_url: &str,
+    referer: &str,
+    into: &Path,
+    title: &str,
+    on_progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PathBuf> {
+    use crate::download::hls;
+    std::fs::create_dir_all(into).ok();
+    let client = media_client()?;
+
+    // The master, then the chosen media playlist. A media playlist has no
+    // variants, so `variants` comes back empty and the master URL is used as-is.
+    let master = media_get(&client, manifest_url, referer)?.text()?;
+    let (media_url, media_text) = if hls::is_master(&master) {
+        let variants = hls::variants(&master, manifest_url);
+        let best = variants.first().ok_or_else(|| anyhow!("화질을 찾지 못했습니다"))?;
+        (best.url.clone(), media_get(&client, &best.url, referer)?.text()?)
+    } else {
+        (manifest_url.to_string(), master)
+    };
+
+    let segments = hls::segments(&media_text, &media_url);
+    if segments.is_empty() {
+        bail!("스트림에 조각이 없습니다");
+    }
+    let init = hls::map_init(&media_text, &media_url);
+
+    // Sniff the first segment to decide the container. fMP4 is joinable as-is;
+    // MPEG-TS would need a demux this does not have yet.
+    let first = fetch_segment(&client, &segments[0], referer, cancelled)?;
+    let looks_ts = init.is_none() && first.first() == Some(&0x47);
+    if looks_ts {
+        bail!("이 사이트는 MPEG-TS(.ts) 스트림입니다. 아직 지원하지 않습니다.");
+    }
+
+    let output = into.join(format!("{}.mp4", safe_name(title)));
+    let mut file = File::create(&output)?;
+
+    // The init segment first, when the playlist names one — it carries the
+    // moov the fragments are read against.
+    if let Some(init_url) = &init {
+        let bytes = fetch_segment(&client, &hls::Segment { url: init_url.clone(), byte_range: None, key: None }, referer, cancelled)?;
+        file.write_all(&bytes)?;
+    }
+
+    let count = segments.len() as u64;
+    // Fetch the AES key once per distinct key URI.
+    let mut key_cache: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+    for (index, segment) in segments.iter().enumerate() {
+        if cancelled() {
+            drop(file);
+            let _ = std::fs::remove_file(&output);
+            bail!("취소되었습니다");
+        }
+        let mut bytes = if index == 0 { first.clone() } else { fetch_segment(&client, segment, referer, cancelled)? };
+        if let Some(key) = &segment.key {
+            bytes = decrypt_segment(&client, key, referer, index as u64, &bytes, &mut key_cache)?;
+        }
+        file.write_all(&bytes)?;
+        on_progress(index as u64 + 1, count);
+    }
+    file.flush()?;
+    Ok(output)
+}
+
+/// One segment's bytes, honouring an `#EXT-X-BYTERANGE` when it has one.
+fn fetch_segment(
+    client: &reqwest::blocking::Client,
+    segment: &crate::download::hls::Segment,
+    referer: &str,
+    _cancelled: &dyn Fn() -> bool,
+) -> Result<Vec<u8>> {
+    let mut request = client.get(&segment.url);
+    if !referer.is_empty() {
+        request = request.header("Referer", referer);
+    }
+    if let Some((len, offset)) = segment.byte_range {
+        request = request.header("Range", format!("bytes={}-{}", offset, offset + len - 1));
+    }
+    let response = request.send()?;
+    if !response.status().is_success() {
+        bail!("조각을 받지 못했습니다 ({})", response.status().as_u16());
+    }
+    Ok(response.bytes()?.to_vec())
+}
+
+/// Decrypt an AES-128-CBC segment. The IV is the one the playlist pins, or the
+/// segment's sequence number when it pins none.
+fn decrypt_segment(
+    client: &reqwest::blocking::Client,
+    key: &crate::download::hls::KeyRef,
+    referer: &str,
+    sequence: u64,
+    data: &[u8],
+    cache: &mut std::collections::HashMap<String, Vec<u8>>,
+) -> Result<Vec<u8>> {
+    if !key.method.eq_ignore_ascii_case("AES-128") {
+        bail!("지원하지 않는 암호화 방식입니다: {}", key.method);
+    }
+    let bytes = if let Some(k) = cache.get(&key.uri) {
+        k.clone()
+    } else {
+        let k = media_get(client, &key.uri, referer)?.bytes()?.to_vec();
+        cache.insert(key.uri.clone(), k.clone());
+        k
+    };
+    if bytes.len() != 16 {
+        bail!("암호 키 길이가 올바르지 않습니다");
+    }
+
+    let iv = key.iv.unwrap_or_else(|| {
+        let mut iv = [0u8; 16];
+        iv[8..].copy_from_slice(&sequence.to_be_bytes());
+        iv
+    });
+
+    let mut key16 = [0u8; 16];
+    key16.copy_from_slice(&bytes);
+    cbc_decrypt(&key16, &iv, data)
+}
+
+/// AES-128-CBC, with the PKCS7 padding removed — the shape every HLS
+/// `#EXT-X-KEY:METHOD=AES-128` segment is in.
+fn cbc_decrypt(key: &[u8; 16], iv: &[u8; 16], data: &[u8]) -> Result<Vec<u8>> {
+    use aes::cipher::generic_array::GenericArray;
+    use aes::cipher::{BlockDecrypt, KeyInit};
+    if data.is_empty() || data.len() % 16 != 0 {
+        bail!("암호문 길이가 블록에 맞지 않습니다");
+    }
+    let cipher = aes::Aes128::new(GenericArray::from_slice(key));
+    let mut out = Vec::with_capacity(data.len());
+    let mut prev = *iv;
+    for chunk in data.chunks_exact(16) {
+        let mut block = GenericArray::clone_from_slice(chunk);
+        cipher.decrypt_block(&mut block);
+        for i in 0..16 {
+            out.push(block[i] ^ prev[i]);
+        }
+        prev.copy_from_slice(chunk);
+    }
+    // PKCS7: a final byte in 1..=16 says how many padding bytes to drop.
+    if let Some(&pad) = out.last() {
+        let pad = pad as usize;
+        if (1..=16).contains(&pad) && pad <= out.len() {
+            out.truncate(out.len() - pad);
+        }
+    }
+    Ok(out)
+}
+
+/// The extension in a URL's path, lower-cased, without the dot. `None` when the
+/// last path segment has no extension.
+fn url_extension(url: &str) -> Option<&str> {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let last = path.rsplit('/').next().unwrap_or(path);
+    let dot = last.rfind('.')?;
+    let ext = &last[dot + 1..];
+    if ext.is_empty() || ext.len() > 4 {
+        None
+    } else {
+        Some(ext)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hex(s: &str) -> Vec<u8> {
+        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    #[test]
+    fn aes_128_cbc_matches_the_nist_vectors() {
+        // NIST SP 800-38A, F.2.2 CBC-AES128.Decrypt, first two blocks. The
+        // plaintext ends in 0x51, which is not a valid PKCS7 pad length, so no
+        // bytes are stripped and the whole 32 come back.
+        let key: [u8; 16] = hex("2b7e151628aed2a6abf7158809cf4f3c").try_into().unwrap();
+        let iv: [u8; 16] = hex("000102030405060708090a0b0c0d0e0f").try_into().unwrap();
+        let cipher = hex("7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2");
+        let plain = hex("6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51");
+        assert_eq!(cbc_decrypt(&key, &iv, &cipher).unwrap(), plain);
+    }
+
+    #[test]
+    fn pkcs7_padding_is_stripped() {
+        // One block of 0x10 bytes is all padding: AES-CBC of 16 pad bytes
+        // decrypts to nothing after unpadding.
+        let key = [0u8; 16];
+        let iv = [0u8; 16];
+        use aes::cipher::generic_array::GenericArray;
+        use aes::cipher::{BlockEncrypt, KeyInit};
+        let mut block = GenericArray::clone_from_slice(&[0x10u8; 16]);
+        aes::Aes128::new(GenericArray::from_slice(&key)).encrypt_block(&mut block);
+        assert!(cbc_decrypt(&key, &iv, &block).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_extension_is_read_from_a_url_past_its_query() {
+        assert_eq!(url_extension("https://x.com/a/video.mp4?token=1"), Some("mp4"));
+        assert_eq!(url_extension("https://x.com/a/list.m3u8"), Some("m3u8"));
+        assert_eq!(url_extension("https://x.com/a/stream"), None);
+    }
 
     #[test]
     fn a_picture_is_named_for_what_it_actually_is() {

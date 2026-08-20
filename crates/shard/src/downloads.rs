@@ -57,6 +57,12 @@ impl Job {
 /// from a click on a real video row. No real format uses it.
 pub const MUSIC_ITAG: u32 = u32::MAX;
 
+/// A direct progressive download (a plain media URL), for non-YouTube sites.
+pub const DIRECT_ITAG: u32 = u32::MAX - 1;
+
+/// An HLS stream, downloaded as segments and joined into one file.
+pub const HLS_ITAG: u32 = u32::MAX - 2;
+
 /// Whether the page said to go ahead despite the warning.
 pub fn forced(payload: &str) -> bool {
     payload.contains("\"force\"")
@@ -213,6 +219,21 @@ impl Downloads {
             Ok(offer) => offer,
             Err(_) => return youtube::say_script("영상 정보를 읽지 못했습니다.", true),
         };
+        // Not YouTube, but the page was seen fetching a media file or an HLS
+        // playlist — the simple and the streaming cases. One row each; the
+        // download itself is a straight fetch (direct) or a segment join (HLS).
+        if offer.template().is_none() && (!offer.media.is_empty() || !offer.hls.is_empty()) {
+            let mut rows = Vec::new();
+            if !offer.media.is_empty() {
+                rows.push((DIRECT_ITAG, "원본 파일".to_string(), "직접 다운로드".to_string()));
+            }
+            if !offer.hls.is_empty() {
+                rows.push((HLS_ITAG, "최고 화질".to_string(), "HLS 스트림 합치기".to_string()));
+            }
+            let script = youtube::list_script(&rows);
+            self.offer = Some(offer);
+            return script;
+        }
         if offer.template().is_none() {
             return youtube::say_script(
                 if offer.formats.is_empty() {
@@ -260,6 +281,12 @@ impl Downloads {
         let Some(offer) = self.offer.clone() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
         };
+        // The non-YouTube rows: a direct fetch, or an HLS join. Neither has a
+        // SABR template, so they are answered here before the template is asked
+        // for below.
+        if itag == DIRECT_ITAG || itag == HLS_ITAG {
+            return self.begin_media(&offer, itag == HLS_ITAG, anyway);
+        }
         let Some(template) = offer.template() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
         };
@@ -347,6 +374,71 @@ impl Downloads {
             rx,
             done: 0,
             total: expected,
+            state: State::Running,
+            note: String::new(),
+            cancel,
+        });
+        youtube::flash_script("받는 중")
+    }
+
+    /// Start a direct or HLS download — the non-YouTube path.
+    ///
+    /// No template, no separate audio track: the file (or the joined stream) is
+    /// one thing, so this is much thinner than [`begin`]. It reuses the same
+    /// job list, progress channel and cancel flag so the panel treats it no
+    /// differently once it is running.
+    fn begin_media(&mut self, offer: &Offer, hls: bool, anyway: bool) -> String {
+        let title = if offer.title.trim().is_empty() {
+            "video".to_string()
+        } else {
+            offer.title.clone()
+        };
+        let url = if hls { offer.hls.clone() } else { offer.media.clone() };
+        if url.is_empty() {
+            return youtube::say_script("받을 주소를 찾지 못했습니다.", true);
+        }
+        let into = videos_folder();
+        let key = format!("{}|{}", into.display(), title);
+        if self.list.iter().any(|o| o.state == State::Running && o.key == key) {
+            return youtube::say_script("이미 받고 있습니다.", true);
+        }
+        if !anyway && already_saved(crate::library::Kind::Video, &title) {
+            return youtube::again_script("이미 보관함에 있습니다.", if hls { HLS_ITAG } else { DIRECT_ITAG });
+        }
+
+        let referer = offer.referer.clone();
+        let title_for_job = title.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Step>();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        std::thread::spawn(move || {
+            let mut report = |done: u64, total: u64| {
+                let _ = tx.send(Step::Progress(done, total));
+            };
+            let outcome = if hls {
+                save::run_hls(&url, &referer, &into, &title_for_job, &mut report, &|| {
+                    stop.load(Ordering::Relaxed)
+                })
+            } else {
+                save::run_direct(&url, &referer, &into, &title_for_job, &mut report, &|| {
+                    stop.load(Ordering::Relaxed)
+                })
+            };
+            let _ = tx.send(match outcome {
+                Ok(_) => Step::Done,
+                Err(e) => Step::Failed(format!("{e:#}")),
+            });
+        });
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.list.push(Job {
+            id,
+            title,
+            key,
+            rx,
+            done: 0,
+            total: 0,
             state: State::Running,
             note: String::new(),
             cancel,
