@@ -1031,7 +1031,7 @@ queueTab.addEventListener("click", () =>
 );
 // Rest on the tab for a moment and it opens on its own — the promised hover.
 queueTab.addEventListener("mouseenter", () => {
-  queueHoverTimer = setTimeout(openQueue, 1500);
+  queueHoverTimer = setTimeout(openQueue, 1000);
 });
 queueTab.addEventListener("mouseleave", () => clearTimeout(queueHoverTimer));
 // Leaving the panel closes it, so it is not left hanging over the picture.

@@ -795,16 +795,19 @@ button svg { display: block; }
   top: 0;
   right: 0;
   bottom: 0;
-  display: flex;
-  align-items: stretch;
   z-index: 5;
   pointer-events: none;   /* only the handle and the open panel take the mouse */
 }
 
+/* Absolute, not a flex child: closed it is a thin sliver on the very edge; open
+   it slides inside the list rather than hanging on the seam outside it. */
 #queueTab {
-  align-self: center;
-  width: 20px;
-  height: 66px;
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  width: 13px;
+  height: 58px;
   display: grid;
   place-items: center;
   color: var(--muted);
@@ -814,13 +817,27 @@ button svg { display: block; }
   border-radius: var(--r-sm) 0 0 var(--r-sm);
   backdrop-filter: blur(6px);
   pointer-events: auto;
-  transition: color var(--t-press), background var(--t-press);
+  transition: color var(--t-press), background var(--t-press),
+    right var(--t-swap) var(--ease), transform var(--t-swap) var(--ease);
 }
-#queueTab svg { width: 11px; height: 14px; }
+#queueTab svg { width: 9px; height: 12px; }
 #queueTab:hover { color: var(--on-surface); background: #0b0d11ee; }
-#queue.open #queueTab { color: var(--accent); transform: scaleX(-1); }
+/* Open: the handle rides in to sit just inside the list's left edge, flipped to
+   read as the way to close it, and loses its own fill so it belongs to the
+   list. */
+#queue.open #queueTab {
+  right: 251px;
+  transform: translateY(-50%) scaleX(-1);
+  color: var(--accent);
+  background: transparent;
+  border-color: transparent;
+}
 
 #queuePanel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
   width: 0;
   overflow: hidden;
   display: flex;
