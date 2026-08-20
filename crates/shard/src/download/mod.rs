@@ -26,5 +26,6 @@ pub mod pull;
 pub mod sabr;
 #[cfg(feature = "desktop")]
 pub mod save;
+pub mod ts;
 pub mod webm;
 pub mod youtube;

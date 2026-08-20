@@ -559,41 +559,128 @@ pub fn run_hls(
     }
     let init = hls::map_init(&media_text, &media_url);
 
-    // Sniff the first segment to decide the container. fMP4 is joinable as-is;
-    // MPEG-TS would need a demux this does not have yet.
-    let first = fetch_segment(&client, &segments[0], referer, cancelled)?;
-    let looks_ts = init.is_none() && first.first() == Some(&0x47);
-    if looks_ts {
-        bail!("이 사이트는 MPEG-TS(.ts) 스트림입니다. 아직 지원하지 않습니다.");
-    }
-
-    let output = into.join(format!("{}.mp4", safe_name(title)));
-    let mut file = File::create(&output)?;
-
-    // The init segment first, when the playlist names one — it carries the
-    // moov the fragments are read against.
-    if let Some(init_url) = &init {
-        let bytes = fetch_segment(&client, &hls::Segment { url: init_url.clone(), byte_range: None, key: None }, referer, cancelled)?;
-        file.write_all(&bytes)?;
-    }
-
     let count = segments.len() as u64;
-    // Fetch the AES key once per distinct key URI.
     let mut key_cache: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+
+    // Sniff the first segment to decide the container. fMP4 is joinable onto its
+    // init segment as-is; MPEG-TS has to be demuxed and repackaged.
+    let raw_first = fetch_segment(&client, &segments[0], referer, cancelled)?;
+    let first = match &segments[0].key {
+        Some(key) => decrypt_segment(&client, key, referer, 0, &raw_first, &mut key_cache)?,
+        None => raw_first,
+    };
+    let looks_ts = init.is_none() && first.first() == Some(&0x47);
+
+    // Gather every segment's bytes, decrypting where the playlist says to.
+    let mut whole: Vec<u8> = Vec::new();
+    if let Some(init_url) = &init {
+        let bytes = fetch_segment(
+            &client,
+            &hls::Segment { url: init_url.clone(), byte_range: None, key: None },
+            referer,
+            cancelled,
+        )?;
+        whole.extend_from_slice(&bytes);
+    }
     for (index, segment) in segments.iter().enumerate() {
         if cancelled() {
-            drop(file);
-            let _ = std::fs::remove_file(&output);
             bail!("취소되었습니다");
         }
-        let mut bytes = if index == 0 { first.clone() } else { fetch_segment(&client, segment, referer, cancelled)? };
-        if let Some(key) = &segment.key {
-            bytes = decrypt_segment(&client, key, referer, index as u64, &bytes, &mut key_cache)?;
-        }
-        file.write_all(&bytes)?;
+        let mut bytes = if index == 0 {
+            first.clone()
+        } else {
+            let raw = fetch_segment(&client, segment, referer, cancelled)?;
+            match &segment.key {
+                Some(key) => decrypt_segment(&client, key, referer, index as u64, &raw, &mut key_cache)?,
+                None => raw,
+            }
+        };
+        whole.append(&mut bytes);
         on_progress(index as u64 + 1, count);
     }
-    file.flush()?;
+
+    if looks_ts {
+        // Transport stream: pull the tracks out and write a Matroska file the
+        // in-app player can open. A raw .ts it cannot.
+        return remux_ts(&whole, into, title);
+    }
+
+    // fMP4 (or a progressive MP4 served in pieces): the concatenation already
+    // is a playable file.
+    let output = into.join(format!("{}.mp4", safe_name(title)));
+    std::fs::write(&output, &whole)?;
+    Ok(output)
+}
+
+/// Demux a transport stream and write it back out as Matroska.
+fn remux_ts(data: &[u8], into: &Path, title: &str) -> Result<PathBuf> {
+    use crate::download::{mkv, ts};
+    let demuxed = ts::demux(data)?;
+
+    let mut specs = Vec::new();
+    let mut video_track = None;
+    let mut audio_track = None;
+    if !demuxed.video.is_empty() {
+        video_track = Some(specs.len() as u64 + 1);
+        specs.push(mkv::TrackSpec::video(
+            "V_MPEG4/ISO/AVC",
+            demuxed.width.max(1),
+            demuxed.height.max(1),
+            demuxed.avcc.clone(),
+        ));
+    }
+    if !demuxed.audio.is_empty() {
+        audio_track = Some(specs.len() as u64 + 1);
+        specs.push(mkv::TrackSpec::audio(
+            "A_AAC",
+            demuxed.sample_rate.max(1) as f64,
+            demuxed.channels.max(1),
+            demuxed.asc.clone(),
+        ));
+    }
+    if specs.is_empty() {
+        bail!("전송 스트림에서 트랙을 찾지 못했습니다");
+    }
+
+    let output = into.join(format!("{}.{}", safe_name(title), mkv::extension(&specs)));
+    let mut writer = mkv::Writer::new(File::create(&output)?, &specs)?;
+
+    // Interleave the two tracks by decode time so a reader never has to seek
+    // backwards. A simple merge of the two already-ordered runs does it.
+    let mut vi = 0;
+    let mut ai = 0;
+    loop {
+        let v = demuxed.video.get(vi);
+        let a = demuxed.audio.get(ai);
+        let take_video = match (v, a) {
+            (Some(v), Some(a)) => v.decode_ms <= a.decode_ms,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if take_video {
+            let s = v.unwrap();
+            writer.add(&mkv::Frame {
+                track: video_track.unwrap(),
+                time_ms: s.time_ms,
+                decode_ms: s.decode_ms,
+                keyframe: s.keyframe,
+                data: s.data.clone(),
+            })?;
+            vi += 1;
+        } else {
+            let s = a.unwrap();
+            writer.add(&mkv::Frame {
+                track: audio_track.unwrap(),
+                time_ms: s.time_ms,
+                decode_ms: s.decode_ms,
+                keyframe: true,
+                data: s.data.clone(),
+            })?;
+            ai += 1;
+        }
+    }
+    writer.finish()?;
     Ok(output)
 }
 
