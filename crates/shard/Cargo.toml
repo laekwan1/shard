@@ -11,10 +11,10 @@ default = ["desktop"]
 # portable core — parsers, strategy model, config format — so that both builds
 # make the same decisions from the same code.
 desktop = [
+    "download",
     "dep:eframe",
     "dep:egui",
     "dep:global-hotkey",
-    "dep:reqwest",
     "dep:tokio",
     "dep:tray-icon",
     "dep:wry",
@@ -23,6 +23,13 @@ desktop = [
     "dep:windows",
     "uikit/gui",
 ]
+
+# The save-a-video engine without a window: fetching segments and muxing them
+# to a file. Split out of `desktop` so the phone builds (iOS especially) can
+# link the same fetch-and-mux path the desktop uses instead of re-writing it.
+# Needs only reqwest + std::fs — no WebView2, no packet driver — so it compiles
+# for aarch64-apple-ios. The download *window* (browser.rs) stays desktop-only.
+download = ["dep:reqwest"]
 
 # The binary carries a requireAdministrator manifest, so its (empty) test
 # harness cannot be launched by `cargo test`. All logic lives in the library.

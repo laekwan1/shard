@@ -9,8 +9,10 @@ license.workspace = true
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-# The portable core only: no packet driver, no window, no async runtime.
-shard = { path = "../shard", default-features = false }
+# The portable core only: no packet driver, no window, no async runtime. The
+# `download` feature adds the fetch-and-mux engine (reqwest + std::fs, no
+# WebView2) so the phone can save video with the same code the desktop uses.
+shard = { path = "../shard", default-features = false, features = ["download"] }
 anyhow = "1.0.104"
 tracing = "0.1.44"
 # For the encrypted resolver only. Blocking rustls, no async runtime.

@@ -14,6 +14,7 @@
 //! Measured against a Korean ISP that reassembles the stream before matching:
 //! splitting alone failed every time, split-plus-urgent succeeded.
 
+pub mod download;
 pub mod http_proxy;
 pub mod jni;
 pub mod resolve;
