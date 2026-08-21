@@ -1014,7 +1014,9 @@ button svg { display: block; }
    that shows while a site is in front — a list of films hanging over a web
    page, playing one on a click, is not what the strip is for. */
 #player.mini #queue { display: none; }
-#player.mini #controls { background: transparent; border-top: 0; padding: 7px 12px 0; }
+/* Balanced top and bottom so the strip's own colour does not show as a lip
+   above the scrubber — the content fills the 58 the strip is given. */
+#player.mini #controls { background: transparent; border-top: 0; padding: 4px 12px 4px; }
 /*
     The strip keeps the smaller controls, and deliberately.
 

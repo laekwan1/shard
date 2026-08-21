@@ -908,11 +908,16 @@ function shutPlayer() {
 function syncPlayer() {
   const own = !browsing && here === "library";
   player.classList.toggle("mini", !own);
-  // The queue is the full player's, not the strip's: close it whenever the
-  // strip is what is showing, so it cannot hang over a web page.
+  // The queue is the full player's, not the strip's: take it away entirely
+  // whenever the strip is what is showing, so not even its edge hangs over a
+  // web page. `hidden` is the strongest off there is — `[hidden]` forces
+  // display:none — so a stray pixel of it cannot survive.
+  const queue = document.getElementById("queue");
   if (!own) {
-    const queue = document.getElementById("queue");
     queue.classList.remove("open");
+    queue.hidden = true;
+  } else if (playing) {
+    queue.hidden = false;
   }
   send("playing", { on: !player.hidden });
 }
