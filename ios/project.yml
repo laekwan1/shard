@@ -1,0 +1,33 @@
+# XcodeGen spec. `xcodegen generate` (run from ios/) writes Shard.xcodeproj from
+# this, so no .pbxproj is hand-maintained in the repo. The Rust core is linked
+# as build/ShardCore.xcframework, produced by scripts/build-xcframework.sh.
+name: Shard
+options:
+  bundleIdPrefix: net.sw
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  Shard:
+    type: application
+    platform: iOS
+    sources:
+      - path: Shard/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: net.sw.shard
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Shard/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Shard/Sources/Shard-Bridging-Header.h
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Header search path so the bridging header finds ShardCore.h inside the
+        # xcframework slice at build time.
+        HEADER_SEARCH_PATHS:
+          - $(inherited)
+          - $(SRCROOT)/Shard/Sources
+    dependencies:
+      - framework: build/ShardCore.xcframework
+        embed: false

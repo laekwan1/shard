@@ -55,3 +55,7 @@ android/keystore/
 android/keystore.properties
 *.jks
 *.keystore
+
+# iOS generated artifacts
+ios/build/
+ios/Shard.xcodeproj/

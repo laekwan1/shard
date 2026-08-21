@@ -1,0 +1,56 @@
+# Build the whole iOS app, not just the Rust core: assemble the xcframework,
+# generate the Xcode project from project.yml, and compile the SwiftUI shell
+# against it for the simulator (no signing needed). This proves the Swift ↔ C
+# ABI bridge and the app sources build, the same way ios-build.yml proves the
+# core links.
+name: iOS app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'ios/**'
+      - '.github/workflows/ios-app.yml'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain + iOS targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ios-app-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build the Rust xcframework
+        run: bash ios/scripts/build-xcframework.sh
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build the app for the simulator (unsigned)
+        run: |
+          xcodebuild \
+            -project ios/Shard.xcodeproj \
+            -scheme Shard \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
