@@ -1,23 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    The handle: 10dp, growing to 14dp under a finger.
+    The scrub handle: a fixed 12dp circle.
 
-    Two shapes in a selector rather than one that is scaled, because a SeekBar
-    takes the thumb's own intrinsic size — there is nothing to animate a scale
-    on. The jump is what every player does anyway: the handle is either being
-    held or it is not.
+    A single plain shape, not a pressed/idle selector. A SeekBar reads the
+    thumb's intrinsic size to draw it, but a StateListDrawable does not report
+    one reliably, so on a tall bar (this one is 32-48dp for a wide touch target)
+    the thumb was stretched to the bar's height — a circle became an oval. A
+    plain shape carries its own size and stays round. The press-grow is dropped;
+    a handle that is always round matters more than one that swells.
 -->
-<selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_pressed="true">
-        <shape android:shape="oval">
-            <size android:width="14dp" android:height="14dp" />
-            <solid android:color="@color/accent" />
-        </shape>
-    </item>
-    <item>
-        <shape android:shape="oval">
-            <size android:width="10dp" android:height="10dp" />
-            <solid android:color="@color/accent" />
-        </shape>
-    </item>
-</selector>
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <size android:width="12dp" android:height="12dp" />
+    <solid android:color="@color/accent" />
+</shape>
