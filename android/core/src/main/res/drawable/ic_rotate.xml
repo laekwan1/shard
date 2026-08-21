@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    A thin circular arrow — the reference's ring, a quarter turn. The number goes
-    on as real text in the button's layout, so it is the app's own font rather
-    than a shape pretending to be a figure.
+    A thin circular arrow with 90 in it — the reference's 360, a quarter turn.
+    The ring is drawn light; the digits are clean stroked outlines, a proper
+    round head and a straight stem for the 9, an oval for the 0, and a small
+    ring for the degree mark.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -10,13 +11,35 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/on_surface">
+    <!-- The ring, clockwise, open at the top-right. -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.4"
+        android:strokeWidth="1.3"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M17.2,5.6 A8,8 0 1 1 12,4" />
+        android:pathData="M17.4,5.4 A8,8 0 1 1 12,4" />
+    <!-- The arrowhead at the open end. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M11.6,1.9 L14,4.2 L11.3,6.1 Z" />
+        android:pathData="M11.7,1.9 L14,4.1 L11.4,6 Z" />
+    <!-- 9: a round head with a straight stem. -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M9.2,10.4 m-1.5,0 a1.5,1.5 0 1 0 3,0 a1.5,1.5 0 1 0 -3,0 M10.7,10.4 L10.4,15" />
+    <!-- 0: an oval outline. -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.2"
+        android:fillColor="#00000000"
+        android:pathData="M13.9,9.7 a1.6,2.3 0 1 0 0.01,0" />
+    <!-- degree mark. -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1"
+        android:fillColor="#00000000"
+        android:pathData="M16.7,9.3 a0.6,0.6 0 1 0 0.01,0" />
 </vector>
