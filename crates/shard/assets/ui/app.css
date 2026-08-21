@@ -489,7 +489,7 @@ button svg { display: block; }
   border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
-.folder:hover { color: var(--surface); }
+.folder:hover { color: #fff; background: var(--state-hover); border-color: var(--surface); }
 .folder.on { color: #fff; background: var(--surface); border-color: var(--surface); font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
@@ -504,8 +504,11 @@ button svg { display: block; }
   place-items: center;
   padding: 0;
   font-size: 12px;
-  background: var(--surface);
-  border-color: var(--surface);
+  /* Just the plus — no box behind it, the way it began. It is an action, not a
+     folder tab, so it should not wear a tab's fill. */
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
   border-radius: var(--r-sm);
 }
 .folder.add svg { width: 11px; height: 11px; }

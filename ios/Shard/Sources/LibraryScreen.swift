@@ -94,7 +94,7 @@ struct LibraryScreen: View {
     private var folderBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("전체", active: store.current == nil) { store.current = nil }
+                chip("저장소", active: store.current == nil) { store.current = nil }
                 ForEach(store.folders, id: \.self) { folder in
                     chip(folder, active: store.current == folder) { store.current = folder }
                 }

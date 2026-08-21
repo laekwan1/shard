@@ -1338,7 +1338,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      */
     private fun shown(): List<Library.Item> {
         val shelf = Library.arranged(activity, items.filter { it.kind == tab }, tab)
-        return showing?.let { name -> shelf.filter { it.folder == name } } ?: shelf
+        // Each folder is its own list, and so is the top level ("저장소"): a
+        // folder is a playlist, not a filter over everything. So the top chip
+        // shows only what sits at the top, not every file gathered from every
+        // folder.
+        val name = showing ?: ""
+        return shelf.filter { it.folder == name }
     }
 
     /** Size, folder and age — the three things worth knowing about a kept file. */
@@ -1475,6 +1480,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                     }
                     across < -far -> {
                         stopPlaying()
+                        true
+                    }
+                    // Rightward: back to the web, the way the browser's own back
+                    // gesture reads — a video is a place you swipe out of.
+                    across > far -> {
+                        back()
                         true
                     }
                     else -> false

@@ -55,7 +55,7 @@
     <string name="library_new_folder">새 폴더</string>
     <string name="library_empty_folder">이 폴더에는 아직 없습니다.</string>
     <string name="library_folder_name">폴더 이름</string>
-    <string name="library_all">전체</string>
+    <string name="library_all">저장소</string>
     <string name="library_tab_video">영상</string>
     <string name="library_tab_music">음악</string>
     <string name="library_empty_music">받은 음악이 없습니다. 음악만 저장하면 여기에 모입니다.</string>
