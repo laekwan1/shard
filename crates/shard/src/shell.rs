@@ -347,11 +347,19 @@ fn relayout(hwnd: HWND) {
             // keeps playing, which is what coming back to it should find.
             let _ = view.set_visible(front);
             if front {
+                // Below the site sits the playing strip when it is up, or the
+                // bottom resize grip when it is not. It was always both —
+                // `bar + edge` — so while something played there was a band of
+                // the page's own background, the width of the grip, showing
+                // between the site and the strip. Maximised the grip is zero and
+                // it vanished, which is why it only showed in a windowed size.
+                // The strip is flush against the site now: no grip under it.
+                let below = if bar > 0 { bar } else { edge };
                 let _ = view.set_bounds(wry::Rect {
                     position: wry::dpi::PhysicalPosition::new(edge, chrome).into(),
                     size: wry::dpi::PhysicalSize::new(
                         width.saturating_sub((edge * 2) as u32),
-                        height.saturating_sub((chrome + bar + edge) as u32),
+                        height.saturating_sub((chrome + below) as u32),
                     )
                     .into(),
                 });

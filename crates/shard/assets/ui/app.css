@@ -481,13 +481,15 @@ button svg { display: block; }
 .folder {
   padding: 5px 15px;
   font-size: 11.5px;
-  color: var(--muted);
+  /* The name reads in the list's own ink, not a dimmer grey, so a folder tab
+     matches the files it opens onto. */
+  color: var(--on-surface);
   background: transparent;
   border: 1px solid var(--surface);
   border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
-.folder:hover { color: var(--on-surface); }
+.folder:hover { color: #fff; }
 .folder.on { color: #fff; background: var(--surface); border-color: var(--surface); font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
@@ -1010,13 +1012,7 @@ button svg { display: block; }
   border-top: 1px solid var(--divider);
 }
 #player.mini #stage { display: none; }
-/* The queue belongs to the full player over the library, never to the strip
-   that shows while a site is in front — a list of films hanging over a web
-   page, playing one on a click, is not what the strip is for. */
-#player.mini #queue { display: none; }
-/* Balanced top and bottom so the strip's own colour does not show as a lip
-   above the scrubber — the content fills the 58 the strip is given. */
-#player.mini #controls { background: transparent; border-top: 0; padding: 4px 12px 4px; }
+#player.mini #controls { background: transparent; border-top: 0; padding: 7px 12px 0; }
 /*
     The strip keeps the smaller controls, and deliberately.
 
