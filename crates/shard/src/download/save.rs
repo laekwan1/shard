@@ -20,6 +20,19 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+/// Make ring the process crypto provider for rustls.
+///
+/// reqwest is built with `rustls-no-provider` so aws-lc-rs (which will not link
+/// into the iOS cdylib) is never pulled in; the price is that rustls has no
+/// default provider until one is installed. Do it once, before the first client
+/// is built. Idempotent — a second install just returns Err, which we ignore.
+fn use_ring() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 /// What to fetch and where to put it.
 pub struct Job {
     pub template: Template,
@@ -50,6 +63,7 @@ pub fn run(
     on_progress: &mut dyn FnMut(Progress),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PathBuf> {
+    use_ring();
     std::fs::create_dir_all(&job.into).ok();
     let scratch = std::env::temp_dir().join("shard-download");
     std::fs::create_dir_all(&scratch)?;
@@ -455,6 +469,7 @@ const UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
 fn media_client() -> Result<reqwest::blocking::Client> {
+    use_ring();
     Ok(reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .user_agent(UA)
@@ -530,6 +545,7 @@ pub fn run_direct(
 /// could not be read. Kept quick with a short timeout — it blocks the caller.
 pub fn hls_variants(manifest_url: &str, referer: &str) -> Vec<crate::download::hls::Variant> {
     use crate::download::hls;
+    use_ring();
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .user_agent(UA)

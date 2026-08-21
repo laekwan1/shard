@@ -3302,6 +3302,7 @@ dependencies = [
  "rand",
  "raw-window-handle",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

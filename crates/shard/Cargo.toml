@@ -29,7 +29,7 @@ desktop = [
 # link the same fetch-and-mux path the desktop uses instead of re-writing it.
 # Needs only reqwest + std::fs — no WebView2, no packet driver — so it compiles
 # for aarch64-apple-ios. The download *window* (browser.rs) stays desktop-only.
-download = ["dep:reqwest"]
+download = ["dep:reqwest", "dep:rustls"]
 
 # The binary carries a requireAdministrator manifest, so its (empty) test
 # harness cannot be launched by `cargo test`. All logic lives in the library.
@@ -76,7 +76,13 @@ tracing = "0.1.44"
 eframe = { version = "0.35.0", default-features = false, features = ["default_fonts", "glow"], optional = true }
 egui = { version = "0.35.0", optional = true }
 global-hotkey = { version = "0.8.0", optional = true }
-reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "http2", "charset", "blocking"], optional = true }
+# rustls-no-provider (not "rustls") keeps aws-lc-rs out: its C+assembly crypto
+# would not link into the iOS cdylib ("symbol(s) not found for arm64"), and the
+# rest of the workspace already standardises on ring. We install ring as the
+# process crypto provider ourselves (see download::save).
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider", "http2", "charset", "blocking"], optional = true }
+# Only to pick ring as reqwest's crypto backend; no TLS is spoken here directly.
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "io-util", "signal"], optional = true }
 tray-icon = { version = "0.24.2", default-features = false, optional = true }
 # The download window. WebView2 is already on every Windows 11 machine, so this
