@@ -886,7 +886,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // Pinching first: a two-finger gesture handed to the swipe detector
             // reads as a swipe by whichever finger moved further.
             pinch.onTouchEvent(event)
-            if (!pinch.isInProgress) gestures.onTouchEvent(event)
+            // An interactive pull-to-web takes priority: while a rightward drag
+            // is following the finger, the tap/scroll/fling detector is held off
+            // so the two do not both act on the same move.
+            val pulled = !pinch.isInProgress && handlePull(event)
+            if (!pinch.isInProgress && !pulled) gestures.onTouchEvent(event)
             // The long-press starts a hold; the finger lifting is the only thing
             // that ends it, and the gesture detector does not report the lift.
             val a = event.actionMasked
@@ -1243,6 +1247,54 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         }
     }
 
+    private var pullStartX = 0f
+    private var pullStartY = 0f
+    private var pulling = false
+
+    /**
+     * Follow the finger for a rightward drag on the windowed player and let it
+     * commit past a third of the way — so leaving a video feels like pulling the
+     * library aside to the web behind it, not a switch flipping.
+     *
+     * Returns true while a pull is active, so the tap/scroll/fling detector is
+     * held off for the duration.
+     */
+    private fun handlePull(e: android.view.MotionEvent): Boolean {
+        if (expanded) { pulling = false; return false }
+        val density = activity.resources.displayMetrics.density
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                pullStartX = e.rawX; pullStartY = e.rawY; pulling = false
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = e.rawX - pullStartX
+                val dy = e.rawY - pullStartY
+                if (!pulling) {
+                    // Begin only once it is clearly a rightward, horizontal drag,
+                    // or a downward brightness/sound drag would never get a turn.
+                    if (dx > 16 * density && dx > kotlin.math.abs(dy) * 1.5f) pulling = true
+                    else return false
+                }
+                // A touch of resistance, so it drags rather than snaps.
+                root.translationX = (e.rawX - pullStartX).coerceAtLeast(0f) * 0.9f
+                return true
+            }
+            android.view.MotionEvent.ACTION_UP,
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                if (!pulling) return false
+                pulling = false
+                if (root.translationX > root.width / 3f) {
+                    root.animate().translationX(root.width.toFloat()).setDuration(160)
+                        .withEndAction { root.translationX = 0f; back() }.start()
+                } else {
+                    root.animate().translationX(0f).setDuration(160).start()
+                }
+                return true
+            }
+        }
+        return pulling
+    }
+
     /** Let go of the player for good; the screen is not coming back. */
     fun release() {
         released = true
@@ -1482,12 +1534,9 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                         stopPlaying()
                         true
                     }
-                    // Rightward: back to the web, the way the browser's own back
-                    // gesture reads — a video is a place you swipe out of.
-                    across > far -> {
-                        back()
-                        true
-                    }
+                    // Rightward-to-web is handled as an interactive pull (see the
+                    // stage touch listener), so it can follow the finger — not
+                    // caught here as an instant fling.
                     else -> false
                 }
             }
