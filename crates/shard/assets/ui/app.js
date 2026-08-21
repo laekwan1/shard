@@ -336,9 +336,18 @@ const shelf = { kind: "video", folder: null, items: [], folders: [] };
 const foldersEl = document.getElementById("folders");
 const filesEl = document.getElementById("files");
 
-// Files marked to be moved together, and the batch a drag is carrying.
+// Files marked to be moved together, the batch a drag is carrying, and the last
+// row clicked, so Shift can take the run up to it.
 const selected = new Set();
 let dragBatch = [];
+let lastClickedId = null;
+
+// Light the rows that are marked, from the set, without rebuilding the list.
+function paintSelection() {
+  for (const row of filesEl.querySelectorAll(".file")) {
+    row.classList.toggle("selected", selected.has(Number(row.dataset.id)));
+  }
+}
 const emptyEl = document.getElementById("empty");
 
 for (const button of document.querySelectorAll(".shelf")) {
@@ -457,21 +466,35 @@ function paintFiles() {
   for (const item of list) {
     const row = document.createElement("div");
     row.className = "file";
+    row.dataset.id = String(item.id);
     // Held down, then moved: the browser starts the drag itself once the
     // button has been pressed on the row, so nothing moves on a passing hover.
     if (selected.has(item.id)) row.classList.add("selected");
-    // A click marks a file; marked files move together. A second click unmarks
-    // it. Playing is the go button or a double click, so a single click is free
-    // for this.
+    // Selection, the way a file manager does it: a plain click picks this one
+    // alone, Ctrl adds or removes one, Shift takes the run between the last
+    // click and this. Playing is the go button or a double click, so a single
+    // click is free for this.
     row.addEventListener("click", (e) => {
       if (e.target.closest(".go")) return;
-      if (selected.has(item.id)) {
-        selected.delete(item.id);
-        row.classList.remove("selected");
+      const ids = shown().map((i) => i.id);
+      if (e.shiftKey && lastClickedId != null) {
+        const a = ids.indexOf(lastClickedId);
+        const b = ids.indexOf(item.id);
+        if (a >= 0 && b >= 0) {
+          if (!e.ctrlKey) selected.clear();
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          for (let i = lo; i <= hi; i++) selected.add(ids[i]);
+        }
+      } else if (e.ctrlKey || e.metaKey) {
+        if (selected.has(item.id)) selected.delete(item.id);
+        else selected.add(item.id);
+        lastClickedId = item.id;
       } else {
+        selected.clear();
         selected.add(item.id);
-        row.classList.add("selected");
+        lastClickedId = item.id;
       }
+      paintSelection();
     });
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {

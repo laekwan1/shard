@@ -437,6 +437,19 @@ pub const ASK: &str = r#"
   // request underneath it.
   function fallback() {
     var media = window.__shardMedia || { mp4: '', m3u8: '' };
+    media.list = media.list || [];
+    // The player may not have fetched the master over the network yet, but its
+    // URL is usually sitting in the page's own scripts (a flashvars object, a
+    // JSON blob). Scan for every .m3u8 there and add it, unescaping the \/ that
+    // JSON writes its slashes as, so Rust has the master to read qualities from.
+    try {
+      var raw = document.documentElement.innerHTML.match(/https?:[^\s"'<>\\]+(?:\\\/[^\s"'<>\\]+)*\.m3u8[^\s"'<>]*/g) || [];
+      for (var i = 0; i < raw.length; i++) {
+        var u = raw[i].replace(/\\\//g, '/');
+        if (media.list.indexOf(u) < 0) media.list.push(u);
+        if (!media.m3u8) media.m3u8 = u;
+      }
+    } catch (e) {}
     var mp4 = media.mp4 || '';
     var hls = media.m3u8 || '';
     if (!mp4) {
