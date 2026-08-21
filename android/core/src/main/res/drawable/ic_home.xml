@@ -1,0 +1,11 @@
+<!-- A simple house outline for the top-level ("storage") folder chip. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="18dp"
+    android:height="18dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24"
+    android:tint="@color/on_surface">
+    <path
+        android:fillColor="@android:color/white"
+        android:pathData="M12,3L4,10v11h5v-6h6v6h5V10L12,3z" />
+</vector>

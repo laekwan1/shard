@@ -10,31 +10,35 @@ struct LibraryScreen: View {
     var close: () -> Void
 
     @StateObject private var probe = MediaProbe()
-    @State private var playingIndex: Int?
+    @StateObject private var player = VLCController()
+    @State private var currentIndex: Int?
+    @State private var fullscreen = false
     @State private var showNewFolder = false
     @State private var newFolder = ""
     @State private var renaming: Item?
     @State private var renameText = ""
-    @State private var showSettings = false
+    @State private var renamingFolder: String?
+    @State private var folderRenameText = ""
+    @State private var deletingFolder: String?
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            shelfSwitch
-            folderBar
-            if !downloads.items.isEmpty { downloadsStrip }
-            if store.visible.isEmpty { empty } else { list }
+        ZStack {
+            VStack(spacing: 0) {
+                header
+                shelfSwitch
+                folderBar
+                if currentIndex != nil && !fullscreen {
+                    stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
+                }
+                if !downloads.items.isEmpty { downloadsStrip }
+                if store.visible.isEmpty { empty } else { list }
+            }
+            if currentIndex != nil && fullscreen {
+                stage.ignoresSafeArea().zIndex(2)
+            }
         }
         .background(Color.surface.ignoresSafeArea())
         .foregroundColor(.onSurface)
-        .fullScreenCover(item: Binding(
-            get: { playingIndex.map { PlayIndex(value: $0) } },
-            set: { playingIndex = $0?.value }
-        )) { start in
-            VLCPlayerScreen(playlist: store.visible.map { $0.url }, start: start.value, prefs: prefs) {
-                playingIndex = nil
-            }
-        }
         .alert("새 폴더", isPresented: $showNewFolder) {
             TextField("폴더 이름", text: $newFolder)
             Button("만들기") { store.createFolder(newFolder); newFolder = "" }
@@ -45,11 +49,59 @@ struct LibraryScreen: View {
             Button("바꾸기") { if let item = renaming { store.rename(item, to: renameText) }; renaming = nil }
             Button("취소", role: .cancel) { renaming = nil }
         }
-        .confirmationDialog("재생 설정", isPresented: $showSettings, titleVisibility: .visible) {
-            Button(prefs.end == .next ? "순서대로 ✓" : "순서대로") { prefs.toggleEnd(.next) }
-            Button(prefs.end == .shuffle ? "무작위 ✓" : "무작위") { prefs.toggleEnd(.shuffle) }
-            Button(prefs.background ? "백그라운드 재생 ✓" : "백그라운드 재생") { prefs.background.toggle() }
-            Button("닫기", role: .cancel) {}
+        .alert("폴더 이름 바꾸기", isPresented: Binding(get: { renamingFolder != nil }, set: { if !$0 { renamingFolder = nil } })) {
+            TextField("새 이름", text: $folderRenameText)
+            Button("바꾸기") { if let f = renamingFolder { store.renameFolder(f, to: folderRenameText) }; renamingFolder = nil }
+            Button("취소", role: .cancel) { renamingFolder = nil }
+        }
+        .confirmationDialog("폴더 삭제", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }), titleVisibility: .visible) {
+            Button("전체삭제", role: .destructive) {
+                if let f = deletingFolder { store.deleteFolder(f, withContents: true) }; deletingFolder = nil
+            }
+            Button("폴더삭제") {
+                if let f = deletingFolder { store.deleteFolder(f, withContents: false) }; deletingFolder = nil
+            }
+            Button("취소", role: .cancel) { deletingFolder = nil }
+        } message: {
+            Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
+        }
+    }
+
+    private var stage: some View {
+        PlayerStage(
+            controller: player,
+            title: currentIndex.flatMap { store.visible.indices.contains($0) ? store.visible[$0].name : nil } ?? "",
+            fullscreen: $fullscreen,
+            onStop: { stopPlayer() },
+            onPullToWeb: { stopPlayer(); close() }
+        )
+    }
+
+    private func play(at index: Int) {
+        guard store.visible.indices.contains(index) else { return }
+        currentIndex = index
+        player.onEnded = { advanceOnEnd() }
+        player.open(store.visible[index].url)
+    }
+
+    private func stopPlayer() {
+        player.stop()
+        currentIndex = nil
+        fullscreen = false
+    }
+
+    private func advanceOnEnd() {
+        guard let i = currentIndex else { return }
+        switch prefs.end {
+        case .next:
+            if i + 1 < store.visible.count { play(at: i + 1) } else { stopPlayer() }
+        case .shuffle:
+            guard store.visible.count > 1 else { return }
+            var n = i
+            while n == i { n = Int.random(in: 0..<store.visible.count) }
+            play(at: n)
+        case .stop:
+            break
         }
     }
 
@@ -59,7 +111,19 @@ struct LibraryScreen: View {
             Spacer()
             Text(store.current ?? "보관함").font(.headline)
             Spacer()
-            Button { showSettings = true } label: { Image(systemName: "gearshape") }
+            Menu {
+                Button { prefs.toggleEnd(.next) } label: {
+                    Label("순서대로", systemImage: prefs.end == .next ? "checkmark" : "arrow.right.to.line")
+                }
+                Button { prefs.toggleEnd(.shuffle) } label: {
+                    Label("무작위", systemImage: prefs.end == .shuffle ? "checkmark" : "shuffle")
+                }
+                Button { prefs.background.toggle() } label: {
+                    Label("백그라운드 재생", systemImage: prefs.background ? "checkmark" : "moon")
+                }
+            } label: {
+                Image(systemName: "gearshape").font(.title3)
+            }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -71,13 +135,15 @@ struct LibraryScreen: View {
         }
         .padding(3)
         .background(Color.toolbar)
-        .clipShape(Capsule())
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
     }
 
     private func shelfTab(_ kind: MediaKind, _ label: String, _ icon: String) -> some View {
         let on = store.kind == kind
-        return Button { store.kind = kind } label: {
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { store.kind = kind }
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                 Text(label).bold()
@@ -87,33 +153,55 @@ struct LibraryScreen: View {
             .frame(maxWidth: .infinity)
             .background(on ? Color.chrome : Color.clear)
             .foregroundColor(on ? .onSurface : .muted)
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
+    /// Fling left/right anywhere on the list to switch shelves, like Android.
+    private func switchShelf(_ translationX: CGFloat) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            store.kind = translationX < 0 ? .music : .video
         }
     }
 
     private var folderBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                chip("저장소", active: store.current == nil) { store.current = nil }
+                // The top level is home — a house, like the desktop's storage tab.
+                chip(active: store.current == nil, tap: { store.current = nil }) {
+                    Image(systemName: "house.fill").font(.subheadline)
+                }
                 ForEach(store.folders, id: \.self) { folder in
-                    chip(folder, active: store.current == folder) { store.current = folder }
+                    chip(active: store.current == folder, tap: { store.current = folder }) {
+                        Text(folder).font(.subheadline)
+                    }
+                    .contextMenu {
+                        Button { renamingFolder = folder; folderRenameText = folder } label: {
+                            Label("이름 바꾸기", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) { deletingFolder = folder } label: {
+                            Label("폴더 삭제", systemImage: "trash")
+                        }
+                    }
                 }
                 Button { showNewFolder = true } label: {
-                    Image(systemName: "plus").padding(.horizontal, 12).padding(.vertical, 6)
-                        .background(Color.toolbar).foregroundColor(.onSurface).clipShape(Capsule())
+                    Image(systemName: "plus").foregroundColor(.muted)
+                        .padding(.horizontal, 12).padding(.vertical, 7)
                 }
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
         }
     }
 
-    private func chip(_ label: String, active: Bool, tap: @escaping () -> Void) -> some View {
+    private func chip<Content: View>(
+        active: Bool, tap: @escaping () -> Void, @ViewBuilder label: () -> Content
+    ) -> some View {
         Button(action: tap) {
-            Text(label).font(.subheadline)
+            label()
                 .padding(.horizontal, 14).padding(.vertical, 6)
                 .background(active ? Color.accent : Color.toolbar)
                 .foregroundColor(active ? .onAccent : .onSurface)
-                .clipShape(Capsule())
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
     }
 
@@ -148,12 +236,27 @@ struct LibraryScreen: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(store.visible.enumerated()), id: \.element.id) { index, item in
-                    Button { playingIndex = index } label: { row(item) }
+                    row(item)
+                        // A tap plays; a drag scrolls. Using a tap gesture rather
+                        // than a Button means a scroll that ends over a row no
+                        // longer counts as a press on it.
+                        .contentShape(Rectangle())
+                        .onTapGesture { play(at: index) }
                         .contextMenu { menu(item) }
                     Divider().background(Color.toolbar)
                 }
             }
         }
+        // Fling left/right to switch shelf, without blocking the vertical scroll.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    if abs(value.translation.width) > 60 &&
+                        abs(value.translation.width) > abs(value.translation.height) * 1.5 {
+                        switchShelf(value.translation.width)
+                    }
+                }
+        )
     }
 
     private func row(_ item: Item) -> some View {
@@ -207,6 +310,3 @@ struct LibraryScreen: View {
         Button(role: .destructive) { store.delete(item) } label: { Label("삭제", systemImage: "trash") }
     }
 }
-
-/// Identifiable wrapper so an index can drive `.fullScreenCover(item:)`.
-private struct PlayIndex: Identifiable { let value: Int; var id: Int { value } }

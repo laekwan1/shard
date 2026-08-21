@@ -13,7 +13,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var duration = "0:00"
     @Published var rate: Float = 1
     var scrubbing = false
-    /// Called when the current track reaches its end, for auto-advance.
     var onEnded: (() -> Void)?
 
     private var currentURL: URL?
@@ -23,10 +22,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     override init() {
         super.init()
         player.delegate = self
-        // Keep sound going when the screen locks or the app backgrounds, so a
-        // video can be listened to like music. moviePlayback mode is the one
-        // meant for a video player and cuts the start/seek clicks a bare
-        // .playback session let through.
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback)
         try? session.setActive(true)
@@ -34,7 +29,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func attach(to view: UIView) { player.drawable = view }
 
-    /// Load and play a file, restoring where it was left off.
     func open(_ url: URL) {
         savePosition()
         currentURL = url
@@ -46,30 +40,23 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 
     func toggle() { player.isPlaying ? player.pause() : player.play() }
-    func seek(to p: Float) { player.position = p }
+    func seek(to p: Float) { player.position = max(0, min(1, p)) }
+    func jump(_ seconds: Int32) { seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds) }
+    func rewindStep() { player.jumpBackward(1) }
 
-    /// Step back in time for the rewind hold. Jumping by whole seconds off the
-    /// clock, rather than nudging the 0–1 position, avoids the little
-    /// forward-then-back oscillation that made a short stretch repeat.
-    func rewindStep() {
-        player.jumpBackward(1)
+    /// libVLC volume runs 0–200; we drive 0–1 from the drag.
+    var volume: Float {
+        get { Float(player.audio?.volume ?? 100) / 200 }
+        set { player.audio?.volume = Int32(max(0, min(1, newValue)) * 200) }
     }
 
     func cycleRate() {
-        let next = Self.rates[(Self.rates.firstIndex(of: rate).map { $0 + 1 } ?? 0) % Self.rates.count]
-        rate = next
-        player.rate = next
+        rate = Self.rates[(Self.rates.firstIndex(of: rate).map { $0 + 1 } ?? 0) % Self.rates.count]
+        player.rate = rate
     }
+    func holdRate(_ value: Float?) { player.rate = value ?? rate }
 
-    /// A temporary rate for a press-and-hold; pass nil to restore the chosen one.
-    func holdRate(_ value: Float?) {
-        player.rate = value ?? rate
-    }
-
-    func stop() {
-        savePosition()
-        player.stop()
-    }
+    func stop() { savePosition(); player.stop() }
 
     private func savePosition() {
         guard let url = currentURL, player.position > 0.01 else { return }
@@ -84,9 +71,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if !scrubbing { position = player.position }
         isPlaying = player.isPlaying
         elapsed = Self.clock(player.time.intValue)
-        if let length = player.media?.length.intValue, length > 0 {
-            duration = Self.clock(length)
-        }
+        if let length = player.media?.length.intValue, length > 0 { duration = Self.clock(length) }
     }
 
     func mediaPlayerStateChanged(_ notification: Notification) {
@@ -105,76 +90,77 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 private struct VLCSurface: UIViewRepresentable {
     let controller: VLCController
     func makeUIView(context: Context) -> UIView {
-        let view = UIView()
-        view.backgroundColor = .black
+        let view = UIView(); view.backgroundColor = .black
         controller.attach(to: view)
         return view
     }
     func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
-/// A player over a playlist (the current folder): play/pause, a scrubber with
-/// times, speed, previous/next, and press-and-hold on the picture — the right
-/// half runs at 2×, the left half rewinds — matching the desktop and phone
-/// players. Position is remembered per file.
-struct VLCPlayerScreen: View {
-    let playlist: [URL]
-    let start: Int
-    @ObservedObject var prefs: PlaybackPrefs
-    var onClose: () -> Void
+/// A brief on-screen gauge for a side drag (brightness or sound).
+private struct Gauge: View {
+    let icon: String
+    let value: Double
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.title2)
+            ProgressView(value: value).frame(width: 90).tint(.white)
+        }
+        .padding(16).background(.ultraThinMaterial).cornerRadius(12).foregroundColor(.white)
+    }
+}
 
-    @StateObject private var controller = VLCController()
-    @State private var index: Int = 0
+/// The player stage: windowed 16:9 above the list, or full screen. Carries the
+/// Android gestures — tap toggles the bar, double-tap seeks by the third of the
+/// picture, hold runs 2× on the right and rewinds on the left, a side drag sets
+/// brightness (left) and sound (right) in full screen, a swipe up expands and
+/// down collapses, left stops and right leaves to the web.
+struct PlayerStage: View {
+    @ObservedObject var controller: VLCController
+    let title: String
+    @Binding var fullscreen: Bool
+    var onStop: () -> Void
+    var onPullToWeb: () -> Void
+
     @State private var showControls = true
     @State private var rewindTimer: Timer?
+    @State private var gauge: (icon: String, value: Double)?
+    @State private var dragStartBrightness: CGFloat = 0
+    @State private var dragStartVolume: Float = 0
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            VLCSurface(controller: controller).ignoresSafeArea()
-            holdSurfaces
-            if showControls { overlay.transition(.opacity) }
+            Color.black
+            VLCSurface(controller: controller)
+            halves
+            if let g = gauge { Gauge(icon: g.icon, value: g.value) }
+            if showControls { controlsOverlay.transition(.opacity) }
         }
-        .onAppear {
-            index = min(max(0, start), max(0, playlist.count - 1))
-            controller.onEnded = { advanceOnEnd() }
-            if playlist.indices.contains(index) { controller.open(playlist[index]) }
-        }
-        .onDisappear { controller.stop() }
+        .clipped()
+        .simultaneousGesture(swipeGesture)
+        .simultaneousGesture(sideDragGesture)
     }
 
-    /// End-of-track: go on to the next, jump to a random one, or stop — matching
-    /// the playback setting under the library's gear.
-    private func advanceOnEnd() {
-        switch prefs.end {
-        case .next:
-            if index < playlist.count - 1 { step(1) }
-        case .shuffle:
-            guard playlist.count > 1 else { return }
-            var next = index
-            while next == index { next = Int.random(in: 0..<playlist.count) }
-            index = next
-            controller.open(playlist[next])
-        case .stop:
-            break
-        }
-    }
-
-    /// Two invisible halves: hold right for 2×, hold left to rewind. A single
-    /// tap toggles the controls.
-    private var holdSurfaces: some View {
+    // Two halves: tap toggles the bar, double-tap seeks, hold runs fast / rewinds.
+    private var halves: some View {
         HStack(spacing: 0) {
-            Color.clear.contentShape(Rectangle())
-                .onTapGesture { withAnimation { showControls.toggle() } }
-                .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
-                    if pressing { startRewind() } else { stopRewind() }
-                }, perform: {})
-            Color.clear.contentShape(Rectangle())
-                .onTapGesture { withAnimation { showControls.toggle() } }
-                .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
-                    controller.holdRate(pressing ? 2.0 : nil)
-                }, perform: {})
+            half(left: true)
+            half(left: false)
         }
+    }
+
+    private func half(left: Bool) -> some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { controller.jump(left ? -10 : 10) }
+            .onTapGesture { withAnimation { showControls.toggle() } }
+            .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
+                if left {
+                    pressing ? startRewind() : stopRewind()
+                } else {
+                    controller.holdRate(pressing ? 2.0 : nil)
+                }
+            }, perform: {})
     }
 
     private func startRewind() {
@@ -183,64 +169,100 @@ struct VLCPlayerScreen: View {
             controller.rewindStep()
         }
     }
-    private func stopRewind() {
-        rewindTimer?.invalidate()
-        rewindTimer = nil
-    }
+    private func stopRewind() { rewindTimer?.invalidate(); rewindTimer = nil }
 
-    private var overlay: some View {
-        VStack {
-            HStack {
-                Spacer()
-                Button { controller.stop(); onClose() } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title).foregroundColor(.white.opacity(0.9))
+    // A flick: up expands, down collapses, left stops, right leaves to the web.
+    private var swipeGesture: some Gesture {
+        DragGesture(minimumDistance: 40)
+            .onEnded { v in
+                let dx = v.translation.width, dy = v.translation.height
+                if abs(dy) > abs(dx) {
+                    if dy < -50 { fullscreen = true }
+                    else if dy > 50 { fullscreen = false }
+                } else {
+                    if dx > 60 { onPullToWeb() }
+                    else if dx < -60 { onStop() }
                 }
             }
-            .padding()
+    }
+
+    // Full screen only: a slow vertical drag on the left sets brightness, on the
+    // right sets sound, with a gauge while it moves.
+    private var sideDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { v in
+                guard fullscreen, abs(v.translation.height) > abs(v.translation.width) else { return }
+                let onLeft = v.startLocation.x < UIScreen.main.bounds.width / 2
+                if gauge == nil {
+                    dragStartBrightness = UIScreen.main.brightness
+                    dragStartVolume = controller.volume
+                }
+                let delta = Float(-v.translation.height / 200)
+                if onLeft {
+                    let b = max(0, min(1, dragStartBrightness + CGFloat(delta)))
+                    UIScreen.main.brightness = b
+                    gauge = ("sun.max", Double(b))
+                } else {
+                    let vol = max(0, min(1, dragStartVolume + delta))
+                    controller.volume = vol
+                    gauge = ("speaker.wave.2", Double(vol))
+                }
+            }
+            .onEnded { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
+            }
+    }
+
+    private var controlsOverlay: some View {
+        VStack {
+            HStack {
+                Text(title).font(.subheadline).foregroundColor(.white).lineLimit(1)
+                    .shadow(radius: 2)
+                Spacer()
+                Button { fullscreen ? (fullscreen = false) : onStop() } label: {
+                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark.circle.fill")
+                        .font(.title3).foregroundColor(.white.opacity(0.9))
+                }
+            }
+            .padding(10)
             Spacer()
             transport
         }
     }
 
     private var transport: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 20) {
-                Button { step(-1) } label: { Image(systemName: "backward.end.fill") }
-                    .disabled(index <= 0)
+        VStack(spacing: 8) {
+            HStack(spacing: 18) {
+                Button { controller.jump(-10) } label: { Image(systemName: "gobackward.10") }
                 Button { controller.toggle() } label: {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title)
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title2)
                 }
-                Button { step(1) } label: { Image(systemName: "forward.end.fill") }
-                    .disabled(index >= playlist.count - 1)
+                Button { controller.jump(10) } label: { Image(systemName: "goforward.10") }
                 Spacer()
                 Button { controller.cycleRate() } label: {
                     Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
                 }
+                Button { fullscreen.toggle() } label: {
+                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
+                                                  : "arrow.up.left.and.arrow.down.right")
+                }
             }
             .foregroundColor(.white)
 
-            HStack(spacing: 10) {
-                Text(controller.elapsed).font(.caption).foregroundColor(.white).monospacedDigit()
+            HStack(spacing: 8) {
+                Text(controller.elapsed).font(.caption2).foregroundColor(.white).monospacedDigit()
                 Slider(
-                    value: Binding(get: { Double(controller.position) },
-                                   set: { controller.position = Float($0) }),
+                    value: Binding(
+                        get: { Double(controller.position) },
+                        set: { controller.position = Float($0); controller.seek(to: Float($0)) }
+                    ),
                     in: 0...1,
-                    onEditingChanged: { editing in
-                        controller.scrubbing = editing
-                        if !editing { controller.seek(to: controller.position) }
-                    }
+                    onEditingChanged: { controller.scrubbing = $0 }
                 ).tint(.white)
-                Text(controller.duration).font(.caption).foregroundColor(.white).monospacedDigit()
+                Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
             }
         }
-        .padding()
+        .padding(10)
         .background(.ultraThinMaterial)
-    }
-
-    private func step(_ delta: Int) {
-        let next = index + delta
-        guard playlist.indices.contains(next) else { return }
-        index = next
-        controller.open(playlist[next])
     }
 }

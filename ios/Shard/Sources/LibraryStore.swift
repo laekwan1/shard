@@ -40,17 +40,18 @@ final class LibraryStore: ObservableObject {
 
     func reload() {
         let fm = FileManager.default
+        let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .creationDateKey]
         var found: [Item] = []
         var dirs: [String] = []
 
         // Top level: files and folder directories.
-        let top = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey],
+        let top = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: keys,
                                                options: [.skipsHiddenFiles])) ?? []
         for url in top {
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             if isDir {
                 dirs.append(url.lastPathComponent)
-                let inside = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: nil,
+                let inside = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: keys,
                                                           options: [.skipsHiddenFiles])) ?? []
                 for f in inside where Self.mediaExts.contains(f.pathExtension.lowercased()) {
                     found.append(Item(url: f, folder: url.lastPathComponent))
@@ -59,8 +60,14 @@ final class LibraryStore: ObservableObject {
                 found.append(Item(url: url, folder: nil))
             }
         }
-        items = found.sorted { $0.name < $1.name }
+        // Newest first: what was just downloaded should sit at the top.
+        items = found.sorted { Self.modified($0.url) > Self.modified($1.url) }
         folders = dirs.sorted()
+    }
+
+    private static func modified(_ url: URL) -> Date {
+        let v = try? url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
+        return v?.contentModificationDate ?? v?.creationDate ?? .distantPast
     }
 
     /// The items shown for the current folder and shelf (video/music).
@@ -95,6 +102,33 @@ final class LibraryStore: ObservableObject {
 
     func delete(_ item: Item) {
         try? FileManager.default.removeItem(at: item.url)
+        reload()
+    }
+
+    func renameFolder(_ from: String, to: String) {
+        let clean = to.trimmingCharacters(in: .whitespaces)
+        guard !clean.isEmpty, clean != from else { return }
+        let src = root.appendingPathComponent(from)
+        let dst = root.appendingPathComponent(clean)
+        try? FileManager.default.moveItem(at: src, to: dst)
+        if current == from { current = clean }
+        reload()
+    }
+
+    /// Delete a folder. `withContents` false moves its files up to the top level
+    /// first (folder gone, files kept); true removes the folder and everything
+    /// in it.
+    func deleteFolder(_ name: String, withContents: Bool) {
+        let dir = root.appendingPathComponent(name)
+        if !withContents {
+            let inside = (try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            for f in inside {
+                try? FileManager.default.moveItem(at: f, to: root.appendingPathComponent(f.lastPathComponent))
+            }
+        }
+        try? FileManager.default.removeItem(at: dir)
+        if current == name { current = nil }
         reload()
     }
 }

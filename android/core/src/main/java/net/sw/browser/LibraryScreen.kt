@@ -1283,7 +1283,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             android.view.MotionEvent.ACTION_CANCEL -> {
                 if (!pulling) return false
                 pulling = false
-                if (root.translationX > root.width / 3f) {
+                // Commit at about a fifth of the way — roughly the reach a
+                // shelf-switch swipe needs, so leaving to the web is no harder
+                // than switching video/music.
+                if (root.translationX > root.width * 0.2f) {
                     root.animate().translationX(root.width.toFloat()).setDuration(160)
                         .withEndAction { root.translationX = 0f; back() }.start()
                 } else {
@@ -2218,12 +2221,18 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
 
     private fun drawFolders() {
         folderRow.removeAllViews()
-        folderRow.addView(chip(activity.getString(R.string.library_all), showing == null, "") {
+        // The top-level chip is home — a house icon, not the word, so it reads as
+        // "the whole storage" at a glance.
+        val home = chip(activity.getString(R.string.library_all), showing == null, "") {
             showing = null
             drawFolders()
             adapter.notifyDataSetChanged()
             showEmpty()
-        })
+        }
+        home.text = ""
+        home.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_home, 0, 0, 0)
+        home.compoundDrawablePadding = 0
+        folderRow.addView(home)
         folders.forEach { name ->
             val chip = chip(name, showing == name, name) {
                 showing = if (showing == name) null else name
@@ -2407,16 +2416,23 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     }
 
     private fun confirmRemoveFolder(name: String) {
+        // Three choices: keep the files (fold them back to the top), or take the
+        // folder and everything in it. "전체삭제" cannot be undone, so it is not
+        // the default button.
         MaterialAlertDialogBuilder(activity)
+            .setTitle(name)
             .setMessage(activity.getString(R.string.library_folder_remove_ask, name))
             .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(R.string.library_folder_remove) { _, _ ->
+            .setNeutralButton(R.string.library_folder_remove) { _, _ ->
                 work.execute {
                     Library.removeFolder(activity, name, items, tab)
-                    ui.post {
-                        if (showing == name) showing = null
-                        reload()
-                    }
+                    ui.post { if (showing == name) showing = null; reload() }
+                }
+            }
+            .setPositiveButton(R.string.library_folder_delete_all) { _, _ ->
+                work.execute {
+                    items.filter { it.kind == tab && it.folder == name }.forEach { Library.delete(activity, it) }
+                    ui.post { if (showing == name) showing = null; reload() }
                 }
             }
             .show()

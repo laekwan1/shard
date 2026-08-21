@@ -73,7 +73,8 @@
     <string name="library_deleted">삭제했습니다</string>
     <string name="library_delete_failed">삭제하지 못했습니다</string>
     <string name="library_move_failed">옮기지 못했습니다</string>
-    <string name="library_folder_remove">폴더 삭제</string>
+    <string name="library_folder_remove">폴더삭제</string>
+    <string name="library_folder_delete_all">전체삭제</string>
     <string name="library_folder_remove_ask">폴더 \"%1$s\" 을(를) 삭제합니다. 안의 영상은 지워지지 않고 보관함 맨 위로 옮겨집니다.</string>
     <string name="library_cannot_play">이 영상을 재생하지 못했습니다</string>
     <string name="library_back">뒤로</string>

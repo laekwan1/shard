@@ -47,6 +47,10 @@ final class DownloadsStore: ObservableObject {
                     update(id) { $0.status = .failed(error.localizedDescription) }
                 }
             }
+            // A finished download clears itself after a moment, so the progress
+            // strip empties on its own rather than piling up completed rows.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            items.removeAll { $0.id == id && $0.status != .running }
         }
     }
 

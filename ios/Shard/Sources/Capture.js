@@ -92,6 +92,15 @@
   document.addEventListener("DOMContentLoaded", keepInline);
   setInterval(keepInline, 1000);
 
+  // Kill the iOS callout (open link / copy / share) on long-press, so a hold on
+  // a video is ours to act on, not the system's.
+  try {
+    var style = document.createElement("style");
+    style.textContent =
+      "video, a, img { -webkit-touch-callout: none !important; }";
+    (document.head || document.documentElement).appendChild(style);
+  } catch (e) {}
+
   // Long-press a video to download it, the way the phone app does. Both the
   // touch timer and the contextmenu can fire for one press, so a short debounce
   // keeps it to a single message.

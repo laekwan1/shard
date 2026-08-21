@@ -4,7 +4,7 @@ import WebKit
 /// The page. Owns the WKWebView so navigation state lives in one observable
 /// place the UI binds to. Media is not tracked continuously any more — the app
 /// asks the page for an offer (Ask.js) at the moment the user wants to download.
-final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
+final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
     @Published var address: String = ""
     @Published var pageTitle: String = ""
     @Published var canGoBack = false
@@ -27,7 +27,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
+        view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
+        // No system link preview / callout menu — long-press is ours, for
+        // downloading, not iOS's open-link/copy/share sheet.
+        view.allowsLinkPreview = false
         return view
     }()
 
@@ -79,6 +83,14 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
               let body = message.body as? [String: Any],
               body["type"] as? String == "longpress" else { return }
         onLongPressVideo?()
+    }
+
+    // MARK: WKUIDelegate — suppress the long-press link menu
+
+    func webView(_ webView: WKWebView,
+                 contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
+                 completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
+        completionHandler(nil)
     }
 
     // MARK: WKNavigationDelegate
