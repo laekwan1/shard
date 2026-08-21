@@ -13,14 +13,6 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// Called when a video is long-pressed, so the browser can offer to download.
     var onLongPressVideo: (() -> Void)?
 
-    // A desktop user agent: YouTube's desktop player exposes getPlayerResponse
-    // and sends the `videoplayback` POST the capture relies on, which is what
-    // the desktop app was built against. The mobile site differs enough to make
-    // capture unreliable.
-    private static let desktopUA =
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
-        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15"
-
     lazy var webView: WKWebView = {
         let controller = WKUserContentController()
         if let js = Self.script("Capture") {
@@ -36,7 +28,6 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.allowsBackForwardNavigationGestures = true
-        view.customUserAgent = Self.desktopUA
         return view
     }()
 

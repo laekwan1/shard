@@ -889,8 +889,11 @@ abstract class BrowserActivity : AppCompatActivity() {
      * back gesture (below), keeps them apart.
      */
     private fun inCentreBand(y: Float): Boolean {
-        val h = resources.displayMetrics.heightPixels
-        return y > h * 0.25f && y < h * 0.75f
+        // The whole height is the band now: the edge swipes are far enough
+        // inside the screen (past the system back gesture) that a page rarely
+        // fights them, and a full-height target is easier to hit than a middle
+        // slice.
+        return true
     }
 
     /**

@@ -22,9 +22,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         super.init()
         player.delegate = self
         // Keep sound going when the screen locks or the app backgrounds, so a
-        // video can be listened to like music.
-        try? AVAudioSession.sharedInstance().setCategory(.playback)
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // video can be listened to like music. moviePlayback mode is the one
+        // meant for a video player and cuts the start/seek clicks a bare
+        // .playback session let through.
+        let session = AVAudioSession.sharedInstance()
+        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setActive(true)
     }
 
     func attach(to view: UIView) { player.drawable = view }
@@ -43,9 +46,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func toggle() { player.isPlaying ? player.pause() : player.play() }
     func seek(to p: Float) { player.position = p }
 
-    /// Nudge by a fraction of the whole, for the rewind hold.
-    func nudge(_ delta: Float) {
-        player.position = max(0, min(1, player.position + delta))
+    /// Step back in time for the rewind hold. Jumping by whole seconds off the
+    /// clock, rather than nudging the 0–1 position, avoids the little
+    /// forward-then-back oscillation that made a short stretch repeat.
+    func rewindStep() {
+        player.jumpBackward(1)
     }
 
     func cycleRate() {
@@ -152,8 +157,8 @@ struct VLCPlayerScreen: View {
 
     private func startRewind() {
         rewindTimer?.invalidate()
-        rewindTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            controller.nudge(-0.01)
+        rewindTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { _ in
+            controller.rewindStep()
         }
     }
     private func stopRewind() {
