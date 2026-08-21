@@ -6,6 +6,15 @@
     <string>Shard</string>
     <key>CFBundleName</key>
     <string>Shard</string>
+    <!-- Without this the installed bundle names no binary, and Sideloadly/
+         AltStore reject the .ipa as "Invalid file". Xcode substitutes the
+         product's executable name. -->
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
     <key>CFBundleIdentifier</key>
     <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
     <key>CFBundleShortVersionString</key>
