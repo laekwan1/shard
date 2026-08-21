@@ -1,17 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A phone with a curved arrow around it: turn the screen a quarter. -->
+<!--
+    A circular arrow with 90 in it — the same shape as the reference's 360, a
+    quarter instead of a whole turn. The arc opens at the top-right where the
+    arrowhead sits; the digits are drawn as filled rings so they read at 24dp.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/on_surface">
-    <!-- The device, upright. -->
+    <!-- The ring, open at the top-right. -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M16.5,5.2 A8,8 0 1 0 20,12" />
+    <!-- The arrowhead at the arc's end. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M9,3h6a2,2 0 0 1 2,2v14a2,2 0 0 1 -2,2H9a2,2 0 0 1 -2,-2V5a2,2 0 0 1 2,-2z M9,5v14h6V5z" />
-    <!-- The quarter-turn arrow riding the corner. -->
+        android:pathData="M15.2,2.4 L20.4,4.2 L17.6,8.9 Z" />
+    <!-- 9 -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M18.4,4.2l2.4,0.6l-0.6,2.4l-0.9,-0.9a5,5 0 0 1 -0.6,4.1l-1.4,-0.9a3.4,3.4 0 0 0 0.3,-2.9z" />
+        android:fillType="evenOdd"
+        android:pathData="M8.6,9.2m-1.7,0a1.7,1.7 0 1 0 3.4,0a1.7,1.7 0 1 0 -3.4,0zM8.6,9.2m-0.7,0a0.7,0.7 0 1 0 1.4,0a0.7,0.7 0 1 0 -1.4,0z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9.7,9.6 L10.6,9.6 L9.2,15 L8.3,15 Z" />
+    <!-- 0 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M14,12.2m-1.9,0a1.9,2.6 0 1 0 3.8,0a1.9,2.6 0 1 0 -3.8,0zM14,12.2m-0.8,0a0.8,1.4 0 1 0 1.6,0a0.8,1.4 0 1 0 -1.6,0z" />
 </vector>

@@ -109,28 +109,73 @@ struct CopyData {
     data: *const std::ffi::c_void,
 }
 
-/// A media file opened from outside the library, kept for `/external` to serve
-/// and for the run loop to notice and hand to the page to play.
-static EXTERNAL: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+/// A media file opened from outside the library, and the others in its folder —
+/// so the panel can list them and the next one is one press away. Kept for
+/// `/external` to serve by index and for the run loop to hand to the page.
+struct External {
+    files: Vec<std::path::PathBuf>,
+    at: usize,
+}
+
+static EXTERNAL: std::sync::Mutex<Option<External>> = std::sync::Mutex::new(None);
 static EXTERNAL_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Remember a file to play, from a double-click on it. The run loop picks it up.
+/// The extensions the folder scan treats as playable, matching the file types
+/// the program registers itself for.
+const MEDIA_EXTS: &[&str] = &[
+    "mp4", "mkv", "webm", "mov", "m4v", "avi", "mp3", "m4a", "aac", "flac", "wav", "opus", "ogg",
+];
+
+fn is_media(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| MEDIA_EXTS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Remember a file to play, and gather the media beside it. The run loop picks
+/// it up. Scanning one folder is a cheap directory read, no burden at start-up.
 pub fn set_opened_file(path: std::path::PathBuf) {
+    let mut files: Vec<std::path::PathBuf> = path
+        .parent()
+        .and_then(|dir| std::fs::read_dir(dir).ok())
+        .map(|entries| {
+            entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| is_media(p)).collect()
+        })
+        .unwrap_or_default();
+    if !files.iter().any(|p| p == &path) {
+        files.push(path.clone());
+    }
+    files.sort();
+    let at = files.iter().position(|p| p == &path).unwrap_or(0);
     if let Ok(mut held) = EXTERNAL.lock() {
-        *held = Some(path);
+        *held = Some(External { files, at });
     }
     EXTERNAL_DIRTY.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// The file name to play, once, if a newly opened file is waiting.
+/// The path served at `/external`, by index or the current one.
+fn external_path(index: Option<usize>) -> Option<std::path::PathBuf> {
+    let held = EXTERNAL.lock().ok()?;
+    let set = held.as_ref()?;
+    set.files.get(index.unwrap_or(set.at)).cloned()
+}
+
+/// The opened file's siblings and which one is current, once, when one is
+/// waiting — the JSON the page needs to draw the panel and start playing.
 fn take_opened_file() -> Option<String> {
     if !EXTERNAL_DIRTY.swap(false, std::sync::atomic::Ordering::Relaxed) {
         return None;
     }
-    EXTERNAL.lock().ok().and_then(|held| {
-        held.as_ref()
-            .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("video").to_string())
-    })
+    let held = EXTERNAL.lock().ok()?;
+    let set = held.as_ref()?;
+    let names: Vec<String> = set
+        .files
+        .iter()
+        .map(|p| p.file_stem().and_then(|s| s.to_str()).unwrap_or("video").to_string())
+        .collect();
+    let list = names.iter().map(|n| format!("\"{}\"", escape(n))).collect::<Vec<_>>().join(",");
+    Some(format!(r#""at":{},"list":[{}]"#, set.at, list))
 }
 
 /// Hand a file path to the copy already running, so it plays it and this copy
@@ -765,7 +810,12 @@ pub fn respond(uri: &str, range: Option<&str>) -> http::Response<std::borrow::Co
     // `EXTERNAL`, with the same range handling a library file gets so seeking
     // works. The query after it is only a cache-buster.
     if path == "/external" || path.starts_with("/external?") {
-        let Some(file) = EXTERNAL.lock().ok().and_then(|g| g.clone()) else {
+        // `?i=N` names one of the folder's files; without it, the current one.
+        let index = uri
+            .split_once("i=")
+            .and_then(|(_, rest)| rest.split(['&', '#']).next())
+            .and_then(|n| n.parse::<usize>().ok());
+        let Some(file) = external_path(index) else {
             return not_found();
         };
         let Ok(mut handle) = std::fs::File::open(&file) else { return not_found() };
@@ -912,28 +962,47 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
 struct Tray {
     icon: uikit::tray::TrayIcon,
     events: uikit::tray::TrayEvents,
-    toggle: uikit::tray::CheckMenuItem,
+    /// The engine switch, only present when the program runs elevated — the
+    /// engine needs the driver, and the driver needs a token.
+    toggle: Option<uikit::tray::CheckMenuItem>,
+    /// Offered only when *not* elevated: run a copy that is, so the engine
+    /// becomes reachable. There is no engine UI at all without the token.
+    elevate: Option<uikit::tray::MenuItem>,
     open: uikit::tray::MenuItem,
     quit: uikit::tray::MenuItem,
 }
 
 impl Tray {
-    fn build() -> Result<Self> {
+    fn build(elevated: bool) -> Result<Self> {
         use uikit::tray::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
         let events = uikit::tray::watch();
         let menu = Menu::new();
-        let toggle = CheckMenuItem::new("우회 켜기", true, false, None);
-        let open = MenuItem::new("창 열기", true, None);
+
+        // Elevated: the engine switch, named by its state. Unelevated: no engine
+        // at all, only the way to become elevated — the bypass is hidden until
+        // the program has the token to run it.
+        let mut toggle = None;
+        let mut elevate = None;
+        if elevated {
+            let item = CheckMenuItem::new("OFF", true, false, None);
+            menu.append(&item)?;
+            toggle = Some(item);
+        } else {
+            let item = MenuItem::new("관리자 권한으로 실행", true, None);
+            menu.append(&item)?;
+            elevate = Some(item);
+        }
+
+        let open = MenuItem::new("보관함 열기", true, None);
         let quit = MenuItem::new("종료", true, None);
-        menu.append(&toggle)?;
         menu.append(&open)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
-        let icon = uikit::tray::build("Shard — 우회 꺼짐", &uikit::icon::shard(false), menu)?;
-        Ok(Self { icon, events, toggle, open, quit })
+        let icon = uikit::tray::build("Shard", &uikit::icon::shard(false), menu)?;
+        Ok(Self { icon, events, toggle, elevate, open, quit })
     }
 
-    /// Show what the engine is doing, in the icon and the tooltip.
+    /// Show what the engine is doing, in the icon, the tooltip and the switch.
     fn follow(&self, core: &crate::core::EngineCore) {
         let running = core.running();
         let art = match (running, core.status_kind) {
@@ -944,8 +1013,11 @@ impl Tray {
         uikit::tray::set_icon(&self.icon, &art);
         let _ = self
             .icon
-            .set_tooltip(Some(if running { "Shard — 우회 동작 중" } else { "Shard — 우회 꺼짐" }));
-        self.toggle.set_checked(running);
+            .set_tooltip(Some(if running { "Shard — 우회 동작 중" } else { "Shard" }));
+        if let Some(toggle) = &self.toggle {
+            toggle.set_checked(running);
+            toggle.set_text(if running { "ON" } else { "OFF" });
+        }
     }
 }
 
@@ -974,7 +1046,8 @@ pub fn preview() -> Result<()> {
     // The switch in the notification area. It is what lets the window be put
     // away while the bypass keeps running — closing the window is tidying it
     // out of the way, not stopping the program.
-    let tray = Tray::build()?;
+    let elevated = uikit::elevation::is_elevated();
+    let tray = Tray::build(elevated)?;
     tray.follow(&core.borrow());
 
     // A probe in flight, if one has been started. Beside the downloads for the
@@ -991,6 +1064,9 @@ pub fn preview() -> Result<()> {
             // A page that has just loaded knows nothing, whatever was last sent
             // to the one before it.
             shell.forget_what_was_said();
+            // Whether the engine is reachable at all — the home screen and its
+            // switch only exist when the program has the token to run the driver.
+            shell.tell(&format!(r#"{{"t":"caps","elevated":{elevated}}}"#));
             shell.say_engine(&engine.borrow());
             shell.say_downloads(&jobs.borrow());
             shell.say_tabs();
@@ -1186,10 +1262,9 @@ pub fn preview() -> Result<()> {
         // A file was double-clicked, on start-up or handed over by a second
         // copy while this one ran. Bring the window up and tell the page to play
         // it — the file itself is served from `/external`.
-        if let Some(name) = take_opened_file() {
+        if let Some(payload) = take_opened_file() {
             shell.show();
-            let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-            shell.tell(&format!(r#"{{"t":"external","name":"{escaped}"}}"#));
+            shell.tell(&format!(r#"{{"t":"external",{payload}}}"#));
         }
 
         // The tray, first: it is how the window comes back once it has been put
@@ -1204,10 +1279,20 @@ pub fn preview() -> Result<()> {
         }
         while let Ok(event) = tray.events.menu.try_recv() {
             let id = event.id();
-            if id == tray.toggle.id() {
+            if tray.toggle.as_ref().is_some_and(|t| id == t.id()) {
                 core.borrow_mut().toggle();
                 shell.say_engine(&core.borrow());
                 tray.follow(&core.borrow());
+            } else if tray.elevate.as_ref().is_some_and(|e| id == e.id()) {
+                // Become elevated: let the claim go, start an elevated copy, and
+                // step aside. If the prompt is declined nothing changes and the
+                // claim is taken back.
+                uikit::single::release();
+                if uikit::elevation::relaunch_elevated("") {
+                    shell.quit();
+                } else {
+                    uikit::single::reclaim();
+                }
             } else if id == tray.open.id() {
                 shell.show();
             } else if id == tray.quit.id() {

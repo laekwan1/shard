@@ -447,7 +447,9 @@ button svg { display: block; }
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px;
+  /* Less air under the folders than over them, so the row sits down against the
+     list it narrows rather than floating between the switch and it. */
+  padding: 6px 8px 2px;
   flex-wrap: wrap;
   flex: none;
   /* No dark band of its own: the folder row sits on the library's own ground,

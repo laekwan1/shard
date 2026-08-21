@@ -322,8 +322,15 @@ pub const RECORDER: &str = r#"
       var bare = url.split('?')[0].toLowerCase();
       // Skip tiny/streaming-ad fragments where we can: keep the last full file
       // and the last playlist. The page usually fetches the real one last.
-      if (bare.indexOf('.m3u8') >= 0) window.__shardMedia.m3u8 = url;
-      else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) window.__shardMedia.mp4 = url;
+      // The first .m3u8 is the master — the one that lists the qualities. The
+      // player fetches it before the single-quality media playlist it then
+      // picks, so keeping the first, not the last, is what lets a quality be
+      // chosen rather than taking whatever the page settled on.
+      if (bare.indexOf('.m3u8') >= 0) {
+        if (!window.__shardMedia.m3u8) window.__shardMedia.m3u8 = url;
+      } else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) {
+        window.__shardMedia.mp4 = url;
+      }
     } catch (e) {}
   }
 

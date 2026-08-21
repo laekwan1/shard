@@ -185,10 +185,16 @@ urlBox.addEventListener("keydown", (e) => {
   urlBox.blur();
 });
 
-// The wordmark opens the library, not the home screen: the library is where
-// the program lands and what it is mostly used for. The engine switch that home
-// carried is still on the tray icon.
-document.getElementById("chip").addEventListener("click", () => show("library"));
+// Whether the program has the token to run the engine. The home screen and its
+// switch only make sense when it does; without it the program is a downloader
+// and library, and the wordmark goes there instead.
+let elevated = false;
+
+// The wordmark opens the home screen when the engine is reachable, the library
+// when it is not — there is no engine to show an unelevated run.
+document.getElementById("chip").addEventListener("click", () =>
+  show(elevated ? "home" : "library"),
+);
 for (const button of document.querySelectorAll("#go button")) {
   button.addEventListener("click", () => {
     const to = button.dataset.go;
@@ -696,6 +702,10 @@ if (localStorage.getItem("at:byhand") !== "1") {
 }
 
 function play(item) {
+  // Back to a shelf item: leave the folder-opened mode so the panel is the
+  // library again.
+  externalItems = null;
+  document.getElementById("queueShelves").style.display = "";
   playing = item;
   player.hidden = false;
   // The queue rides with the film — hidden until there is one to play, and its
@@ -724,25 +734,39 @@ function play(item) {
   paintQueue();
 }
 
-// A file opened from outside the library — Shard being the program a video or a
-// song opens with. It is not on any shelf, so there is nothing to step through:
-// the player just shows, pointed at `/external`, with the queue put away.
-function playExternal(name) {
+// Files opened from outside the library — Shard being the program a video or a
+// song opens with. Not shelf items, so they live in their own little list: the
+// panel shows the folder they came from, and playing one points the player at
+// `/external?i=`.
+let externalItems = null;
+let externalAt = 0;
+
+function openExternal(list, at) {
+  externalItems = list;
+  externalAt = at;
   show("library");
+  playExternalAt(at);
+  // The panel lists the folder, so open it onto that.
+  paintQueue();
+}
+
+function playExternalAt(index) {
+  if (!externalItems || index < 0 || index >= externalItems.length) return;
+  externalAt = index;
   playing = null;
   player.hidden = false;
-  const queue = document.getElementById("queue");
-  if (queue) { queue.hidden = true; queue.classList.remove("open"); }
+  document.getElementById("queue").hidden = false;
   art.hidden = true;
   video.style.visibility = "visible";
+  const name = externalItems[index];
   nowLine.textContent = name;
   titleLine.textContent = name;
-  // A cache-buster, so opening a second file replaces the first rather than
-  // being served the one the view already has.
-  video.src = "/external?t=" + Date.now();
+  // A cache-buster after the index, so moving between files always reloads.
+  video.src = "/external?i=" + index + "&t=" + Date.now();
   video.play().catch(() => {});
   syncPlayer();
   paintTime();
+  paintQueue();
 }
 
 function shutPlayer() {
@@ -751,6 +775,8 @@ function shutPlayer() {
   video.load();
   player.hidden = true;
   playing = null;
+  externalItems = null;
+  document.getElementById("queueShelves").style.display = "";
   document.getElementById("queue").hidden = true;
   document.getElementById("queue").classList.remove("open");
   syncPlayer();
@@ -1016,6 +1042,21 @@ function markQueueShelf() {
 function paintQueue() {
   markQueueShelf();
   queueList.textContent = "";
+  // Opened from a folder rather than a shelf: the panel lists that folder, and a
+  // press plays the file beside the one on screen.
+  if (externalItems) {
+    document.getElementById("queueShelves").style.display = "none";
+    externalItems.forEach((name, index) => {
+      const row = document.createElement("button");
+      row.className = "qrow" + (index === externalAt ? " playing" : "");
+      row.textContent = name;
+      row.title = name;
+      row.addEventListener("click", () => playExternalAt(index));
+      queueList.appendChild(row);
+    });
+    return;
+  }
+  document.getElementById("queueShelves").style.display = "";
   for (const item of shown()) {
     const row = document.createElement("button");
     row.className =
@@ -1368,7 +1409,7 @@ function settingsBar() {
   done.addEventListener("click", () => {
     done.classList.add("done");
     done.textContent = "저장됨";
-    setTimeout(() => show("home"), 260);
+    setTimeout(() => show(elevated ? "home" : "library"), 260);
   });
 
   bar.append(logs, resetButton(), done);
@@ -1506,9 +1547,17 @@ window.__shard = {
         break;
       case "external":
         // A file opened from outside the library — a double-click on a video or
-        // a song. It is not a shelf item, so it plays on its own: the player
-        // shows over whatever is up, pointed at `/external`.
-        playExternal(message.name || "");
+        // a song, with the others in its folder. It plays on its own, and the
+        // panel lists the folder so the next one is one press away.
+        openExternal(message.list || [], message.at || 0);
+        break;
+      case "caps":
+        // Whether the engine is reachable. When it is not, the home screen — the
+        // one place the switch lives — is hidden, and the wordmark goes to the
+        // library instead of it.
+        elevated = !!message.elevated;
+        document.getElementById("chip").title = elevated ? "홈으로" : "보관함";
+        if (!elevated && here === "home") show("library");
         break;
     }
   },
