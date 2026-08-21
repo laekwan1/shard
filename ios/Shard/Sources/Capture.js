@@ -74,4 +74,21 @@
       return openOriginal.apply(this, arguments);
     };
   } catch (e) {}
+
+  // Keep video inline. To capture YouTube's request the video has to play, but
+  // iOS otherwise throws it into its own fullscreen player, which the user then
+  // has to dismiss before downloading. Marking every <video> playsinline keeps
+  // it on the page (paired with allowsInlineMediaPlayback on the native side).
+  function keepInline() {
+    try {
+      var vids = document.getElementsByTagName("video");
+      for (var i = 0; i < vids.length; i++) {
+        vids[i].setAttribute("playsinline", "");
+        vids[i].setAttribute("webkit-playsinline", "");
+        vids[i].playsInline = true;
+      }
+    } catch (e) {}
+  }
+  document.addEventListener("DOMContentLoaded", keepInline);
+  setInterval(keepInline, 1000);
 })();

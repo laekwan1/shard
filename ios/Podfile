@@ -1,0 +1,12 @@
+# libVLC for iOS, so the library plays mkv/webm (VP9/Opus) — the containers
+# YouTube and some sites give that AVPlayer will not open. Pulled in with
+# CocoaPods because that is how VideoLAN ships MobileVLCKit; XcodeGen writes the
+# .xcodeproj first (from project.yml) and `pod install` wraps it in the
+# workspace the CI then builds.
+platform :ios, '15.0'
+project 'Shard.xcodeproj'
+
+target 'Shard' do
+  use_frameworks!
+  pod 'MobileVLCKit', '3.6.0'
+end

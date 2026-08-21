@@ -44,10 +44,16 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
+      # MobileVLCKit (the mkv/webm player) comes in via CocoaPods, which wraps
+      # the generated project in a workspace the build steps then use.
+      - name: Install pods
+        working-directory: ios
+        run: pod install
+
       - name: Build the app for the simulator (compile check)
         run: |
           xcodebuild \
-            -project ios/Shard.xcodeproj \
+            -workspace ios/Shard.xcworkspace \
             -scheme Shard \
             -sdk iphonesimulator \
             -configuration Release \
@@ -62,7 +68,7 @@ jobs:
       - name: Build the app for a device (unsigned)
         run: |
           xcodebuild \
-            -project ios/Shard.xcodeproj \
+            -workspace ios/Shard.xcworkspace \
             -scheme Shard \
             -sdk iphoneos \
             -configuration Release \

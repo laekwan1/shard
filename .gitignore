@@ -59,3 +59,6 @@ android/keystore.properties
 # iOS generated artifacts
 ios/build/
 ios/Shard.xcodeproj/
+ios/Pods/
+ios/Shard.xcworkspace/
+ios/Podfile.lock

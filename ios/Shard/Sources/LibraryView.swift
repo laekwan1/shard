@@ -1,5 +1,4 @@
 import SwiftUI
-import AVKit
 
 /// A saved file on disk.
 struct SavedItem: Identifiable {
@@ -51,8 +50,17 @@ struct LibraryView: View {
             get: { playing.map { PlayerItem(url: $0) } },
             set: { playing = $0?.url }
         )) { item in
-            VideoPlayer(player: AVPlayer(url: item.url))
-                .ignoresSafeArea()
+            ZStack(alignment: .topTrailing) {
+                Color.black.ignoresSafeArea()
+                VLCPlayerView(url: item.url)
+                    .ignoresSafeArea()
+                Button { playing = nil } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title)
+                        .foregroundColor(.white.opacity(0.85))
+                        .padding()
+                }
+            }
         }
     }
 
