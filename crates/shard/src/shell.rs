@@ -941,6 +941,9 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
             let _ = tx.send(request.into_body());
         })
         .with_background_color((0x0e, 0x0e, 0x10, 0xff))
+        // DevTools on so the shell UI can be inspected with F12 / right-click
+        // Inspect — release builds otherwise ship with it disabled.
+        .with_devtools(true)
         .build_as_child(&host)
         .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))?;
 

@@ -518,6 +518,8 @@ pub(crate) fn new_view(
             let _ = navigated.send(Event::Navigated(url));
             true
         })
+        // DevTools on so the site view can be inspected too (F12 / Inspect).
+        .with_devtools(true)
         .build_as_child(&host)
         .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))
 }

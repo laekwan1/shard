@@ -481,15 +481,15 @@ button svg { display: block; }
 .folder {
   padding: 5px 15px;
   font-size: 11.5px;
-  /* The name reads in the list's own ink, not a dimmer grey, so a folder tab
-     matches the files it opens onto. */
-  color: var(--on-surface);
+  /* The name in the list's own colour, so a folder tab is drawn in the same
+     ink the list is filled with. */
+  color: var(--surface);
   background: transparent;
   border: 1px solid var(--surface);
   border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
-.folder:hover { color: #fff; }
+.folder:hover { color: var(--surface); }
 .folder.on { color: #fff; background: var(--surface); border-color: var(--surface); font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
