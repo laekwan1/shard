@@ -695,22 +695,49 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** The speeds the rate button steps through, the same set the desktop uses. */
     private val rates = listOf(1f, 1.25f, 1.5f, 2f, 0.5f, 0.75f)
 
-    /** A menu of speeds off the rate button; slow at the top, fast at the foot. */
+    /** The speeds off the rate button — laid out left to right, above it, the
+     *  same shape as the sound slider. */
     private fun showRateMenu() {
         val exo = player ?: return
-        val ordered = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
-        val menu = android.widget.PopupMenu(activity, vbRate)
-        ordered.forEachIndexed { index, rate -> menu.menu.add(0, index, index, rateLabel(rate)) }
-        menu.setOnMenuItemClickListener { item ->
-            val rate = ordered[item.itemId]
-            exo.setPlaybackSpeed(rate)
-            vbRate.text = rateLabel(rate)
-            keepControlsUp()
-            true
+        val view = activity.layoutInflater.inflate(R.layout.popup_rates, null)
+        val choices = listOf(
+            R.id.rate05 to 0.5f,
+            R.id.rate075 to 0.75f,
+            R.id.rate10 to 1f,
+            R.id.rate125 to 1.25f,
+            R.id.rate15 to 1.5f,
+            R.id.rate20 to 2f,
+        )
+        val current = exo.playbackParameters.speed
+        val popup = android.widget.PopupWindow(
+            view,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+            true,
+        )
+        popup.elevation = 12f
+        for ((id, rate) in choices) {
+            val cell = view.findViewById<TextView>(id)
+            // The one in force is lit.
+            cell.setTextColor(
+                activity.getColor(
+                    if (kotlin.math.abs(rate - current) < 0.01f) R.color.accent else R.color.on_surface
+                )
+            )
+            cell.setOnClickListener {
+                exo.setPlaybackSpeed(rate)
+                vbRate.text = rateLabel(rate)
+                keepControlsUp()
+                popup.dismiss()
+            }
         }
-        menu.setOnDismissListener { keepControlsUp() }
+        popup.setOnDismissListener { keepControlsUp() }
         ui.removeCallbacks(hideControls)
-        menu.show()
+        view.measure(
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        )
+        popup.showAsDropDown(vbRate, 0, -(view.measuredHeight + vbRate.height), android.view.Gravity.END)
     }
 
     /**

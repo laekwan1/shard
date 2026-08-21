@@ -109,15 +109,33 @@
                     is watched sideways, and a phone left to its own sensor
                     fights the hand holding it; this pins the turn to a press.
                 -->
-                <ImageButton
+                <FrameLayout
                     android:id="@+id/rotate"
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_rotate"
-                    android:scaleType="fitCenter"
-                    android:padding="9dp"
-                    android:contentDescription="@string/rotate_screen" />
+                    android:contentDescription="@string/rotate_screen">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:src="@drawable/ic_rotate"
+                        android:scaleType="fitCenter"
+                        android:padding="7dp"
+                        android:contentDescription="@null" />
+
+                    <!-- The number as real text, in the app's own face, small and
+                         centred inside the ring. -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:layout_marginTop="1dp"
+                        android:text="90°"
+                        android:textColor="@color/on_surface"
+                        android:textSize="9sp"
+                        android:includeFontPadding="false" />
+                </FrameLayout>
 
                 <ImageButton
                     android:id="@+id/openLibrary"

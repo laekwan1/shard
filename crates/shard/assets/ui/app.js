@@ -207,6 +207,35 @@ const SHARD_MARK =
 // settings button. Unelevated: the switch's place holds the Shard mark with a
 // light that breathes on and off, and pressing it relaunches elevated; settings
 // is hidden, since nothing it sets can take effect without the engine.
+// A file whose row we are waiting for, to play the moment the shelf it is on
+// has loaded — the home logo asked for the last thing watched.
+let pendingLast = null;
+
+// Bring back the last video or song. The shelf it is on may not be loaded yet,
+// so the key is held and the row played once the list arrives (see paintFiles).
+function playLast() {
+  const raw = localStorage.getItem("last");
+  if (!raw) return;
+  let last;
+  try {
+    last = JSON.parse(raw);
+  } catch (e) {
+    return;
+  }
+  if (!last || !last.key) return;
+  pendingLast = last.key;
+  show("library");
+  const already = shelf.items.find((i) => i.key === last.key);
+  if (shelf.kind === last.kind && already) {
+    pendingLast = null;
+    play(already);
+  } else {
+    const button = document.querySelector('.shelf[data-shelf="' + last.kind + '"]');
+    if (button && shelf.kind !== last.kind) button.click();
+    else send("library.list", { kind: last.kind });
+  }
+}
+
 function applyElevation() {
   const power = document.getElementById("power");
   document.querySelector('[data-go="settings"]').hidden = !elevated;
@@ -216,10 +245,7 @@ function applyElevation() {
   }
   power.classList.add("locked");
   power.innerHTML = SHARD_MARK;
-  power.title = "우회를 켜려면 눌러 관리자 권한으로 실행하세요";
-  document.getElementById("headline").textContent = "다운로드 · 보관함";
-  document.getElementById("detail").textContent =
-    "우회를 켜려면 로고를 눌러 관리자 권한으로 실행하세요";
+  power.title = "마지막 재생";
 }
 for (const button of document.querySelectorAll("#go button")) {
   button.addEventListener("click", () => {
@@ -236,6 +262,13 @@ const headline = document.getElementById("headline");
 const detail = document.getElementById("detail");
 
 power.addEventListener("click", () => {
+  // Without the token the mark stands in for the switch, and pressing it plays
+  // the last thing watched rather than toggling an engine that is not there.
+  // Elevation is the tray's job now, not this button's.
+  if (power.classList.contains("locked")) {
+    playLast();
+    return;
+  }
   power.classList.add("busy");
   send("engine.toggle");
 });
@@ -250,7 +283,9 @@ function paintEngine(state) {
   if (typeof markProbe === "function") markProbe();
   power.setAttribute("aria-pressed", String(on));
   power.classList.remove("busy");
-  headline.textContent = state.headline;
+  // Without the token there is no engine to be off, so the "꺼짐" heading is
+  // dropped; the line under it — the invitation to press — stays.
+  headline.textContent = elevated ? state.headline : "";
   // The same four readings the drawn window had: trouble in red, running with a
   // caveat in amber, running in green, off in grey.
   headline.className = state.kind || "idle";
@@ -323,6 +358,13 @@ function paintLibrary(message) {
   paintFolders();
   paintFiles();
   paintQueue();
+  // The home logo asked for the last thing watched, and the shelf it is on has
+  // just arrived: play it now that its row exists.
+  if (pendingLast) {
+    const found = shelf.items.find((i) => i.key === pendingLast);
+    pendingLast = null;
+    if (found) play(found);
+  }
 }
 
 function paintFolders() {
@@ -732,6 +774,8 @@ function play(item) {
   // library again.
   externalItems = null;
   document.getElementById("queueShelves").style.display = "";
+  // Remembered so the home logo can bring the last thing watched straight back.
+  localStorage.setItem("last", JSON.stringify({ kind: shelf.kind, key: item.key }));
   playing = item;
   player.hidden = false;
   // The queue rides with the film — hidden until there is one to play, and its
@@ -883,6 +927,13 @@ playButton.addEventListener("click", () => (video.paused ? video.play() : video.
 video.addEventListener("dblclick", (e) => {
   e.preventDefault();
   toggleFullscreen();
+});
+// Double-clicking the name on the bottom strip brings the picture up — the
+// strip has no stage of its own, so this is the way from a name back to a
+// screen. In the full player it goes the rest of the way, to full screen.
+titleLine.addEventListener("dblclick", () => {
+  if (player.classList.contains("mini")) show("library");
+  else toggleFullscreen();
 });
 video.addEventListener("play", () => (playButton.innerHTML = PAUSE));
 video.addEventListener("pause", () => (playButton.innerHTML = PLAY));

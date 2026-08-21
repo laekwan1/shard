@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The speeds, laid out left to right off the rate button — the same shape as
+    the sound slider that pops above the icon. Slow at the left, fast at the
+    right; the one in force is lit.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/rateRow"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:background="@drawable/menu_backdrop"
+    android:paddingHorizontal="6dp"
+    android:paddingVertical="4dp">
+
+    <TextView
+        android:id="@+id/rate05"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="44dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="0.5×" />
+
+    <TextView
+        android:id="@+id/rate075"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="48dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="0.75×" />
+
+    <TextView
+        android:id="@+id/rate10"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="40dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="1×" />
+
+    <TextView
+        android:id="@+id/rate125"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="48dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="1.25×" />
+
+    <TextView
+        android:id="@+id/rate15"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="44dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="1.5×" />
+
+    <TextView
+        android:id="@+id/rate20"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:minWidth="40dp"
+        android:gravity="center"
+        android:background="@drawable/press_square"
+        android:paddingHorizontal="6dp"
+        android:textColor="@color/on_surface"
+        android:textSize="14sp"
+        android:text="2×" />
+</LinearLayout>

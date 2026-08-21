@@ -1267,6 +1267,10 @@ pub fn preview() -> Result<()> {
     // What the running downloads have to say, taken in on the same beat as the
     // window's own messages: they finish on their own threads, and the page
     // learns about it here.
+    // The engine state the tray last drew, so a change made from the home
+    // screen — which the tray does not hear about directly — is followed here
+    // and the two never drift apart.
+    let tray_shows = std::cell::Cell::new(core.borrow().running());
     shell.run(|shell| {
         // A file was double-clicked, on start-up or handed over by a second
         // copy while this one ran. Bring the window up and tell the page to play
@@ -1274,6 +1278,15 @@ pub fn preview() -> Result<()> {
         if let Some(payload) = take_opened_file() {
             shell.show();
             shell.tell(&format!(r#"{{"t":"external",{payload}}}"#));
+        }
+
+        // Keep the tray in step with the engine however it was switched — the
+        // page toggles it without the tray knowing, so the tray reads the truth
+        // here rather than trusting its own last guess.
+        let running = core.borrow().running();
+        if running != tray_shows.get() {
+            tray_shows.set(running);
+            tray.follow(&core.borrow());
         }
 
         // The tray, first: it is how the window comes back once it has been put
