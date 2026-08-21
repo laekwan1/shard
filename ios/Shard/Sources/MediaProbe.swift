@@ -26,10 +26,7 @@ final class MediaProbe: NSObject, ObservableObject, VLCMediaThumbnailerDelegate 
 
     private func start(_ url: URL) {
         let media = VLCMedia(url: url)
-        guard let thumb = VLCMediaThumbnailer(media: media, andDelegate: self) else {
-            cache[url] = Result(image: nil, duration: nil)
-            return
-        }
+        let thumb = VLCMediaThumbnailer(media: media, andDelegate: self)
         thumb.snapshotPosition = 0.1
         inFlight[ObjectIdentifier(thumb)] = (url, thumb)
         thumb.fetchThumbnail()
@@ -40,7 +37,8 @@ final class MediaProbe: NSObject, ObservableObject, VLCMediaThumbnailerDelegate 
         guard let (url, _) = inFlight[key] else { return }
         inFlight[key] = nil
         var duration: String?
-        if let length = thumb.media?.length.intValue, length > 0 {
+        let length = thumb.media.length.intValue
+        if length > 0 {
             duration = Self.clock(length)
         }
         cache[url] = Result(image: image, duration: duration)
