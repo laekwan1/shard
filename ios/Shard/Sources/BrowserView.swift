@@ -23,7 +23,7 @@ struct BrowserView: View {
             }
         }
         .onAppear { if model.address.isEmpty { model.load("https://www.youtube.com") } }
-        .confirmationDialog("받을 화질을 고르세요", isPresented: $showCandidates, titleVisibility: .visible) {
+        .confirmationDialog(candidatesTitle, isPresented: $showCandidates, titleVisibility: .visible) {
             ForEach(model.candidates) { candidate in
                 Button(candidateLabel(candidate)) { start(candidate) }
             }
@@ -52,14 +52,25 @@ struct BrowserView: View {
                 Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
             }
 
-            // The save button: enabled only when the page revealed media.
+            // The save button. Always tappable so the sheet can report what was
+            // (and was not) found; it fills in and shows a count once a page
+            // reveals media.
             Button {
-                if model.candidates.count == 1 { start(model.candidates[0]) }
-                else { showCandidates = true }
+                showCandidates = true
             } label: {
-                Image(systemName: "arrow.down.circle\(model.candidates.isEmpty ? "" : ".fill")")
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "arrow.down.circle\(model.candidates.isEmpty ? "" : ".fill")")
+                    if !model.candidates.isEmpty {
+                        Text("\(model.candidates.count)")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(3)
+                            .background(Circle().fill(Color.accentColor))
+                            .offset(x: 8, y: -8)
+                    }
+                }
             }
-            .disabled(model.candidates.isEmpty || task != nil)
+            .disabled(task != nil)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -86,6 +97,12 @@ struct BrowserView: View {
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { banner = nil }
             }
+    }
+
+    private var candidatesTitle: String {
+        model.candidates.isEmpty
+            ? "이 페이지에서 감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
+            : "받을 미디어를 고르세요"
     }
 
     private func candidateLabel(_ c: MediaCandidate) -> String {
