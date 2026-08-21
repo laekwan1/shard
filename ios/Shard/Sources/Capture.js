@@ -1,87 +1,77 @@
-// Media capture for the iOS shell.
+// Document-start capture for the iOS shell — the same idea as the desktop's
+// RECORDER (crates/shard/src/download/youtube.rs).
 //
-// WKWebView cannot intercept a page's sub-requests the way Android's
-// shouldInterceptRequest does, so we watch from inside the page instead: wrap
-// fetch and XHR, and sweep the DOM. Anything that looks like a playlist or a
-// video file is reported to the native side, which offers it for download.
+// WKWebView cannot watch the network, so we watch from inside the page: wrap
+// fetch and XHR before the page's own scripts take their references. Two things
+// are kept for the download to use later (read back on demand by Ask.js):
+//   window.__shardSabr  — YouTube's captured `videoplayback` POST (url + body)
+//   window.__shardMedia — the last progressive file and every .m3u8 seen
 //
-// This is the weaker half of the port (a pure-native <video src> with only
-// range requests can slip past), but it catches HLS and most streaming sites.
+// Nothing is posted from here; the app runs Ask.js when the user asks to
+// download, which reads these globals plus the player response.
 (function () {
   "use strict";
-  if (window.__shardCapture) return;
-  window.__shardCapture = true;
+  if (window.__shardSabrReady) return;
+  window.__shardSabrReady = true;
+  window.__shardSabr = null;
+  window.__shardMedia = window.__shardMedia || { mp4: "", m3u8: "", list: [] };
 
-  var seen = Object.create(null);
-
-  function post(url, kind) {
-    if (!url || typeof url !== "string") return;
-    // Absolute-ise against the page so a relative playlist URL is usable.
-    try { url = new URL(url, location.href).href; } catch (e) { return; }
-    if (!/^https?:/i.test(url)) return;
-    var key = kind + "\n" + url;
-    if (seen[key]) return;
-    seen[key] = true;
+  function noteMedia(url) {
     try {
-      window.webkit.messageHandlers.shard.postMessage({
-        type: "media",
-        url: url,
-        kind: kind,
-        title: document.title || location.hostname
-      });
+      if (typeof url !== "string") return;
+      var bare = url.split("?")[0].toLowerCase();
+      if (bare.indexOf(".m3u8") >= 0) {
+        if (!window.__shardMedia.m3u8) window.__shardMedia.m3u8 = url;
+        if (window.__shardMedia.list.indexOf(url) < 0) window.__shardMedia.list.push(url);
+      } else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) {
+        window.__shardMedia.mp4 = url;
+      }
     } catch (e) {}
   }
 
-  // Classify a URL by extension. HLS playlists win over plain files because a
-  // site usually offers both and the playlist carries every quality.
-  function classify(url) {
-    if (!url) return null;
-    var u = url.split("?")[0].split("#")[0].toLowerCase();
-    if (u.indexOf(".m3u8") !== -1) return "hls";
-    if (/\.(mp4|m4v|mov|webm|mkv)$/.test(u)) return "file";
-    return null;
-  }
-
-  function consider(url) {
-    var kind = classify(url);
-    if (kind) post(url, kind);
-  }
-
-  // fetch
-  var origFetch = window.fetch;
-  if (origFetch) {
-    window.fetch = function (input) {
-      try { consider(typeof input === "string" ? input : (input && input.url)); } catch (e) {}
-      return origFetch.apply(this, arguments);
+  var original = window.fetch;
+  if (original) {
+    window.fetch = function (input, init) {
+      try {
+        var isRequest = typeof Request !== "undefined" && input instanceof Request;
+        var url = isRequest ? input.url : String(input);
+        noteMedia(url);
+        if (url.indexOf("videoplayback") >= 0) {
+          var method = (init && init.method) || (isRequest ? input.method : "GET");
+          if (method === "POST") {
+            // Read the body through a clone; reading it directly would consume
+            // the request the player is about to send.
+            var source = init && init.body != null ? null : isRequest ? input.clone() : null;
+            var bytes = source ? source.arrayBuffer() : Promise.resolve(init.body);
+            Promise.resolve(bytes)
+              .then(function (raw) {
+                var u8 =
+                  raw instanceof ArrayBuffer
+                    ? new Uint8Array(raw)
+                    : raw instanceof Uint8Array
+                    ? raw
+                    : null;
+                if (!u8) return;
+                var s = "";
+                for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+                window.__shardSabr = { url: url, body: btoa(s) };
+              })
+              .catch(function () {});
+          }
+        }
+      } catch (e) {}
+      return original.apply(this, arguments);
     };
   }
 
-  // XHR
-  var origOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function (method, url) {
-    try { consider(url); } catch (e) {}
-    return origOpen.apply(this, arguments);
-  };
-
-  // <video>/<source> src set directly, plus a periodic DOM sweep for players
-  // that write the URL into an attribute we never saw requested.
-  function sweep() {
-    try {
-      var vids = document.querySelectorAll("video, source, video source");
-      for (var i = 0; i < vids.length; i++) {
-        consider(vids[i].currentSrc || vids[i].src);
-      }
-      // Playlist URLs embedded in the page's own HTML (many sites inline them).
-      var html = document.documentElement ? document.documentElement.innerHTML : "";
-      var m = html.match(/https?:[^\s"'<>\\]+\.m3u8[^\s"'<>]*/g);
-      if (m) for (var j = 0; j < m.length; j++) post(m[j], "hls");
-    } catch (e) {}
-  }
-
-  var sweeps = 0;
-  var timer = setInterval(function () {
-    sweep();
-    if (++sweeps > 40) clearInterval(timer); // ~20s, then rely on fetch/XHR
-  }, 500);
-  document.addEventListener("DOMContentLoaded", sweep);
+  // XHR too: hls.js and many players fetch over XMLHttpRequest, not fetch.
+  try {
+    var openOriginal = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      try {
+        noteMedia(String(url));
+      } catch (e) {}
+      return openOriginal.apply(this, arguments);
+    };
+  } catch (e) {}
 })();

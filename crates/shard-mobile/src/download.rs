@@ -69,6 +69,76 @@ pub unsafe extern "C" fn shard_download_hls(
     }
 }
 
+/// Quality rows for a captured YouTube offer.
+///
+/// `offer_json` is the `ytInitialPlayerResponse` the page script captured.
+/// Returns an owned JSON string the caller frees with `shard_string_free`:
+/// `{"ok":true,"rows":[{"itag":N,"label":"...","detail":"..."}]}` or
+/// `{"ok":false,"error":"..."}`. The itag `4294967295` (u32::MAX) is the
+/// audio-only row.
+///
+/// # Safety
+/// `offer_json` must be a valid NUL-terminated UTF-8 string.
+#[no_mangle]
+pub unsafe extern "C" fn shard_youtube_qualities(offer_json: *const c_char) -> *mut c_char {
+    let Some(json) = (unsafe { str_arg(offer_json) }) else {
+        return result_err("영상 정보를 읽지 못했습니다");
+    };
+    match save::youtube_qualities(&json) {
+        Ok(rows) => {
+            let mut items = String::new();
+            for (i, (itag, label, detail)) in rows.iter().enumerate() {
+                if i > 0 {
+                    items.push(',');
+                }
+                items.push_str(&format!(
+                    r#"{{"itag":{},"label":{},"detail":{}}}"#,
+                    itag,
+                    json_string(label),
+                    json_string(detail)
+                ));
+            }
+            into_c_string(format!(r#"{{"ok":true,"rows":[{}]}}"#, items))
+        }
+        Err(e) => result_err(&e.to_string()),
+    }
+}
+
+/// Download a YouTube video (or its audio alone) from a captured offer.
+///
+/// `itag` names the wanted video format, or `4294967295` for audio only. Same
+/// return contract, progress/cancel callbacks, and safety notes as
+/// [`shard_download_hls`].
+///
+/// # Safety
+/// See [`shard_download_hls`]. `offer_json` and `into_dir` must be valid
+/// NUL-terminated UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn shard_download_youtube(
+    offer_json: *const c_char,
+    itag: u32,
+    into_dir: *const c_char,
+    progress: Option<ProgressCb>,
+    cancel: Option<CancelCb>,
+    ctx: *mut c_void,
+) -> *mut c_char {
+    let Some(json) = (unsafe { str_arg(offer_json) }) else {
+        return result_err("영상 정보를 읽지 못했습니다");
+    };
+    let Some(dir) = (unsafe { str_arg(into_dir) }) else {
+        return result_err("저장 폴더를 읽지 못했습니다");
+    };
+
+    let holder = CallbackHolder { progress, cancel, ctx };
+    let mut on_progress = |done: u64, total: u64| holder.progress(done, total);
+    let cancelled = || holder.cancelled();
+
+    match save::run_youtube(&json, itag, Path::new(&dir), &mut on_progress, &cancelled) {
+        Ok(path) => result_ok(&path.to_string_lossy()),
+        Err(e) => result_err(&e.to_string()),
+    }
+}
+
 /// Save a plain file URL (a direct `<video src>` or a progressive MP4).
 ///
 /// Same return contract and safety notes as [`shard_download_hls`].

@@ -1,17 +1,22 @@
 import SwiftUI
 
-/// The browser tab: address bar, the page, and a download control that lights
-/// up once the page reveals something saveable.
+/// The browser tab: address bar, the page, and a download control that asks the
+/// page what it has the moment it is pressed.
 struct BrowserView: View {
     @StateObject private var model = WebModel()
     @State private var editing = ""
-    @State private var showCandidates = false
+
+    // The YouTube quality picker.
+    @State private var showQualities = false
+    @State private var qualities: [YtRow] = []
+    @State private var pendingOffer = ""
 
     // Download progress for the active save.
     @State private var task: DownloadTask?
     @State private var progressText = ""
     @State private var fraction: Double = 0
     @State private var banner: String?
+    @State private var asking = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,9 +28,9 @@ struct BrowserView: View {
             }
         }
         .onAppear { if model.address.isEmpty { model.load("https://www.youtube.com") } }
-        .confirmationDialog(candidatesTitle, isPresented: $showCandidates, titleVisibility: .visible) {
-            ForEach(model.candidates) { candidate in
-                Button(candidateLabel(candidate)) { start(candidate) }
+        .confirmationDialog("받을 화질을 고르세요", isPresented: $showQualities, titleVisibility: .visible) {
+            ForEach(qualities) { row in
+                Button("\(row.label) — \(row.detail)") { startYouTube(row.itag) }
             }
             Button("취소", role: .cancel) {}
         }
@@ -52,25 +57,15 @@ struct BrowserView: View {
                 Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
             }
 
-            // The save button. Always tappable so the sheet can report what was
-            // (and was not) found; it fills in and shows a count once a page
-            // reveals media.
-            Button {
-                showCandidates = true
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "arrow.down.circle\(model.candidates.isEmpty ? "" : ".fill")")
-                    if !model.candidates.isEmpty {
-                        Text("\(model.candidates.count)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(3)
-                            .background(Circle().fill(Color.accentColor))
-                            .offset(x: 8, y: -8)
-                    }
+            // Always tappable: pressing it asks the page what it has right now.
+            Button { askAndDownload() } label: {
+                if asking {
+                    ProgressView()
+                } else {
+                    Image(systemName: "arrow.down.circle")
                 }
             }
-            .disabled(task != nil)
+            .disabled(task != nil || asking)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -99,24 +94,59 @@ struct BrowserView: View {
             }
     }
 
-    private var candidatesTitle: String {
-        model.candidates.isEmpty
-            ? "이 페이지에서 감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
-            : "받을 미디어를 고르세요"
+    /// Ask the page for an offer, then act on it: a YouTube offer opens the
+    /// quality picker; a plain media/HLS offer starts straight away.
+    private func askAndDownload() {
+        asking = true
+        Task {
+            defer { asking = false }
+            guard let json = await model.offer(),
+                  let data = json.data(using: .utf8),
+                  let offer = try? JSONDecoder().decode(Offer.self, from: data) else {
+                banner = "감지된 미디어가 없습니다"
+                return
+            }
+            if offer.isYouTube {
+                guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
+                    banner = "화질을 찾지 못했습니다"
+                    return
+                }
+                qualities = rows
+                pendingOffer = json
+                showQualities = true
+            } else if let hls = offer.hls, !hls.isEmpty {
+                startURL(hls, isHLS: true, referer: offer.referer ?? "", title: offer.title ?? "video")
+            } else if let media = offer.media, !media.isEmpty {
+                startURL(media, isHLS: false, referer: offer.referer ?? "", title: offer.title ?? "video")
+            } else {
+                banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
+            }
+        }
     }
 
-    private func candidateLabel(_ c: MediaCandidate) -> String {
-        (c.isHLS ? "스트리밍(HLS) — " : "파일 — ") + c.title
+    private func startYouTube(_ itag: UInt32) {
+        let offer = pendingOffer
+        beginTask { task, report in
+            try await Downloader.runYouTube(offer, itag: itag, task: task, progress: report)
+        }
     }
 
-    private func start(_ candidate: MediaCandidate) {
-        let task = DownloadTask(candidate)
+    private func startURL(_ url: String, isHLS: Bool, referer: String, title: String) {
+        beginTask { task, report in
+            try await Downloader.runURL(url, isHLS: isHLS, referer: referer, title: title,
+                                        task: task, progress: report)
+        }
+    }
+
+    /// Shared progress plumbing for any download.
+    private func beginTask(_ run: @escaping (DownloadTask, @escaping (UInt64, UInt64) -> Void) async throws -> URL) {
+        let task = DownloadTask()
         self.task = task
         progressText = "준비 중…"
         fraction = 0
         Task {
             do {
-                let saved = try await Downloader.run(task) { done, total in
+                let saved = try await run(task) { done, total in
                     if total > 0 {
                         fraction = Double(done) / Double(total)
                         progressText = "\(byteText(done)) / \(byteText(total))"

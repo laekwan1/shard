@@ -30,6 +30,19 @@ char *shard_download_direct(const char *url, const char *referer,
                             ShardProgress progress, ShardCancel cancel,
                             void *ctx);
 
+// Quality rows for a captured YouTube offer (the ytInitialPlayerResponse the
+// page script built). Returns owned JSON: {"ok":true,"rows":[{itag,label,detail}]}
+// or {"ok":false,"error":"..."}. itag 4294967295 is the audio-only row. Free
+// with shard_string_free.
+char *shard_youtube_qualities(const char *offer_json);
+
+// Download a YouTube video (or its audio alone) from a captured offer. itag
+// names the wanted format, or 4294967295 for audio only. Same contract as
+// shard_download_hls.
+char *shard_download_youtube(const char *offer_json, uint32_t itag,
+                             const char *into_dir, ShardProgress progress,
+                             ShardCancel cancel, void *ctx);
+
 // Release a string returned by this library.
 void shard_string_free(char *ptr);
 

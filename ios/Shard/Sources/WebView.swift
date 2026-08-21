@@ -1,37 +1,44 @@
 import SwiftUI
 import WebKit
 
-/// The page and everything captured from it. Owns the WKWebView so navigation
-/// state and the media candidates live in one observable place the UI binds to.
-final class WebModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavigationDelegate {
+/// The page. Owns the WKWebView so navigation state lives in one observable
+/// place the UI binds to. Media is not tracked continuously any more — the app
+/// asks the page for an offer (Ask.js) at the moment the user wants to download.
+final class WebModel: NSObject, ObservableObject, WKNavigationDelegate {
     @Published var address: String = ""
     @Published var pageTitle: String = ""
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
-    /// Distinct media URLs the current page has revealed. Newest first.
-    @Published var candidates: [MediaCandidate] = []
+
+    // A desktop user agent: YouTube's desktop player exposes getPlayerResponse
+    // and sends the `videoplayback` POST the capture relies on, which is what
+    // the desktop app was built against. The mobile site differs enough to make
+    // capture unreliable.
+    private static let desktopUA =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 " +
+        "(KHTML, like Gecko) Version/17.0 Safari/605.1.15"
 
     lazy var webView: WKWebView = {
         let controller = WKUserContentController()
-        if let js = Self.captureScript() {
+        if let js = Self.script("Capture") {
             controller.addUserScript(
                 WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
         }
-        controller.add(self, name: "shard")
-
         let config = WKWebViewConfiguration()
         config.userContentController = controller
         config.allowsInlineMediaPlayback = true
+
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.allowsBackForwardNavigationGestures = true
+        view.customUserAgent = Self.desktopUA
         return view
     }()
 
-    private static func captureScript() -> String? {
-        guard let url = Bundle.main.url(forResource: "Capture", withExtension: "js"),
+    private static func script(_ name: String) -> String? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "js"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         return text
     }
@@ -39,9 +46,7 @@ final class WebModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
     // MARK: navigation
 
     func load(_ text: String) {
-        let target = Self.normalize(text)
-        guard let url = URL(string: target) else { return }
-        candidates = []
+        guard let url = URL(string: Self.normalize(text)) else { return }
         webView.load(URLRequest(url: url))
     }
 
@@ -62,24 +67,14 @@ final class WebModel: NSObject, ObservableObject, WKScriptMessageHandler, WKNavi
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
 
-    // MARK: captured media
-
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "shard",
-              let body = message.body as? [String: Any],
-              body["type"] as? String == "media",
-              let url = body["url"] as? String,
-              let kind = body["kind"] as? String else { return }
-        let candidate = MediaCandidate(
-            url: url,
-            isHLS: kind == "hls",
-            referer: webView.url?.absoluteString ?? "",
-            title: (body["title"] as? String) ?? pageTitle
-        )
-        if !candidates.contains(where: { $0.url == candidate.url }) {
-            // HLS first, then files — the playlist is what carries every quality.
-            candidates.insert(candidate, at: 0)
-            candidates.sort { ($0.isHLS ? 0 : 1) < ($1.isHLS ? 0 : 1) }
+    /// Ask the current page what it has to offer — runs Ask.js and returns the
+    /// offer JSON (formats for YouTube, or a media/hls URL otherwise).
+    func offer() async -> String? {
+        guard let js = Self.script("Ask") else { return nil }
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(js) { result, _ in
+                continuation.resume(returning: result as? String)
+            }
         }
     }
 

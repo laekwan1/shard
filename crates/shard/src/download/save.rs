@@ -563,6 +563,118 @@ pub fn hls_variants(manifest_url: &str, referer: &str) -> Vec<crate::download::h
     }
 }
 
+/// The itag that stands for "audio only" — the music row. Matches the desktop
+/// queue's marker so the same sentinel means the same thing on the phone.
+pub const MUSIC_ITAG: u32 = u32::MAX;
+
+/// Quality rows for a captured YouTube offer: (itag, label, detail).
+///
+/// The same list the desktop shows, without the desktop-only queue around it,
+/// so the phone can offer the identical choices from the identical parse. The
+/// music row (audio only) leads, then one row per resolution.
+pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>> {
+    use crate::config::AudioQuality;
+    use crate::download::youtube::{AudioWish, Offer};
+    let offer = Offer::parse(offer_json)?;
+    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best, portable: true };
+    let mut rows = Vec::new();
+    if let Some(audio) = offer.best_audio(&wish) {
+        rows.push((
+            MUSIC_ITAG,
+            "음악만 저장".to_string(),
+            format!("{} · {} {}k", human(audio.size()), audio.codec(), audio.bitrate / 1000),
+        ));
+    }
+    // Best audio for the video rows may differ (Opus is fine inside a video).
+    let video_wish =
+        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
+    let audio = offer.best_audio(&video_wish);
+    let mut seen: Vec<String> = Vec::new();
+    for video in offer.video_tracks() {
+        if seen.contains(&video.quality) {
+            continue;
+        }
+        seen.push(video.quality.clone());
+        let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
+        let size = if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) };
+        rows.push((
+            video.itag,
+            video.quality.clone(),
+            format!("{} · {}", size, video.codec()),
+        ));
+    }
+    Ok(rows)
+}
+
+/// Human byte count, small and dependency-free.
+fn human(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit])
+    }
+}
+
+/// Download a YouTube video (or its audio alone) from a captured offer.
+///
+/// `offer_json` is the `ytInitialPlayerResponse` the page script captured;
+/// `itag` names the wanted video format, or [`MUSIC_ITAG`] for audio only. The
+/// Job is built exactly as the desktop builds it, then run through the SABR
+/// path — the phone reuses the most-tested download code rather than a new one.
+pub fn run_youtube(
+    offer_json: &str,
+    itag: u32,
+    into: &Path,
+    on_progress: &mut dyn FnMut(u64, u64),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<PathBuf> {
+    use crate::config::AudioQuality;
+    use crate::download::youtube::{AudioWish, Offer};
+    let offer = Offer::parse(offer_json)?;
+    let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
+
+    let audio_only = itag == MUSIC_ITAG;
+    let wish =
+        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: audio_only };
+    let audio = offer.best_audio(&wish).ok_or_else(|| anyhow!("음성을 찾지 못했습니다"))?;
+    let video = if audio_only {
+        offer.video_tracks().into_iter().last()
+    } else {
+        offer.formats.iter().find(|f| f.itag == itag)
+    }
+    .ok_or_else(|| anyhow!("고른 화질을 찾지 못했습니다"))?;
+
+    // Name a format other than the wanted one as "already playing", so the wire
+    // is not primed for the bytes we are about to ask for.
+    let decoy = offer
+        .video_tracks()
+        .into_iter()
+        .find(|f| f.itag != itag)
+        .map(|f| f.track())
+        .unwrap_or_else(|| audio.track());
+
+    let job = Job {
+        template,
+        video: video.track(),
+        audio: audio.track(),
+        decoy,
+        title: offer.title.clone(),
+        into: into.to_path_buf(),
+        cover: offer.thumb.clone(),
+        audio_only,
+    };
+    let expected = job.video.bytes + job.audio.bytes;
+    let mut progress = |p: Progress| on_progress(p.video + p.audio, expected);
+    run(&job, &mut progress, cancelled)
+}
+
 /// Download an HLS stream and join it into one file.
 ///
 /// The master playlist's highest rendition is taken (the page's own player
