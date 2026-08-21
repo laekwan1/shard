@@ -243,9 +243,11 @@ pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
 /// What to call an audio stream, judged by what it turns out to be.
 fn audio_extension(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
-        // Opus lives in WebM here. Named for the container rather than the
-        // codec, because that is what it is.
-        "webm"
+        // Opus lives in a WebM here, but with no video track — so `.weba`, the
+        // WebM-audio extension. It marks the file as audio (the phone's library
+        // sorts music from video by extension, and players show it as a song)
+        // without renaming the container it actually is.
+        "weba"
     } else {
         "m4a"
     }

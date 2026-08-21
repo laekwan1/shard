@@ -1,0 +1,212 @@
+import SwiftUI
+
+/// The library, over the browser: a header with the video/music switch, folder
+/// chips, and the list — the shape of the Android app's library. Playing a row
+/// opens the player over the current shelf.
+struct LibraryScreen: View {
+    @ObservedObject var store: LibraryStore
+    @ObservedObject var downloads: DownloadsStore
+    @ObservedObject var prefs: PlaybackPrefs
+    var close: () -> Void
+
+    @StateObject private var probe = MediaProbe()
+    @State private var playingIndex: Int?
+    @State private var showNewFolder = false
+    @State private var newFolder = ""
+    @State private var renaming: Item?
+    @State private var renameText = ""
+    @State private var showSettings = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            shelfSwitch
+            folderBar
+            if !downloads.items.isEmpty { downloadsStrip }
+            if store.visible.isEmpty { empty } else { list }
+        }
+        .background(Color.surface.ignoresSafeArea())
+        .foregroundColor(.onSurface)
+        .fullScreenCover(item: Binding(
+            get: { playingIndex.map { PlayIndex(value: $0) } },
+            set: { playingIndex = $0?.value }
+        )) { start in
+            VLCPlayerScreen(playlist: store.visible.map { $0.url }, start: start.value, prefs: prefs) {
+                playingIndex = nil
+            }
+        }
+        .alert("새 폴더", isPresented: $showNewFolder) {
+            TextField("폴더 이름", text: $newFolder)
+            Button("만들기") { store.createFolder(newFolder); newFolder = "" }
+            Button("취소", role: .cancel) {}
+        }
+        .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("새 이름", text: $renameText)
+            Button("바꾸기") { if let item = renaming { store.rename(item, to: renameText) }; renaming = nil }
+            Button("취소", role: .cancel) { renaming = nil }
+        }
+        .confirmationDialog("재생 설정", isPresented: $showSettings, titleVisibility: .visible) {
+            Button(prefs.end == .next ? "순서대로 ✓" : "순서대로") { prefs.toggleEnd(.next) }
+            Button(prefs.end == .shuffle ? "무작위 ✓" : "무작위") { prefs.toggleEnd(.shuffle) }
+            Button(prefs.background ? "백그라운드 재생 ✓" : "백그라운드 재생") { prefs.background.toggle() }
+            Button("닫기", role: .cancel) {}
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Button(action: close) { Image(systemName: "chevron.left").font(.title3) }
+            Spacer()
+            Text(store.current ?? "보관함").font(.headline)
+            Spacer()
+            Button { showSettings = true } label: { Image(systemName: "gearshape") }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12)
+    }
+
+    private var shelfSwitch: some View {
+        HStack(spacing: 0) {
+            shelfTab(.video, "비디오", "film")
+            shelfTab(.music, "음악", "music.note")
+        }
+        .padding(3)
+        .background(Color.toolbar)
+        .clipShape(Capsule())
+        .padding(.horizontal, 16)
+    }
+
+    private func shelfTab(_ kind: MediaKind, _ label: String, _ icon: String) -> some View {
+        let on = store.kind == kind
+        return Button { store.kind = kind } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                Text(label).bold()
+            }
+            .font(.subheadline)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity)
+            .background(on ? Color.chrome : Color.clear)
+            .foregroundColor(on ? .onSurface : .muted)
+            .clipShape(Capsule())
+        }
+    }
+
+    private var folderBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                chip("전체", active: store.current == nil) { store.current = nil }
+                ForEach(store.folders, id: \.self) { folder in
+                    chip(folder, active: store.current == folder) { store.current = folder }
+                }
+                Button { showNewFolder = true } label: {
+                    Image(systemName: "plus").padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Color.toolbar).foregroundColor(.onSurface).clipShape(Capsule())
+                }
+            }
+            .padding(.horizontal, 16).padding(.vertical, 10)
+        }
+    }
+
+    private func chip(_ label: String, active: Bool, tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Text(label).font(.subheadline)
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .background(active ? Color.accent : Color.toolbar)
+                .foregroundColor(active ? .onAccent : .onSurface)
+                .clipShape(Capsule())
+        }
+    }
+
+    private var downloadsStrip: some View {
+        VStack(spacing: 6) {
+            ForEach(downloads.items.prefix(3)) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(item.title).font(.caption).lineLimit(1)
+                        Spacer()
+                        if item.status == .running {
+                            Button { downloads.cancel(item.id) } label: {
+                                Image(systemName: "xmark.circle").font(.caption)
+                            }
+                        }
+                    }
+                    if item.status == .running { ProgressView(value: item.fraction).tint(.accent) }
+                }
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 6)
+        .background(Color.chrome)
+    }
+
+    private var empty: some View {
+        Text(store.kind == .music ? "저장한 음악이 없습니다" : "저장한 영상이 없습니다")
+            .foregroundColor(.muted)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var list: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(Array(store.visible.enumerated()), id: \.element.id) { index, item in
+                    Button { playingIndex = index } label: { row(item) }
+                        .contextMenu { menu(item) }
+                    Divider().background(Color.toolbar)
+                }
+            }
+        }
+    }
+
+    private func row(_ item: Item) -> some View {
+        HStack(spacing: 12) {
+            ZStack(alignment: .bottomTrailing) {
+                thumbnail(item)
+                if let duration = probe.result(for: item.url)?.duration {
+                    Text(duration)
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.black.opacity(0.7)).foregroundColor(.white)
+                        .cornerRadius(3).padding(3)
+                }
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.name).foregroundColor(.onSurface).lineLimit(2)
+                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
+                    .font(.caption).foregroundColor(.muted)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
+
+    private func thumbnail(_ item: Item) -> some View {
+        Group {
+            if item.kind == .music {
+                ZStack { Color.toolbar; Image(systemName: "music.note").foregroundColor(.muted) }
+            } else if let image = probe.result(for: item.url)?.image {
+                Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                ZStack { Color.toolbar; Image(systemName: "film").foregroundColor(.muted) }
+            }
+        }
+        .frame(width: 104, height: 58)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private func menu(_ item: Item) -> some View {
+        Button { renaming = item; renameText = item.name } label: { Label("이름 바꾸기", systemImage: "pencil") }
+        Menu {
+            if item.folder != nil {
+                Button { store.move(item, to: nil) } label: { Label("최상위로", systemImage: "arrow.up") }
+            }
+            ForEach(store.folders.filter { $0 != item.folder }, id: \.self) { folder in
+                Button { store.move(item, to: folder) } label: { Label(folder, systemImage: "folder") }
+            }
+        } label: { Label("폴더로 이동", systemImage: "folder") }
+        Button(role: .destructive) { store.delete(item) } label: { Label("삭제", systemImage: "trash") }
+    }
+}
+
+/// Identifiable wrapper so an index can drive `.fullScreenCover(item:)`.
+private struct PlayIndex: Identifiable { let value: Int; var id: Int { value } }

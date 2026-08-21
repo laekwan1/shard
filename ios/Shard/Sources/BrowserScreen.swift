@@ -1,33 +1,35 @@
 import SwiftUI
 
-/// The browser tab: address bar, the page, and a download control that asks the
-/// page what it has the moment it is pressed. Downloads are handed to the shared
-/// store and run in parallel; their progress lives in the Downloads tab.
-struct BrowserView: View {
+/// The browser: a thin top bar and the page. Downloads are handed to the shared
+/// store and run in parallel; the library slides in from the right, or from a
+/// swipe on the right edge.
+struct BrowserScreen: View {
     @ObservedObject var downloads: DownloadsStore
+    var openLibrary: () -> Void
+
     @StateObject private var model = WebModel()
     @State private var editing = ""
 
-    // The YouTube quality picker.
     @State private var showQualities = false
     @State private var qualities: [YtRow] = []
     @State private var pendingOffer = ""
     @State private var pendingTitle = ""
-
     @State private var banner: String?
     @State private var asking = false
 
     var body: some View {
         VStack(spacing: 0) {
-            addressBar
+            topBar
             ZStack(alignment: .bottom) {
                 WebViewContainer(model: model)
                 if let banner = banner { self.banner(banner) }
             }
         }
+        .background(Color.surface)
+        .overlay(alignment: .trailing) { rightEdgeSwipe }
         .onAppear {
             model.onLongPressVideo = { askAndDownload() }
-            if model.address.isEmpty { model.load("https://www.youtube.com") }
+            if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
         .confirmationDialog("받을 화질을 고르세요", isPresented: $showQualities, titleVisibility: .visible) {
             ForEach(qualities) { row in
@@ -37,35 +39,65 @@ struct BrowserView: View {
         }
     }
 
-    private var addressBar: some View {
-        HStack(spacing: 12) {
-            Button { model.goBack() } label: { Image(systemName: "chevron.left") }
-                .disabled(!model.canGoBack)
-            Button { model.goForward() } label: { Image(systemName: "chevron.right") }
-                .disabled(!model.canGoForward)
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
+            iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
 
             TextField("주소 또는 검색", text: $editing)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .autocapitalization(.none)
                 .disableAutocorrection(true)
                 .keyboardType(.webSearch)
+                .foregroundColor(.onSurface)
+                .padding(.horizontal, 12).padding(.vertical, 7)
+                .background(Color.chrome)
+                .clipShape(Capsule())
                 .onSubmit { model.load(editing) }
                 .onChange(of: model.address) { editing = $0 }
 
-            if model.isLoading {
-                Button { model.reload() } label: { Image(systemName: "xmark") }
-            } else {
-                Button { model.reload() } label: { Image(systemName: "arrow.clockwise") }
-            }
-
-            // Always tappable; several downloads can run at once.
-            Button { askAndDownload() } label: {
-                if asking { ProgressView() } else { Image(systemName: "arrow.down.circle") }
-            }
-            .disabled(asking)
+            iconButton(model.isLoading ? "xmark" : "arrow.clockwise") { model.reload() }
+            downloadButton
+            iconButton("square.stack") { openLibrary() }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.surface)
+    }
+
+    private var downloadButton: some View {
+        Button { askAndDownload() } label: {
+            if asking {
+                ProgressView().tint(.accent)
+            } else {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundColor(.accent)
+            }
+        }
+        .disabled(asking)
+        .frame(width: 30)
+    }
+
+    private func iconButton(_ name: String, enabled: Bool = true, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            Image(systemName: name).foregroundColor(enabled ? .onSurface : .muted)
+        }
+        .disabled(!enabled)
+        .frame(width: 26)
+    }
+
+    /// A slim strip down the right edge: dragging left from it opens the library.
+    private var rightEdgeSwipe: some View {
+        Color.clear
+            .frame(width: 24)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { value in
+                        if value.translation.width < -40 && abs(value.translation.height) < 60 {
+                            openLibrary()
+                        }
+                    }
+            )
     }
 
     private func banner(_ text: String) -> some View {
@@ -73,13 +105,9 @@ struct BrowserView: View {
             .font(.callout).padding(12)
             .background(.ultraThinMaterial)
             .cornerRadius(10).padding(.bottom, 16)
-            .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil }
-            }
+            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
     }
 
-    /// Ask the page for an offer, then act on it: a YouTube offer opens the
-    /// quality picker; a plain media/HLS offer starts straight away.
     private func askAndDownload() {
         asking = true
         Task {

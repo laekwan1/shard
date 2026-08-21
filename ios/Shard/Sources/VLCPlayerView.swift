@@ -13,6 +13,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var duration = "0:00"
     @Published var rate: Float = 1
     var scrubbing = false
+    /// Called when the current track reaches its end, for auto-advance.
+    var onEnded: (() -> Void)?
 
     private var currentURL: URL?
     private var pendingSeek: Float?
@@ -89,6 +91,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func mediaPlayerStateChanged(_ notification: Notification) {
         isPlaying = player.isPlaying
+        if player.state == .ended { onEnded?() }
     }
 
     private static func clock(_ ms: Int32) -> String {
@@ -117,6 +120,7 @@ private struct VLCSurface: UIViewRepresentable {
 struct VLCPlayerScreen: View {
     let playlist: [URL]
     let start: Int
+    @ObservedObject var prefs: PlaybackPrefs
     var onClose: () -> Void
 
     @StateObject private var controller = VLCController()
@@ -133,9 +137,27 @@ struct VLCPlayerScreen: View {
         }
         .onAppear {
             index = min(max(0, start), max(0, playlist.count - 1))
+            controller.onEnded = { advanceOnEnd() }
             if playlist.indices.contains(index) { controller.open(playlist[index]) }
         }
         .onDisappear { controller.stop() }
+    }
+
+    /// End-of-track: go on to the next, jump to a random one, or stop — matching
+    /// the playback setting under the library's gear.
+    private func advanceOnEnd() {
+        switch prefs.end {
+        case .next:
+            if index < playlist.count - 1 { step(1) }
+        case .shuffle:
+            guard playlist.count > 1 else { return }
+            var next = index
+            while next == index { next = Int.random(in: 0..<playlist.count) }
+            index = next
+            controller.open(playlist[next])
+        case .stop:
+            break
+        }
     }
 
     /// Two invisible halves: hold right for 2×, hold left to rewind. A single

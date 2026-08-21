@@ -1,6 +1,8 @@
 import SwiftUI
 import MobileVLCKit
 
+enum MediaKind: String { case video, music }
+
 /// A saved file, with what the list needs to draw it.
 struct Item: Identifiable, Hashable {
     let url: URL
@@ -12,6 +14,9 @@ struct Item: Identifiable, Hashable {
     var size: Int64 {
         (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
     }
+
+    static let musicExts: Set<String> = ["m4a", "mp3", "weba", "opus", "aac", "oga", "wav"]
+    var kind: MediaKind { Item.musicExts.contains(ext) ? .music : .video }
 }
 
 /// The saved files, grouped into folders, plus the operations the library needs.
@@ -23,13 +28,15 @@ final class LibraryStore: ObservableObject {
     @Published var folders: [String] = []
     /// The folder being viewed, or nil for the top level.
     @Published var current: String?
+    /// Which shelf is shown — video or music.
+    @Published var kind: MediaKind = .video
 
     private var root: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
     private static let mediaExts: Set<String> =
-        ["mp4", "m4v", "mov", "webm", "mkv", "m4a", "mp3", "opus", "aac", "wav"]
+        ["mp4", "m4v", "mov", "webm", "mkv", "m4a", "mp3", "opus", "aac", "wav", "weba", "oga"]
 
     func reload() {
         let fm = FileManager.default
@@ -56,8 +63,8 @@ final class LibraryStore: ObservableObject {
         folders = dirs.sorted()
     }
 
-    /// The items shown for the current folder.
-    var visible: [Item] { items.filter { $0.folder == current } }
+    /// The items shown for the current folder and shelf (video/music).
+    var visible: [Item] { items.filter { $0.folder == current && $0.kind == kind } }
 
     func createFolder(_ name: String) {
         let clean = name.trimmingCharacters(in: .whitespaces)
