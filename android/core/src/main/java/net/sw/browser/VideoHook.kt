@@ -292,7 +292,15 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
                 return words;
               }
 
+              var lastFire = 0;
               function fire(x, y) {
+                // A touch long-press makes the WebView fire both our touchstart
+                // timer and a contextmenu event, so fire() was called twice and
+                // two quality dialogs stacked. Swallow a second call within a
+                // second of the first.
+                var now = Date.now();
+                if (now - lastFire < 1000) return;
+                lastFire = now;
                 var v = videoAt(x, y);
                 if (!v) return;
                 var title = titleFor(v);

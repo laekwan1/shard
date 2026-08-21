@@ -50,17 +50,7 @@ struct LibraryView: View {
             get: { playing.map { PlayerItem(url: $0) } },
             set: { playing = $0?.url }
         )) { item in
-            ZStack(alignment: .topTrailing) {
-                Color.black.ignoresSafeArea()
-                VLCPlayerView(url: item.url)
-                    .ignoresSafeArea()
-                Button { playing = nil } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title)
-                        .foregroundColor(.white.opacity(0.85))
-                        .padding()
-                }
-            }
+            VLCPlayerScreen(url: item.url) { playing = nil }
         }
     }
 

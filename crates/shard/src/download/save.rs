@@ -576,7 +576,9 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     use crate::config::AudioQuality;
     use crate::download::youtube::{AudioWish, Offer};
     let offer = Offer::parse(offer_json)?;
-    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best, portable: true };
+    // portable=false so music comes out as Opus (in WebM): it is smaller and
+    // better than AAC, and the phone's library plays WebM through VLCKit now.
+    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
     let mut rows = Vec::new();
     if let Some(audio) = offer.best_audio(&wish) {
         rows.push((
@@ -641,8 +643,10 @@ pub fn run_youtube(
     let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
 
     let audio_only = itag == MUSIC_ITAG;
+    // portable=false: prefer Opus (in WebM) even for audio-only music. VLCKit
+    // plays WebM on the phone now, and Opus is smaller and better than AAC.
     let wish =
-        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: audio_only };
+        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
     let audio = offer.best_audio(&wish).ok_or_else(|| anyhow!("음성을 찾지 못했습니다"))?;
     let video = if audio_only {
         offer.video_tracks().into_iter().last()
