@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    A circular arrow with 90 in it — the same shape as the reference's 360, a
-    quarter instead of a whole turn. The arc opens at the top-right where the
-    arrowhead sits; the digits are drawn as filled rings so they read at 24dp.
+    A circular arrow with 90 in it — the reference's 360, a quarter instead of a
+    whole turn. A near-complete ring opening at the top-right where a clean
+    arrowhead sits, and the digits small and centred, drawn as thin outlines so
+    they read as figures rather than blobs.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -10,28 +11,29 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="@color/on_surface">
-    <!-- The ring, open at the top-right. -->
+    <!-- The ring, clockwise, open at the top-right. -->
     <path
         android:strokeColor="#FFFFFF"
         android:strokeWidth="2"
         android:strokeLineCap="round"
         android:fillColor="#00000000"
-        android:pathData="M16.5,5.2 A8,8 0 1 0 20,12" />
-    <!-- The arrowhead at the arc's end. -->
+        android:pathData="M17.2,5.6 A8,8 0 1 1 12,4" />
+    <!-- The arrowhead at the open end. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M15.2,2.4 L20.4,4.2 L17.6,8.9 Z" />
-    <!-- 9 -->
+        android:pathData="M11.4,1.6 L14.2,4.2 L11,6.4 Z" />
+    <!-- 9: a small loop with a stem. -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M8.6,9.2m-1.7,0a1.7,1.7 0 1 0 3.4,0a1.7,1.7 0 1 0 -3.4,0zM8.6,9.2m-0.7,0a0.7,0.7 0 1 0 1.4,0a0.7,0.7 0 1 0 -1.4,0z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000"
+        android:pathData="M10.7,11 a1.6,1.6 0 1 0 -1.5,1 L10.6,14.6" />
+    <!-- 0: an outlined oval. -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M9.7,9.6 L10.6,9.6 L9.2,15 L8.3,15 Z" />
-    <!-- 0 -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillType="evenOdd"
-        android:pathData="M14,12.2m-1.9,0a1.9,2.6 0 1 0 3.8,0a1.9,2.6 0 1 0 -3.8,0zM14,12.2m-0.8,0a0.8,1.4 0 1 0 1.6,0a0.8,1.4 0 1 0 -1.6,0z" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.4"
+        android:fillColor="#00000000"
+        android:pathData="M14,9.7 a1.7,2.4 0 1 0 0.01,0" />
 </vector>

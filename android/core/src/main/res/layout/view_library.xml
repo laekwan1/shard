@@ -683,13 +683,14 @@
                 -->
                 <ImageButton
                     android:id="@+id/folderSettings"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_marginEnd="6dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_marginBottom="3dp"
                     android:background="@drawable/press_square"
                     android:src="@drawable/ic_settings"
                     android:scaleType="fitCenter"
-                    android:padding="9dp"
+                    android:padding="6dp"
                     android:contentDescription="@string/library_playback_settings" />
             </LinearLayout>
 

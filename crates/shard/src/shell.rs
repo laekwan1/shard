@@ -198,7 +198,14 @@ pub fn send_file_to_running_copy(path: &std::path::Path) {
             len: (wide.len() * 2) as u32,
             data: wide.as_ptr().cast(),
         };
+        // Let the running copy take the foreground. Without this its
+        // SetForegroundWindow is refused when its window is already open but
+        // behind another — Windows only lets the process that currently owns the
+        // foreground (this launcher, for the moment) hand it over.
         unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                windows_sys::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+            );
             SendMessageW(
                 hwnd,
                 WM_COPYDATA,
@@ -963,8 +970,9 @@ struct Tray {
     icon: uikit::tray::TrayIcon,
     events: uikit::tray::TrayEvents,
     /// The engine switch, only present when the program runs elevated — the
-    /// engine needs the driver, and the driver needs a token.
-    toggle: Option<uikit::tray::CheckMenuItem>,
+    /// engine needs the driver, and the driver needs a token. Its label is the
+    /// action, not the state: "ON" while stopped, "OFF" while running.
+    toggle: Option<uikit::tray::MenuItem>,
     /// Offered only when *not* elevated: run a copy that is, so the engine
     /// becomes reachable. There is no engine UI at all without the token.
     elevate: Option<uikit::tray::MenuItem>,
@@ -974,7 +982,7 @@ struct Tray {
 
 impl Tray {
     fn build(elevated: bool) -> Result<Self> {
-        use uikit::tray::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+        use uikit::tray::{Menu, MenuItem, PredefinedMenuItem};
         let events = uikit::tray::watch();
         let menu = Menu::new();
 
@@ -984,7 +992,7 @@ impl Tray {
         let mut toggle = None;
         let mut elevate = None;
         if elevated {
-            let item = CheckMenuItem::new("OFF", true, false, None);
+            let item = MenuItem::new("ON", true, None);
             menu.append(&item)?;
             toggle = Some(item);
         } else {
@@ -1015,8 +1023,9 @@ impl Tray {
             .icon
             .set_tooltip(Some(if running { "Shard — 우회 동작 중" } else { "Shard" }));
         if let Some(toggle) = &self.toggle {
-            toggle.set_checked(running);
-            toggle.set_text(if running { "ON" } else { "OFF" });
+            // The label is what a press will do: turn it ON while it is off,
+            // turn it OFF while it is on.
+            toggle.set_text(if running { "OFF" } else { "ON" });
         }
     }
 }

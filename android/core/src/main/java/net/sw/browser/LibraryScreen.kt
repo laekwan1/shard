@@ -695,6 +695,24 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     /** The speeds the rate button steps through, the same set the desktop uses. */
     private val rates = listOf(1f, 1.25f, 1.5f, 2f, 0.5f, 0.75f)
 
+    /** A menu of speeds off the rate button; slow at the top, fast at the foot. */
+    private fun showRateMenu() {
+        val exo = player ?: return
+        val ordered = listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+        val menu = android.widget.PopupMenu(activity, vbRate)
+        ordered.forEachIndexed { index, rate -> menu.menu.add(0, index, index, rateLabel(rate)) }
+        menu.setOnMenuItemClickListener { item ->
+            val rate = ordered[item.itemId]
+            exo.setPlaybackSpeed(rate)
+            vbRate.text = rateLabel(rate)
+            keepControlsUp()
+            true
+        }
+        menu.setOnDismissListener { keepControlsUp() }
+        ui.removeCallbacks(hideControls)
+        menu.show()
+    }
+
     /**
      * The three settings that used to live behind the menu, lit when on.
      *
@@ -912,16 +930,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // music stream, the same one the side-drag and the hardware keys move.
         vbMute.setOnClickListener { showVolumeSlider(vbMute) }
         npMute.setOnClickListener { showVolumeSlider(npMute) }
-        // The speed, stepping through the same set the desktop offers. Not kept
-        // between files — a rate is for the thing being watched now.
-        vbRate.setOnClickListener {
-            val exo = player ?: return@setOnClickListener
-            val at = rates.indexOfFirst { kotlin.math.abs(it - exo.playbackParameters.speed) < 0.01f }
-            val next = rates[(at + 1).mod(rates.size)]
-            exo.setPlaybackSpeed(next)
-            vbRate.text = rateLabel(next)
-            keepControlsUp()
-        }
+        // The speed: a tap opens the set to pick from, rather than stepping one
+        // at a time. Not kept between files — a rate is for the thing being
+        // watched now.
+        vbRate.setOnClickListener { showRateMenu() }
         paintPlaybackToggles()
 
         list.adapter = adapter

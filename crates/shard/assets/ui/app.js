@@ -185,16 +185,42 @@ urlBox.addEventListener("keydown", (e) => {
   urlBox.blur();
 });
 
-// Whether the program has the token to run the engine. The home screen and its
-// switch only make sense when it does; without it the program is a downloader
-// and library, and the wordmark goes there instead.
+// Whether the program has the token to run the engine. The home screen is shown
+// either way — it is where downloads report their progress — but its engine
+// switch and settings are hidden without the token, since neither can do
+// anything then.
 let elevated = false;
 
-// The wordmark opens the home screen when the engine is reachable, the library
-// when it is not — there is no engine to show an unelevated run.
-document.getElementById("chip").addEventListener("click", () =>
-  show(elevated ? "home" : "library"),
-);
+// The wordmark always opens home; downloads live there, so it must be reachable
+// even in an unelevated run.
+document.getElementById("chip").addEventListener("click", () => show("home"));
+
+// Shard's mark, the same shape the chip and the tray draw — used in the engine
+// switch's place when the engine is out of reach.
+const SHARD_MARK =
+  '<svg viewBox="-1 -1 2 2" aria-hidden="true"><mask id="powercut">' +
+  '<rect x="-.72" y="-.72" width="1.44" height="1.44" rx=".22" fill="#fff"/>' +
+  '<line x1="-1.5" y1="-1.5" x2="1.5" y2="1.5" stroke="#000" stroke-width=".22"/></mask>' +
+  '<rect x="-.72" y="-.72" width="1.44" height="1.44" rx=".22" fill="currentColor" mask="url(#powercut)"/></svg>';
+
+// Reflect whether the engine is reachable. Elevated: the real switch and the
+// settings button. Unelevated: the switch's place holds the Shard mark with a
+// light that breathes on and off, and pressing it relaunches elevated; settings
+// is hidden, since nothing it sets can take effect without the engine.
+function applyElevation() {
+  const power = document.getElementById("power");
+  document.querySelector('[data-go="settings"]').hidden = !elevated;
+  if (elevated) {
+    power.classList.remove("locked");
+    return;
+  }
+  power.classList.add("locked");
+  power.innerHTML = SHARD_MARK;
+  power.title = "우회를 켜려면 눌러 관리자 권한으로 실행하세요";
+  document.getElementById("headline").textContent = "다운로드 · 보관함";
+  document.getElementById("detail").textContent =
+    "우회를 켜려면 로고를 눌러 관리자 권한으로 실행하세요";
+}
 for (const button of document.querySelectorAll("#go button")) {
   button.addEventListener("click", () => {
     const to = button.dataset.go;
@@ -796,6 +822,12 @@ function syncPlayer() {
 // Wrapping round at the ends: a shelf of songs is a loop, not a queue that runs
 // out.
 function step(by) {
+  // A folder-opened file steps through that folder, not a shelf.
+  if (externalItems) {
+    const n = externalItems.length;
+    playExternalAt((externalAt + by + n) % n);
+    return;
+  }
   if (!playing) return;
   const list = shown();
   const at = list.findIndex((i) => i.id === playing.id);
@@ -1409,7 +1441,7 @@ function settingsBar() {
   done.addEventListener("click", () => {
     done.classList.add("done");
     done.textContent = "저장됨";
-    setTimeout(() => show(elevated ? "home" : "library"), 260);
+    setTimeout(() => show("home"), 260);
   });
 
   bar.append(logs, resetButton(), done);
@@ -1552,12 +1584,8 @@ window.__shard = {
         openExternal(message.list || [], message.at || 0);
         break;
       case "caps":
-        // Whether the engine is reachable. When it is not, the home screen — the
-        // one place the switch lives — is hidden, and the wordmark goes to the
-        // library instead of it.
         elevated = !!message.elevated;
-        document.getElementById("chip").title = elevated ? "홈으로" : "보관함";
-        if (!elevated && here === "home") show("library");
+        applyElevation();
         break;
     }
   },
@@ -1567,6 +1595,6 @@ window.__shard = {
 // so nothing has been sent yet.
 send("ready");
 
-// Land on the library rather than the home screen — that is what the program is
-// mostly opened for, and the engine switch home carried is on the tray.
-show("library");
+// Land on home: downloads report there, so it has to be the first thing seen
+// even in an unelevated run where its switch is hidden.
+show("home");

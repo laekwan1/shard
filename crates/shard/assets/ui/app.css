@@ -304,6 +304,21 @@ button svg { display: block; }
   place-items: center;
 }
 #power svg { width: 156px; height: 156px; overflow: visible; }
+
+/* The engine out of reach: the mark stands in for the switch, its light
+   breathing between the dim off-colour and the accent — an invitation to press
+   it, which relaunches the program with the token the engine needs. The mark is
+   smaller than the switch it replaces so it reads as a logo, not a control. */
+#power.locked svg { width: 96px; height: 96px; }
+#power.locked {
+  color: var(--dim);
+  animation: shard-light 2.6s ease-in-out infinite;
+}
+#power.locked:hover { animation-play-state: paused; color: var(--accent); }
+@keyframes shard-light {
+  0%, 100% { color: var(--dim); filter: none; }
+  50% { color: var(--accent); filter: drop-shadow(0 0 10px #2dd4bf88); }
+}
 #power .halo { fill: var(--accent); opacity: 0; transition: opacity .35s; }
 #power .body { fill: var(--raised); transition: fill .35s; }
 #power .ring {
@@ -1029,6 +1044,10 @@ button svg { display: block; }
 #prev, #next { color: var(--on-surface); }
 /* The two that say how the shelf plays through, lit while they are in force. */
 #onward.on, #shuffle.on { color: var(--accent); }
+/* Lit stays lit under the pointer: the plain hover paints every button white,
+   which hid whether a just-clicked mode was on or off. These keep the accent so
+   the state is readable with the mouse still on them. */
+#row #onward.on:hover, #row #shuffle.on:hover { color: var(--accent); }
 /* Not on the strip: it is the width of the window minus everything else, and
    these are set where the listening is done. */
 #player.mini #onward,
