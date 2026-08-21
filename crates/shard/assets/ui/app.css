@@ -546,6 +546,10 @@ button svg { display: block; }
 .file:hover { background: #ffffff0d; }
 .file:hover::before, .file:hover + .file::before { background: transparent; }
 .file.held { opacity: .45; }
+/* Marked to move: a faint accent wash and a lit edge, so a set of them reads as
+   picked out from the rest before they are dragged to a folder. */
+.file.selected { background: #2dd4bf1f; box-shadow: inset 2px 0 0 var(--accent); }
+.file.selected:hover { background: #2dd4bf2b; }
 /* Where the row being carried will land. */
 .file.above::after,
 .file.below::after {
@@ -1007,6 +1011,10 @@ button svg { display: block; }
   border-top: 1px solid var(--divider);
 }
 #player.mini #stage { display: none; }
+/* The queue belongs to the full player over the library, never to the strip
+   that shows while a site is in front — a list of films hanging over a web
+   page, playing one on a click, is not what the strip is for. */
+#player.mini #queue { display: none; }
 #player.mini #controls { background: transparent; border-top: 0; padding: 7px 12px 0; }
 /*
     The strip keeps the smaller controls, and deliberately.

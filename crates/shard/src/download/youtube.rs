@@ -139,6 +139,10 @@ pub struct Offer {
     /// An HLS master or media playlist URL, for sites that stream over HLS.
     #[serde(default)]
     pub hls: String,
+    /// Every HLS playlist URL the page fetched, newline-separated — so the one
+    /// that is really the master can be found when the first is not.
+    #[serde(default, rename = "hlsList")]
+    pub hls_list: String,
     /// The address to send as `Referer` when fetching the two above: arbitrary
     /// CDNs refuse a request that does not look like it came from the page.
     #[serde(default)]
@@ -322,12 +326,14 @@ pub const RECORDER: &str = r#"
       var bare = url.split('?')[0].toLowerCase();
       // Skip tiny/streaming-ad fragments where we can: keep the last full file
       // and the last playlist. The page usually fetches the real one last.
-      // The first .m3u8 is the master — the one that lists the qualities. The
-      // player fetches it before the single-quality media playlist it then
-      // picks, so keeping the first, not the last, is what lets a quality be
-      // chosen rather than taking whatever the page settled on.
+      // Every .m3u8 the page asks for is kept: the first is usually the master
+      // that lists the qualities, but sites differ, so Rust is given all of them
+      // and picks whichever actually parses as a master. The mp4 is the last
+      // progressive file, for sites that expose one.
       if (bare.indexOf('.m3u8') >= 0) {
         if (!window.__shardMedia.m3u8) window.__shardMedia.m3u8 = url;
+        window.__shardMedia.list = window.__shardMedia.list || [];
+        if (window.__shardMedia.list.indexOf(url) < 0) window.__shardMedia.list.push(url);
       } else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) {
         window.__shardMedia.mp4 = url;
       }
@@ -449,6 +455,7 @@ pub const ASK: &str = r#"
       formats: [],
       media: mp4,
       hls: hls,
+      hlsList: (media.list || []).join('\n'),
       referer: location.href,
       title: document.title || '',
       thumb: picture,

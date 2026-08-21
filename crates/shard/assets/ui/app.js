@@ -335,6 +335,10 @@ const shelf = { kind: "video", folder: null, items: [], folders: [] };
 
 const foldersEl = document.getElementById("folders");
 const filesEl = document.getElementById("files");
+
+// Files marked to be moved together, and the batch a drag is carrying.
+const selected = new Set();
+let dragBatch = [];
 const emptyEl = document.getElementById("empty");
 
 for (const button of document.querySelectorAll(".shelf")) {
@@ -388,7 +392,11 @@ function paintFolders() {
       e.preventDefault();
       button.classList.remove("over");
       const id = Number(e.dataTransfer.getData("text/plain"));
-      if (id) send("library.folder", { id, folder: name || "" });
+      // The whole marked set moves when the dropped file is one of them.
+      const ids = dragBatch.length && dragBatch.includes(id) ? dragBatch : [id];
+      for (const one of ids) if (one) send("library.folder", { id: one, folder: name || "" });
+      selected.clear();
+      dragBatch = [];
     });
     // A folder made by hand can be unmade the same way. "전체" is not a folder
     // and has nothing to offer.
@@ -451,10 +459,28 @@ function paintFiles() {
     row.className = "file";
     // Held down, then moved: the browser starts the drag itself once the
     // button has been pressed on the row, so nothing moves on a passing hover.
+    if (selected.has(item.id)) row.classList.add("selected");
+    // A click marks a file; marked files move together. A second click unmarks
+    // it. Playing is the go button or a double click, so a single click is free
+    // for this.
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".go")) return;
+      if (selected.has(item.id)) {
+        selected.delete(item.id);
+        row.classList.remove("selected");
+      } else {
+        selected.add(item.id);
+        row.classList.add("selected");
+      }
+    });
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {
+      // Drag the whole marked set when the dragged file is one of them; a lone
+      // file drags on its own.
+      dragBatch = selected.has(item.id) && selected.size > 1 ? [...selected] : [item.id];
       e.dataTransfer.setData("text/plain", String(item.id));
       e.dataTransfer.effectAllowed = "move";
+      for (const other of filesEl.querySelectorAll(".file")) other.classList.remove("held");
       row.classList.add("held");
     });
     row.addEventListener("dragend", () => {
@@ -859,6 +885,12 @@ function shutPlayer() {
 function syncPlayer() {
   const own = !browsing && here === "library";
   player.classList.toggle("mini", !own);
+  // The queue is the full player's, not the strip's: close it whenever the
+  // strip is what is showing, so it cannot hang over a web page.
+  if (!own) {
+    const queue = document.getElementById("queue");
+    queue.classList.remove("open");
+  }
   send("playing", { on: !player.hidden });
 }
 

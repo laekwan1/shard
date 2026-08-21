@@ -233,7 +233,22 @@ impl Downloads {
             let mut rows = Vec::new();
             self.variants = Vec::new();
             if !offer.hls.is_empty() {
-                let variants = save::hls_variants(&offer.hls, &offer.referer);
+                // Try the first playlist, then every other one the page fetched,
+                // until one reads as a master with qualities in it. Sites do not
+                // agree on which request is the master.
+                let mut variants = save::hls_variants(&offer.hls, &offer.referer);
+                if variants.is_empty() {
+                    for url in offer.hls_list.split('\n').filter(|u| !u.trim().is_empty()) {
+                        if url == offer.hls {
+                            continue;
+                        }
+                        let found = save::hls_variants(url, &offer.referer);
+                        if !found.is_empty() {
+                            variants = found;
+                            break;
+                        }
+                    }
+                }
                 if variants.is_empty() {
                     // A media playlist, or a master that would not read: one row,
                     // the stream taken whole.
@@ -317,7 +332,10 @@ impl Downloads {
         if itag == HLS_ITAG {
             return self.begin_media(&offer, offer.hls.clone(), true, anyway);
         }
-        if itag >= HLS_VARIANT_BASE {
+        // Bounded to the real variant count: the music marker itag is u32::MAX,
+        // which is also >= the base, and without this bound a music download was
+        // taken for an HLS quality and refused with "고른 화질을 찾지 못했습니다".
+        if itag >= HLS_VARIANT_BASE && (itag - HLS_VARIANT_BASE) < self.variants.len() as u32 {
             let index = (itag - HLS_VARIANT_BASE) as usize;
             let Some(variant) = self.variants.get(index) else {
                 return youtube::say_script("고른 화질을 찾지 못했습니다.", true);
