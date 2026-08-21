@@ -2025,6 +2025,16 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // about is not a way out. It travels with the bar, so whether it is up
         // is the bar's question — this only says whether it is allowed at all.
         fade(leaveFullScreen, expanded && controlsShown)
+        // The title clears the back button in full screen: the button sits in
+        // the top-left corner then, and without this the name ran under it.
+        val density = activity.resources.displayMetrics.density
+        val start = ((if (expanded) 56 else 14) * density).toInt()
+        stageTitle.setPaddingRelative(
+            start,
+            (10 * density).toInt(),
+            (14 * density).toInt(),
+            (18 * density).toInt(),
+        )
         stage.post { fitSurface() }
     }
 
