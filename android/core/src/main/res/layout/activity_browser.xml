@@ -100,11 +100,6 @@
                     android:importantForAutofill="no" />
 
                 <!--
-                    The way into what has already been saved. Beside the address
-                    rather than buried in a menu: it is the other half of what
-                    this browser is for.
-                -->
-                <!--
                     Turn the whole browser a quarter. A page that only plays wide
                     is watched sideways, and a phone left to its own sensor
                     fights the hand holding it; this pins the turn to a press.
@@ -119,37 +114,11 @@
                     android:padding="8dp"
                     android:contentDescription="@string/rotate_screen" />
 
-                <ImageButton
-                    android:id="@+id/openLibrary"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_library"
-                    android:scaleType="fitCenter"
-                    android:padding="9dp"
-                    android:contentDescription="@string/library_open" />
-
-            </LinearLayout>
-
-            <!-- State on the left, downloads on the right. -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:paddingHorizontal="14dp"
-                android:paddingBottom="5dp">
-
-                <TextView
-                    android:id="@+id/status"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:textSize="11sp"
-                    android:textColor="@color/muted"
-                    android:maxLines="1"
-                    android:ellipsize="end"
-                    android:text="@string/status_idle" />
+                <!--
+                    The library has no button any more: a swipe in from the right
+                    edge opens it, mirroring the address panel's swipe from the
+                    left. The address field takes the freed width.
+                -->
 
             </LinearLayout>
 

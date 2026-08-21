@@ -456,10 +456,11 @@ abstract class BrowserActivity : AppCompatActivity() {
      * which is the question actually worth asking of a tunnel — so that is what
      * this shows, alongside one word for what the engine is doing.
      */
+    // The status line under the address bar was removed — it repeated what the
+    // page already shows and what the download row/notification carry. The tick
+    // stays only to keep the download row current.
     private val statusTicker = object : Runnable {
         override fun run() {
-            binding.status.text =
-                if (engineOn) "${engineStatus()}   ${throughput()}" else idleStatus()
             refreshDownloads()
             ui.postDelayed(this, 1000)
         }
@@ -499,9 +500,10 @@ abstract class BrowserActivity : AppCompatActivity() {
         else -> "%.0f KB/s".format(rate / 1024)
     }
 
-    /** Replace the status line until the next tick — used by downloads. */
+    /** Formerly replaced the status line for downloads; the line is gone, so
+     *  this is now a no-op kept for the download callers and Veil's override. */
     protected fun showStatus(text: String) {
-        ui.post { binding.status.text = text }
+        // Intentionally empty — the address-bar status line was removed.
     }
 
     /**
@@ -734,6 +736,13 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /** Slides in from the left edge, where the handle is. */
+    /** Open the library over the page. The panel is browser furniture and has
+     *  no business staying over a different screen, so it is put away first. */
+    private fun openLibrary() {
+        hidePanel()
+        library.open()
+    }
+
     private fun showPanel() {
         if (panelShown) return
         panelShown = true
@@ -773,12 +782,6 @@ abstract class BrowserActivity : AppCompatActivity() {
 
     private fun wireControls() {
         binding.power.setOnClickListener { setEngine(!engineOn) }
-        binding.openLibrary.setOnClickListener {
-            // The panel is the browser's furniture and has no business being
-            // over a different screen.
-            hidePanel()
-            library.open()
-        }
         binding.rotate.setOnClickListener { rotateScreen() }
 
         // Tapping the address bar should replace what is there, not put a
@@ -820,14 +823,27 @@ abstract class BrowserActivity : AppCompatActivity() {
                 distanceY: Float,
             ): Boolean {
                 val start = down ?: return false
-                if (panelShown || !startsAtTopLeft(start.rawX, start.rawY)) return false
+                if (panelShown) return false
 
                 val dx = current.rawX - start.rawX
                 val dy = current.rawY - start.rawY
-                // Sideways, and clearly more sideways than vertical, or a page
-                // that scrolls would open the panel every time.
-                if (dx > swipeThreshold() && dx > kotlin.math.abs(dy) * 1.2f) {
+                // Clearly more sideways than vertical, or a page that scrolls
+                // would trip these every time.
+                val sideways = kotlin.math.abs(dx) > swipeThreshold() &&
+                    kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.2f
+                if (!sideways) return false
+
+                // Rightward from the left band opens the address panel.
+                if (dx > 0 && startsInAddressBand(start.rawX, start.rawY)) {
                     showPanel()
+                    return true
+                }
+                // Leftward from the right band opens the library — but only when
+                // the page is the front-most thing (not over a player or an
+                // already-open library).
+                if (dx < 0 && startsInLibraryBand(start.rawX, start.rawY) &&
+                    customView == null && !(libraryMade && library.isOpen)) {
+                    openLibrary()
                     return true
                 }
                 return false
@@ -864,22 +880,37 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
-     * The band a swipe may start in — near the left edge, and only the top
-     * third of it, where the handle is.
+     * The vertical band both edge swipes must start in — the middle half of the
+     * screen, a quarter down to three quarters.
      *
-     * It used to be the whole height, and the whole height belongs to pages:
-     * a carousel dragged rightward from the left half kept opening the panel
-     * instead. The panel slides out from under the handle, so the gesture
-     * starts where the handle is.
-     *
-     * The outermost strip is skipped: a swipe starting there is the system's
-     * back gesture and never reaches the app, so aiming at the very edge made
-     * this *less* likely to work.
+     * It used to be the top third so the address swipe started under its handle.
+     * But the system back gesture also lives at the top-left, so the two fought;
+     * moving the app's swipe to the centre, and starting it further in than the
+     * back gesture (below), keeps them apart.
      */
-    private fun startsAtTopLeft(x: Float, y: Float): Boolean {
+    private fun inCentreBand(y: Float): Boolean {
+        val h = resources.displayMetrics.heightPixels
+        return y > h * 0.25f && y < h * 0.75f
+    }
+
+    /**
+     * Left band for the address panel: from well inside the edge (past the
+     * system back-gesture strip) to about a third across, in the centre band.
+     */
+    private fun startsInAddressBand(x: Float, y: Float): Boolean {
         val density = resources.displayMetrics.density
-        return x > 24 * density && x < resources.displayMetrics.widthPixels * 0.22f &&
-            y < resources.displayMetrics.heightPixels * 0.33f
+        val w = resources.displayMetrics.widthPixels
+        return x > 48 * density && x < w * 0.32f && inCentreBand(y)
+    }
+
+    /**
+     * Right band for the library: mirror of the address band on the other edge,
+     * also inset from the system back gesture.
+     */
+    private fun startsInLibraryBand(x: Float, y: Float): Boolean {
+        val density = resources.displayMetrics.density
+        val w = resources.displayMetrics.widthPixels
+        return x < w - 48 * density && x > w * 0.68f && inCentreBand(y)
     }
 
     private fun swipeThreshold() = 36 * resources.displayMetrics.density

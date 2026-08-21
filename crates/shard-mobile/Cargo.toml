@@ -9,10 +9,8 @@ license.workspace = true
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-# The portable core only: no packet driver, no window, no async runtime. The
-# `download` feature adds the fetch-and-mux engine (reqwest + std::fs, no
-# WebView2) so the phone can save video with the same code the desktop uses.
-shard = { path = "../shard", default-features = false, features = ["download"] }
+# The portable core only: no packet driver, no window, no async runtime.
+shard = { path = "../shard", default-features = false }
 anyhow = "1.0.104"
 tracing = "0.1.44"
 # For the encrypted resolver only. Blocking rustls, no async runtime.
@@ -30,3 +28,10 @@ libc = "0.2"
 jni = "0.21.1"
 android_logger = "0.14.1"
 log = "0.4.28"
+
+# The download engine (reqwest + mux) is only for iOS: Android saves video with
+# its own Kotlin downloader and never calls the Rust path, so enabling it there
+# would pull reqwest into the .so for nothing. Features merge additively, so
+# this adds `download` on every target except Android.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+shard = { path = "../shard", default-features = false, features = ["download"] }

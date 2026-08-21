@@ -14,6 +14,9 @@
 //! Measured against a Korean ISP that reassembles the stream before matching:
 //! splitting alone failed every time, split-plus-urgent succeeded.
 
+// iOS links this to save video; Android uses its own Kotlin downloader, and the
+// `download` feature (reqwest) is off there, so the module is too.
+#[cfg(not(target_os = "android"))]
 pub mod download;
 pub mod http_proxy;
 pub mod jni;

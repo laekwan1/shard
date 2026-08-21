@@ -1724,6 +1724,23 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 }
             }
 
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (player !== exo) return
+                // Seeking back into a finished video restarts playback without
+                // going through the toggle, so wantsPlay (the intent flag the
+                // button reads) is left at false and the button wrongly shows
+                // "play" while the video runs. When playback actually resumes,
+                // make the intent agree. Only the resume direction is synced —
+                // pausing still goes through the toggle, keeping its no-flicker
+                // intent semantics.
+                if (isPlaying && !wantsPlay) {
+                    wantsPlay = true
+                    updateVideoBar()
+                    updateNowPlaying()
+                    refreshMediaNotification()
+                }
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 if (player !== exo) return
                 // A named code, not a bare number: it says whether the file is
