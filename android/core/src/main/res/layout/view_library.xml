@@ -454,7 +454,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="@color/chrome"
+            android:background="@color/surface"
             android:elevation="6dp"
             android:paddingHorizontal="12dp"
             android:paddingTop="10dp"
@@ -503,6 +503,16 @@
                         android:textSize="11sp"
                         android:text="@string/library_playing" />
                 </LinearLayout>
+
+                <ImageButton
+                    android:id="@+id/npMute"
+                    android:layout_width="@dimen/target"
+                    android:layout_height="@dimen/target"
+                    android:background="@drawable/press_square"
+                    android:src="@drawable/ic_volume"
+                    android:scaleType="fitCenter"
+                    android:padding="13dp"
+                    android:contentDescription="@string/library_mute" />
 
                 <ImageButton
                     android:id="@+id/npStop"

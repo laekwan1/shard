@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The volume slider's own handle, a fixed 12dp circle. Its own drawable rather
+    than the scrubber's: the scrubber's thumb is a pressed/idle selector, and
+    sharing it let the pressed state leak between the two SeekBars so one showed
+    the other's stretched handle — an oval where a circle belongs.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <size android:width="12dp" android:height="12dp" />
+    <solid android:color="@color/accent" />
+</shape>

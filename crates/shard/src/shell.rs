@@ -1981,6 +1981,20 @@ fn create_window(title: &str) -> Result<HWND> {
     if hwnd.is_null() {
         return Err(anyhow!("창을 만들지 못했습니다"));
     }
+    // Let a lower-integrity copy reach this window. When Shard runs elevated,
+    // Windows' message filter (UIPI) drops messages from an unelevated process
+    // by default — so a media file double-clicked from Explorer, which starts
+    // an unelevated copy, could not hand its path to the elevated one and a
+    // second window opened instead. These two are the messages that handoff
+    // uses: the file path, and the request to come to the front.
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            ChangeWindowMessageFilterEx, MSGFLT_ALLOW, WM_COPYDATA,
+        };
+        ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, std::ptr::null_mut());
+        let wake = uikit::single::wake_message(crate::config::APP_NAME);
+        ChangeWindowMessageFilterEx(hwnd, wake, MSGFLT_ALLOW, std::ptr::null_mut());
+    }
     centre(hwnd);
     dark_title_bar(hwnd);
     // A beat of its own. The loop only turns when a message arrives, and a

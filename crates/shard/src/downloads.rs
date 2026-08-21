@@ -186,13 +186,20 @@ pub struct Downloads {
     shared: Arc<Shared>,
     /// What the page last offered, kept so a click can be matched to a format.
     offer: Option<Offer>,
+    /// The HLS renditions of the last offer, if it was one, so a chosen quality
+    /// row maps back to the playlist to download.
+    variants: Vec<crate::download::hls::Variant>,
     pub list: Vec<Job>,
     next_id: u64,
 }
 
+/// The first itag an HLS quality row carries; the rest count up from it. Above
+/// every real YouTube itag and below the two markers, so the three never clash.
+const HLS_VARIANT_BASE: u32 = 90_000;
+
 impl Downloads {
     pub fn new(shared: Arc<Shared>) -> Self {
-        Self { shared, offer: None, list: Vec::new(), next_id: 1 }
+        Self { shared, offer: None, variants: Vec::new(), list: Vec::new(), next_id: 1 }
     }
 
     /// What the settings say about sound, in the form the chooser wants.
@@ -220,15 +227,35 @@ impl Downloads {
             Err(_) => return youtube::say_script("영상 정보를 읽지 못했습니다.", true),
         };
         // Not YouTube, but the page was seen fetching a media file or an HLS
-        // playlist — the simple and the streaming cases. One row each; the
-        // download itself is a straight fetch (direct) or a segment join (HLS).
+        // playlist. When it is HLS, its renditions are listed so a quality can be
+        // picked the way the phone does; the master is fetched here to read them.
         if offer.template().is_none() && (!offer.media.is_empty() || !offer.hls.is_empty()) {
             let mut rows = Vec::new();
-            if !offer.media.is_empty() {
+            self.variants = Vec::new();
+            if !offer.hls.is_empty() {
+                let variants = save::hls_variants(&offer.hls, &offer.referer);
+                if variants.is_empty() {
+                    // A media playlist, or a master that would not read: one row,
+                    // the stream taken whole.
+                    rows.push((HLS_ITAG, "최고 화질".to_string(), "HLS 스트림".to_string()));
+                } else {
+                    for (index, variant) in variants.iter().enumerate() {
+                        rows.push((
+                            HLS_VARIANT_BASE + index as u32,
+                            variant.label(),
+                            "HLS 스트림".to_string(),
+                        ));
+                    }
+                    self.variants = variants;
+                }
+            }
+            // The direct file only when there is no HLS: on an HLS site the
+            // captured progressive URL is usually a short preview, not the video.
+            if !offer.media.is_empty() && offer.hls.is_empty() {
                 rows.push((DIRECT_ITAG, "원본 파일".to_string(), "직접 다운로드".to_string()));
             }
-            if !offer.hls.is_empty() {
-                rows.push((HLS_ITAG, "최고 화질".to_string(), "HLS 스트림 합치기".to_string()));
+            if rows.is_empty() {
+                return youtube::say_script("받을 수 있는 형식을 찾지 못했습니다.", true);
             }
             let script = youtube::list_script(&rows);
             self.offer = Some(offer);
@@ -281,11 +308,21 @@ impl Downloads {
         let Some(offer) = self.offer.clone() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
         };
-        // The non-YouTube rows: a direct fetch, or an HLS join. Neither has a
-        // SABR template, so they are answered here before the template is asked
-        // for below.
-        if itag == DIRECT_ITAG || itag == HLS_ITAG {
-            return self.begin_media(&offer, itag == HLS_ITAG, anyway);
+        // The non-YouTube rows: a direct fetch, or an HLS join at some quality.
+        // None has a SABR template, so they are answered here before the template
+        // is asked for below.
+        if itag == DIRECT_ITAG {
+            return self.begin_media(&offer, offer.media.clone(), false, anyway);
+        }
+        if itag == HLS_ITAG {
+            return self.begin_media(&offer, offer.hls.clone(), true, anyway);
+        }
+        if itag >= HLS_VARIANT_BASE {
+            let index = (itag - HLS_VARIANT_BASE) as usize;
+            let Some(variant) = self.variants.get(index) else {
+                return youtube::say_script("고른 화질을 찾지 못했습니다.", true);
+            };
+            return self.begin_media(&offer, variant.url.clone(), true, anyway);
         }
         let Some(template) = offer.template() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
@@ -387,13 +424,12 @@ impl Downloads {
     /// one thing, so this is much thinner than [`begin`]. It reuses the same
     /// job list, progress channel and cancel flag so the panel treats it no
     /// differently once it is running.
-    fn begin_media(&mut self, offer: &Offer, hls: bool, anyway: bool) -> String {
+    fn begin_media(&mut self, offer: &Offer, url: String, hls: bool, anyway: bool) -> String {
         let title = if offer.title.trim().is_empty() {
             "video".to_string()
         } else {
             offer.title.clone()
         };
-        let url = if hls { offer.hls.clone() } else { offer.media.clone() };
         if url.is_empty() {
             return youtube::say_script("받을 주소를 찾지 못했습니다.", true);
         }

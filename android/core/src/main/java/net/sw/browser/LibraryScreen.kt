@@ -93,6 +93,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val npTitle: TextView = root.findViewById(R.id.npTitle)
     private val npToggle: ImageButton = root.findViewById(R.id.npToggle)
     private val npStop: ImageButton = root.findViewById(R.id.npStop)
+    private val npMute: ImageButton = root.findViewById(R.id.npMute)
     private val npSeek: android.widget.SeekBar = root.findViewById(R.id.npSeek)
     private val npElapsed: TextView = root.findViewById(R.id.npElapsed)
     private val npTotal: TextView = root.findViewById(R.id.npTotal)
@@ -416,6 +417,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
      * what rebuilding it every time would look like.
      */
     private fun showNowPlaying(item: Library.Item) {
+        // The sound glyph on the music bar reflects the level too.
+        syncVolumeBar()
         if (npFor != item.uri) {
             npFor = item.uri
             npTitle.text = item.title
@@ -638,13 +641,15 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private fun syncVolumeBar() {
         val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
         val now = audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)
-        vbMute.setImageResource(if (now == 0) R.drawable.ic_muted else R.drawable.ic_volume)
+        val glyph = if (now == 0) R.drawable.ic_muted else R.drawable.ic_volume
+        vbMute.setImageResource(glyph)
+        npMute.setImageResource(glyph)
     }
 
     private var volumePopup: android.widget.PopupWindow? = null
 
-    /** A tall volume slider off the sound icon; the bottom is mute. */
-    private fun showVolumeSlider() {
+    /** A volume slider off the sound icon; the low end is mute. */
+    private fun showVolumeSlider(anchor: View) {
         volumePopup?.dismiss()
         val audio = activity.getSystemService(android.media.AudioManager::class.java) ?: return
         val most = audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)
@@ -677,7 +682,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
             View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
         )
-        popup.showAsDropDown(vbMute, 0, -(view.measuredHeight + vbMute.height), android.view.Gravity.END)
+        popup.showAsDropDown(anchor, 0, -(view.measuredHeight + anchor.height), android.view.Gravity.END)
     }
 
     private fun rateLabel(rate: Float): String {
@@ -905,7 +910,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // A tap on the sound icon brings up a tall slider; dragging it sets the
         // level, and the bottom of it is zero — mute. The level is the system
         // music stream, the same one the side-drag and the hardware keys move.
-        vbMute.setOnClickListener { showVolumeSlider() }
+        vbMute.setOnClickListener { showVolumeSlider(vbMute) }
+        npMute.setOnClickListener { showVolumeSlider(npMute) }
         // The speed, stepping through the same set the desktop offers. Not kept
         // between files — a rate is for the thing being watched now.
         vbRate.setOnClickListener {

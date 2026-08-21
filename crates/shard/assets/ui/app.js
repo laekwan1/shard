@@ -185,7 +185,10 @@ urlBox.addEventListener("keydown", (e) => {
   urlBox.blur();
 });
 
-document.getElementById("chip").addEventListener("click", () => show("home"));
+// The wordmark opens the library, not the home screen: the library is where
+// the program lands and what it is mostly used for. The engine switch that home
+// carried is still on the tray icon.
+document.getElementById("chip").addEventListener("click", () => show("library"));
 for (const button of document.querySelectorAll("#go button")) {
   button.addEventListener("click", () => {
     const to = button.dataset.go;
@@ -1514,3 +1517,7 @@ window.__shard = {
 // Ask for the state once the page is up: the shell is built before this runs,
 // so nothing has been sent yet.
 send("ready");
+
+// Land on the library rather than the home screen — that is what the program is
+// mostly opened for, and the engine switch home carried is on the tray.
+show("library");

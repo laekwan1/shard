@@ -523,6 +523,30 @@ pub fn run_direct(
     Ok(output)
 }
 
+/// The renditions an HLS master lists, highest first, for a quality menu.
+///
+/// Fetched and parsed here so the list can be shown before anything is chosen;
+/// an empty result means the URL was a media playlist already (one quality) or
+/// could not be read. Kept quick with a short timeout — it blocks the caller.
+pub fn hls_variants(manifest_url: &str, referer: &str) -> Vec<crate::download::hls::Variant> {
+    use crate::download::hls;
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent(UA)
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    let Ok(response) = media_get(&client, manifest_url, referer) else { return Vec::new() };
+    let Ok(text) = response.text() else { return Vec::new() };
+    if hls::is_master(&text) {
+        hls::variants(&text, manifest_url)
+    } else {
+        Vec::new()
+    }
+}
+
 /// Download an HLS stream and join it into one file.
 ///
 /// The master playlist's highest rendition is taken (the page's own player

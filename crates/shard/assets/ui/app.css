@@ -458,23 +458,25 @@ button svg { display: block; }
 }
 /* Named by an outline, chosen by being filled: the same pair the shelf switch
    above is drawn with, so one row does not answer differently from the other. */
+/* The chips are the list's own colour: a chosen folder is filled with it and an
+   idle one is outlined in it, so a tab reads as a piece of the list it opens
+   onto rather than a control in a different shade. */
 .folder {
   padding: 5px 15px;
   font-size: 11.5px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid #ffffff1c;
+  border: 1px solid var(--surface);
   border-radius: var(--r-sm);
   transition: color var(--t-press) var(--ease), background var(--t-press) var(--ease), border-color var(--t-press) var(--ease);
 }
-.folder:hover { color: var(--on-surface); border-color: #ffffff3d; }
-/* Chosen is said by the fill and the weight; the outline belongs to idle
-   chips, where it is the only thing marking the pressable area. */
-.folder.on { color: #fff; background: #34343b; border-color: transparent; font-weight: 700; }
+.folder:hover { color: var(--on-surface); }
+.folder.on { color: #fff; background: var(--surface); border-color: var(--surface); font-weight: 700; }
 /* Lit while a file is held over it, so a drop is never a guess. */
 .folder.over { background: #2dd4bf26; border-color: var(--accent); color: #fff; }
 /* Square with itself, and the same box the new-tab button in the title strip
-   is: it does the same thing a row further down. */
+   is: it does the same thing a row further down. Filled in the list's colour
+   too, so it sits in the row like the rest. */
 .folder.add {
   margin-left: auto;
   width: 20px;
@@ -483,7 +485,8 @@ button svg { display: block; }
   place-items: center;
   padding: 0;
   font-size: 12px;
-  border-color: transparent;
+  background: var(--surface);
+  border-color: var(--surface);
   border-radius: var(--r-sm);
 }
 .folder.add svg { width: 11px; height: 11px; }

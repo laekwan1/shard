@@ -13,6 +13,43 @@
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 
+/// A security descriptor with a null DACL, kept alive beside the attributes that
+/// point at it, so a kernel object made with it is open to every process.
+struct OpenToAll {
+    attributes: windows_sys::Win32::Security::SECURITY_ATTRIBUTES,
+    // The descriptor the attributes point into; boxed so its address is stable.
+    _descriptor: Box<windows_sys::Win32::Security::SECURITY_DESCRIPTOR>,
+}
+
+/// Build attributes granting everyone access, or `None` if the descriptor could
+/// not be set up (in which case the default is used — no worse than before).
+fn open_to_all() -> Option<OpenToAll> {
+    use windows_sys::Win32::Security::{
+        InitializeSecurityDescriptor, SetSecurityDescriptorDacl, SECURITY_ATTRIBUTES,
+        SECURITY_DESCRIPTOR,
+    };
+    // SECURITY_DESCRIPTOR_REVISION is 1; used directly to avoid a fragile import.
+    const REVISION: u32 = 1;
+    let mut descriptor: Box<SECURITY_DESCRIPTOR> =
+        Box::new(unsafe { std::mem::zeroed() });
+    let ptr = descriptor.as_mut() as *mut SECURITY_DESCRIPTOR as *mut std::ffi::c_void;
+    unsafe {
+        if InitializeSecurityDescriptor(ptr, REVISION) == 0 {
+            return None;
+        }
+        // A null (not empty) DACL: present, pointing at nothing, which grants all.
+        if SetSecurityDescriptorDacl(ptr, 1, std::ptr::null(), 0) == 0 {
+            return None;
+        }
+    }
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: ptr,
+        bInheritHandle: 0,
+    };
+    Some(OpenToAll { attributes, _descriptor: descriptor })
+}
+
 /// Held for the life of the process; dropping it lets the next copy start.
 pub struct Claim(HANDLE);
 
@@ -63,7 +100,17 @@ pub fn claim(app: &str) -> Option<Claim> {
     let mut name: Vec<u16> = format!("Global\\{app}-single-instance").encode_utf16().collect();
     name.push(0);
 
-    let handle = unsafe { CreateMutexW(std::ptr::null(), 1, name.as_ptr()) };
+    // A null DACL, so both an elevated and an unelevated copy can open the same
+    // mutex. Without it the mutex an elevated copy creates carries a DACL that
+    // denies the unelevated one — which then reads "no mutex" and starts a whole
+    // second engine. Two Shards is exactly what this is meant to prevent, so the
+    // claim has to be visible across the integrity line.
+    let security = open_to_all();
+    let attributes = security
+        .as_ref()
+        .map(|s| &s.attributes as *const windows_sys::Win32::Security::SECURITY_ATTRIBUTES)
+        .unwrap_or(std::ptr::null());
+    let handle = unsafe { CreateMutexW(attributes, 1, name.as_ptr()) };
     if handle.is_null() {
         // The claim could not be made at all — which is not evidence that
         // another copy is running, so this does not stop the program.
