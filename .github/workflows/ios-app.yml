@@ -44,7 +44,7 @@ jobs:
         working-directory: ios
         run: xcodegen generate
 
-      - name: Build the app for the simulator (unsigned)
+      - name: Build the app for the simulator (compile check)
         run: |
           xcodebuild \
             -project ios/Shard.xcodeproj \
@@ -55,3 +55,35 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=YES EXCLUDED_ARCHS=x86_64 \
             build
+
+      # A real-iPhone build (arm64, iphoneos SDK), unsigned. SideStore signs it
+      # with the user's Apple ID on the device, so we ship it unsigned rather
+      # than embedding any certificate here.
+      - name: Build the app for a device (unsigned)
+        run: |
+          xcodebuild \
+            -project ios/Shard.xcodeproj \
+            -scheme Shard \
+            -sdk iphoneos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath ios/build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      # Package the .app as a .ipa (Payload/Shard.app, zipped). No signing.
+      - name: Package unsigned .ipa
+        run: |
+          APP=$(find ios/build/dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "app: $APP"
+          rm -rf ios/build/payload && mkdir -p ios/build/payload/Payload
+          cp -R "$APP" ios/build/payload/Payload/
+          (cd ios/build/payload && zip -qry ../Shard-unsigned.ipa Payload)
+          ls -la ios/build/Shard-unsigned.ipa
+
+      - name: Upload .ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Shard-unsigned-ipa
+          path: ios/build/Shard-unsigned.ipa
+          if-no-files-found: error
