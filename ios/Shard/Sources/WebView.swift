@@ -4,12 +4,14 @@ import WebKit
 /// The page. Owns the WKWebView so navigation state lives in one observable
 /// place the UI binds to. Media is not tracked continuously any more — the app
 /// asks the page for an offer (Ask.js) at the moment the user wants to download.
-final class WebModel: NSObject, ObservableObject, WKNavigationDelegate {
+final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var address: String = ""
     @Published var pageTitle: String = ""
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
+    /// Called when a video is long-pressed, so the browser can offer to download.
+    var onLongPressVideo: (() -> Void)?
 
     // A desktop user agent: YouTube's desktop player exposes getPlayerResponse
     // and sends the `videoplayback` POST the capture relies on, which is what
@@ -26,6 +28,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate {
                 WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
         }
+        controller.add(self, name: "shard")
         let config = WKWebViewConfiguration()
         config.userContentController = controller
         config.allowsInlineMediaPlayback = true
@@ -76,6 +79,15 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate {
                 continuation.resume(returning: result as? String)
             }
         }
+    }
+
+    // MARK: WKScriptMessageHandler
+
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == "shard",
+              let body = message.body as? [String: Any],
+              body["type"] as? String == "longpress" else { return }
+        onLongPressVideo?()
     }
 
     // MARK: WKNavigationDelegate

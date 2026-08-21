@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import MobileVLCKit
 
 /// Drives one libVLC player and publishes what the controls need. libVLC plays
@@ -10,20 +11,69 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var isPlaying = false
     @Published var elapsed = "0:00"
     @Published var duration = "0:00"
-    /// True while the user drags the scrubber, so ticks do not fight the drag.
+    @Published var rate: Float = 1
     var scrubbing = false
-    private var started = false
 
-    func open(_ url: URL, into view: UIView) {
-        guard !started else { return }
-        started = true
+    private var currentURL: URL?
+    private var pendingSeek: Float?
+    private static let rates: [Float] = [1, 1.25, 1.5, 2, 0.5, 0.75]
+
+    override init() {
+        super.init()
         player.delegate = self
-        player.drawable = view
+        // Keep sound going when the screen locks or the app backgrounds, so a
+        // video can be listened to like music.
+        try? AVAudioSession.sharedInstance().setCategory(.playback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    func attach(to view: UIView) { player.drawable = view }
+
+    /// Load and play a file, restoring where it was left off.
+    func open(_ url: URL) {
+        savePosition()
+        currentURL = url
         player.media = VLCMedia(url: url)
+        let saved = UserDefaults.standard.float(forKey: "pos:\(url.lastPathComponent)")
+        pendingSeek = saved > 0.01 && saved < 0.98 ? saved : nil
         player.play()
+        player.rate = rate
+    }
+
+    func toggle() { player.isPlaying ? player.pause() : player.play() }
+    func seek(to p: Float) { player.position = p }
+
+    /// Nudge by a fraction of the whole, for the rewind hold.
+    func nudge(_ delta: Float) {
+        player.position = max(0, min(1, player.position + delta))
+    }
+
+    func cycleRate() {
+        let next = Self.rates[(Self.rates.firstIndex(of: rate).map { $0 + 1 } ?? 0) % Self.rates.count]
+        rate = next
+        player.rate = next
+    }
+
+    /// A temporary rate for a press-and-hold; pass nil to restore the chosen one.
+    func holdRate(_ value: Float?) {
+        player.rate = value ?? rate
+    }
+
+    func stop() {
+        savePosition()
+        player.stop()
+    }
+
+    private func savePosition() {
+        guard let url = currentURL, player.position > 0.01 else { return }
+        UserDefaults.standard.set(player.position, forKey: "pos:\(url.lastPathComponent)")
     }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
+        if let seek = pendingSeek, player.isSeekable {
+            player.position = seek
+            pendingSeek = nil
+        }
         if !scrubbing { position = player.position }
         isPlaying = player.isPlaying
         elapsed = Self.clock(player.time.intValue)
@@ -36,11 +86,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         isPlaying = player.isPlaying
     }
 
-    func toggle() { player.isPlaying ? player.pause() : player.play() }
-    func seek(to p: Float) { player.position = p }
-    func stop() { player.stop() }
-
-    /// Milliseconds to m:ss (or h:mm:ss past an hour).
     private static func clock(_ ms: Int32) -> String {
         let total = Int(max(0, ms)) / 1000
         let s = total % 60, m = (total / 60) % 60, h = total / 3600
@@ -51,73 +96,124 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 /// The bare drawing surface libVLC renders into.
 private struct VLCSurface: UIViewRepresentable {
     let controller: VLCController
-    let url: URL
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         view.backgroundColor = .black
-        controller.open(url, into: view)
+        controller.attach(to: view)
         return view
     }
     func updateUIView(_ uiView: UIView, context: Context) {}
-    static func dismantleUIView(_ uiView: UIView, coordinator: ()) {}
 }
 
-/// A player with controls: play/pause, a scrubber with times, and a close
-/// button. Tapping the picture toggles the controls.
+/// A player over a playlist (the current folder): play/pause, a scrubber with
+/// times, speed, previous/next, and press-and-hold on the picture — the right
+/// half runs at 2×, the left half rewinds — matching the desktop and phone
+/// players. Position is remembered per file.
 struct VLCPlayerScreen: View {
-    let url: URL
+    let playlist: [URL]
+    let start: Int
     var onClose: () -> Void
+
     @StateObject private var controller = VLCController()
+    @State private var index: Int = 0
     @State private var showControls = true
+    @State private var rewindTimer: Timer?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            VLCSurface(controller: controller, url: url)
-                .ignoresSafeArea()
-                .onTapGesture { withAnimation { showControls.toggle() } }
-
-            if showControls {
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button { controller.stop(); onClose() } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title).foregroundColor(.white.opacity(0.9))
-                        }
-                    }
-                    .padding()
-                    Spacer()
-                    controls
-                }
-                .transition(.opacity)
-            }
+            VLCSurface(controller: controller).ignoresSafeArea()
+            holdSurfaces
+            if showControls { overlay.transition(.opacity) }
+        }
+        .onAppear {
+            index = min(max(0, start), max(0, playlist.count - 1))
+            if playlist.indices.contains(index) { controller.open(playlist[index]) }
         }
         .onDisappear { controller.stop() }
     }
 
-    private var controls: some View {
-        HStack(spacing: 14) {
-            Button { controller.toggle() } label: {
-                Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title2).foregroundColor(.white)
-            }
-            Text(controller.elapsed).font(.caption).foregroundColor(.white).monospacedDigit()
-            Slider(
-                value: Binding(
-                    get: { Double(controller.position) },
-                    set: { controller.position = Float($0) }
-                ),
-                in: 0...1,
-                onEditingChanged: { editing in
-                    controller.scrubbing = editing
-                    if !editing { controller.seek(to: controller.position) }
+    /// Two invisible halves: hold right for 2×, hold left to rewind. A single
+    /// tap toggles the controls.
+    private var holdSurfaces: some View {
+        HStack(spacing: 0) {
+            Color.clear.contentShape(Rectangle())
+                .onTapGesture { withAnimation { showControls.toggle() } }
+                .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
+                    if pressing { startRewind() } else { stopRewind() }
+                }, perform: {})
+            Color.clear.contentShape(Rectangle())
+                .onTapGesture { withAnimation { showControls.toggle() } }
+                .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
+                    controller.holdRate(pressing ? 2.0 : nil)
+                }, perform: {})
+        }
+    }
+
+    private func startRewind() {
+        rewindTimer?.invalidate()
+        rewindTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            controller.nudge(-0.01)
+        }
+    }
+    private func stopRewind() {
+        rewindTimer?.invalidate()
+        rewindTimer = nil
+    }
+
+    private var overlay: some View {
+        VStack {
+            HStack {
+                Spacer()
+                Button { controller.stop(); onClose() } label: {
+                    Image(systemName: "xmark.circle.fill").font(.title).foregroundColor(.white.opacity(0.9))
                 }
-            )
-            .tint(.white)
-            Text(controller.duration).font(.caption).foregroundColor(.white).monospacedDigit()
+            }
+            .padding()
+            Spacer()
+            transport
+        }
+    }
+
+    private var transport: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 20) {
+                Button { step(-1) } label: { Image(systemName: "backward.end.fill") }
+                    .disabled(index <= 0)
+                Button { controller.toggle() } label: {
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title)
+                }
+                Button { step(1) } label: { Image(systemName: "forward.end.fill") }
+                    .disabled(index >= playlist.count - 1)
+                Spacer()
+                Button { controller.cycleRate() } label: {
+                    Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
+                }
+            }
+            .foregroundColor(.white)
+
+            HStack(spacing: 10) {
+                Text(controller.elapsed).font(.caption).foregroundColor(.white).monospacedDigit()
+                Slider(
+                    value: Binding(get: { Double(controller.position) },
+                                   set: { controller.position = Float($0) }),
+                    in: 0...1,
+                    onEditingChanged: { editing in
+                        controller.scrubbing = editing
+                        if !editing { controller.seek(to: controller.position) }
+                    }
+                ).tint(.white)
+                Text(controller.duration).font(.caption).foregroundColor(.white).monospacedDigit()
+            }
         }
         .padding()
         .background(.ultraThinMaterial)
+    }
+
+    private func step(_ delta: Int) {
+        let next = index + delta
+        guard playlist.indices.contains(next) else { return }
+        index = next
+        controller.open(playlist[next])
     }
 }

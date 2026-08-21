@@ -91,4 +91,40 @@
   }
   document.addEventListener("DOMContentLoaded", keepInline);
   setInterval(keepInline, 1000);
+
+  // Long-press a video to download it, the way the phone app does. Both the
+  // touch timer and the contextmenu can fire for one press, so a short debounce
+  // keeps it to a single message.
+  var lastPress = 0;
+  function askDownload(x, y) {
+    var now = Date.now();
+    if (now - lastPress < 1000) return;
+    var el = document.elementFromPoint(x, y);
+    var onVideo = false;
+    while (el) {
+      if (el.tagName === "VIDEO") { onVideo = true; break; }
+      el = el.parentElement;
+    }
+    if (!onVideo) return;
+    lastPress = now;
+    try {
+      window.webkit.messageHandlers.shard.postMessage({ type: "longpress" });
+    } catch (e) {}
+  }
+
+  var pressTimer = null;
+  document.addEventListener(
+    "touchstart",
+    function (e) {
+      var t = e.touches[0];
+      if (!t) return;
+      var x = t.clientX, y = t.clientY;
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () { askDownload(x, y); }, 550);
+    },
+    true
+  );
+  ["touchend", "touchmove", "touchcancel", "scroll"].forEach(function (name) {
+    document.addEventListener(name, function () { clearTimeout(pressTimer); }, true);
+  });
 })();

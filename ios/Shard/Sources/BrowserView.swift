@@ -25,7 +25,10 @@ struct BrowserView: View {
                 if let banner = banner { self.banner(banner) }
             }
         }
-        .onAppear { if model.address.isEmpty { model.load("https://www.youtube.com") } }
+        .onAppear {
+            model.onLongPressVideo = { askAndDownload() }
+            if model.address.isEmpty { model.load("https://www.youtube.com") }
+        }
         .confirmationDialog("받을 화질을 고르세요", isPresented: $showQualities, titleVisibility: .visible) {
             ForEach(qualities) { row in
                 Button("\(row.label) — \(row.detail)") { startYouTube(row) }

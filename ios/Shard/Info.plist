@@ -41,6 +41,13 @@
         <true/>
     </dict>
 
+    <!-- Keep audio playing when the screen locks or the app backgrounds, so a
+         downloaded video can be listened to like music. -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>audio</string>
+    </array>
+
     <key>UILaunchScreen</key>
     <dict/>
     <key>UISupportedInterfaceOrientations</key>
