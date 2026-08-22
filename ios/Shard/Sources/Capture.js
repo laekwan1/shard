@@ -109,40 +109,108 @@
   document.addEventListener("webkitbeginfullscreen", function () { reportFullscreen(true); }, true);
   document.addEventListener("webkitendfullscreen", function () { reportFullscreen(false); }, true);
 
-  // Long-press a video to download it (kept alongside the system's own
-  // long-press menu; the button is the reliable path). Both the
-  // touch timer and the contextmenu can fire for one press, so a short debounce
-  // keeps it to a single message.
-  var lastPress = 0;
-  function askDownload(x, y) {
-    var now = Date.now();
-    if (now - lastPress < 1000) return;
-    var el = document.elementFromPoint(x, y);
-    var onVideo = false;
-    while (el) {
-      if (el.tagName === "VIDEO") { onVideo = true; break; }
-      el = el.parentElement;
-    }
-    if (!onVideo) return;
-    lastPress = now;
-    try {
-      window.webkit.messageHandlers.shard.postMessage({ type: "longpress" });
-    } catch (e) {}
+  // A download button over each video's top-right, and the quality list right
+  // under it — rendered in the page so it sits on the actual video and a tap
+  // anywhere else dismisses it, which a native overlay could not do.
+  function send(msg) {
+    try { window.webkit.messageHandlers.shard.postMessage(msg); } catch (e) {}
   }
 
-  var pressTimer = null;
-  document.addEventListener(
-    "touchstart",
-    function (e) {
-      var t = e.touches[0];
-      if (!t) return;
-      var x = t.clientX, y = t.clientY;
-      clearTimeout(pressTimer);
-      pressTimer = setTimeout(function () { askDownload(x, y); }, 550);
-    },
-    true
-  );
-  ["touchend", "touchmove", "touchcancel", "scroll"].forEach(function (name) {
-    document.addEventListener(name, function () { clearTimeout(pressTimer); }, true);
-  });
+  var buttons = [];   // {video, el}
+  var anchor = null;  // button the open list belongs to
+  var listEl = null;
+
+  function makeButton() {
+    var b = document.createElement("div");
+    b.style.cssText =
+      "position:fixed;width:26px;height:26px;z-index:2147483646;display:none;" +
+      "border:1.5px solid rgba(255,255,255,0.7);border-radius:7px;" +
+      "align-items:center;justify-content:center;cursor:pointer;" +
+      "color:rgba(255,255,255,0.9);font:600 15px system-ui;background:transparent;";
+    b.textContent = "↓"; // down arrow
+    b.setAttribute("data-shard", "dl");
+    b.addEventListener("click", function (e) {
+      e.preventDefault(); e.stopPropagation();
+      removeList();
+      anchor = b;
+      send({ type: "download" });
+    });
+    document.documentElement.appendChild(b);
+    return b;
+  }
+
+  function syncButtons() {
+    var vids = Array.prototype.slice.call(document.getElementsByTagName("video"));
+    vids.forEach(function (v) {
+      if (!buttons.some(function (x) { return x.video === v; })) {
+        buttons.push({ video: v, el: makeButton() });
+      }
+    });
+    buttons.forEach(function (x) {
+      var r = x.video.getBoundingClientRect();
+      var visible = r.width > 60 && r.height > 60 && r.bottom > 0 && r.top < innerHeight;
+      x.el.style.display = visible ? "flex" : "none";
+      if (visible) {
+        x.el.style.left = Math.min(innerWidth - 32, r.right - 32) + "px";
+        x.el.style.top = Math.max(6, r.top + 6) + "px";
+      }
+    });
+    if (listEl && anchor) positionList();
+  }
+
+  function removeList() {
+    if (listEl) { listEl.remove(); listEl = null; }
+    anchor = null;
+  }
+  function positionList() {
+    if (!listEl || !anchor) return;
+    var r = anchor.getBoundingClientRect();
+    var w = 230;
+    listEl.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + "px";
+    listEl.style.top = (r.bottom + 6) + "px";
+    listEl.style.width = w + "px";
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  // Native calls this with the quality rows once it has parsed the page.
+  window.__shardQualities = function (rows) {
+    if (listEl) { listEl.remove(); listEl = null; }
+    if (!anchor || !rows || !rows.length) return;
+    listEl = document.createElement("div");
+    listEl.style.cssText =
+      "position:fixed;z-index:2147483647;background:#1a1a1d;border-radius:10px;" +
+      "box-shadow:0 6px 20px rgba(0,0,0,0.5);overflow:hidden;font:14px system-ui;";
+    rows.forEach(function (row, i) {
+      var item = document.createElement("div");
+      item.style.cssText =
+        "padding:10px 12px;color:#e8e6e3;display:flex;justify-content:space-between;gap:10px;" +
+        (i ? "border-top:1px solid #2c2e32;" : "");
+      item.innerHTML =
+        "<b>" + esc(row.label) + '</b><span style="color:#8a8a90">' + esc(row.detail) + "</span>";
+      item.addEventListener("click", function (e) {
+        e.stopPropagation();
+        send({ type: "pick", itag: row.itag });
+        removeList();
+      });
+      listEl.appendChild(item);
+    });
+    document.documentElement.appendChild(listEl);
+    positionList();
+  };
+
+  // A tap anywhere but the list (or a download button) closes it.
+  document.addEventListener("click", function (e) {
+    if (listEl && !listEl.contains(e.target) && e.target.getAttribute("data-shard") !== "dl") {
+      removeList();
+    }
+  }, true);
+
+  setInterval(syncButtons, 400);
+  window.addEventListener("scroll", syncButtons, true);
+  window.addEventListener("resize", syncButtons, true);
 })();

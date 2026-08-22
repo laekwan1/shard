@@ -11,8 +11,16 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
-    /// Called when a video is long-pressed, so the browser can offer to download.
-    var onLongPressVideo: (() -> Void)?
+    /// The download button on a video was pressed — the browser fetches the
+    /// quality rows and hands them back with `sendQualities`.
+    var onDownloadRequest: (() -> Void)?
+    /// A quality row in the in-page list was chosen (its itag).
+    var onPick: ((UInt32) -> Void)?
+
+    /// Render the quality list in the page, under the button that asked for it.
+    func sendQualities(_ json: String) {
+        webView.evaluateJavaScript("window.__shardQualities(\(json))", completionHandler: nil)
+    }
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
     /// Centre swipes: a rightward one opens the address panel, a leftward one the
@@ -118,7 +126,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "shard", let body = message.body as? [String: Any] else { return }
         switch body["type"] as? String {
-        case "longpress": onLongPressVideo?()
+        case "download": onDownloadRequest?()
+        case "pick": if let itag = (body["itag"] as? NSNumber)?.uint32Value { onPick?(itag) }
         case "fullscreen": videoFullscreen = (body["on"] as? Bool) ?? false
         default: break
         }

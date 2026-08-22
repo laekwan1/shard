@@ -10,12 +10,10 @@ struct BrowserScreen: View {
     @StateObject private var model = WebModel()
     @State private var editing = ""
 
-    @State private var showQualities = false
     @State private var qualities: [YtRow] = []
     @State private var pendingOffer = ""
     @State private var pendingTitle = ""
     @State private var banner: String?
-    @State private var asking = false
     @State private var showAddress = false
     // The bypass toggle is hidden until asked for: two more right-swipes on the
     // open address panel reveal it.
@@ -33,7 +31,6 @@ struct BrowserScreen: View {
             // swipes for address/library are recognizers on the web view itself
             // (see WebViewContainer) so they never swallow the page's touches.
             WebViewContainer(model: model)
-                .overlay(alignment: .topTrailing) { topDownload }
 
             if showAddress {
                 addressPanel.transition(.move(edge: .top))
@@ -46,64 +43,60 @@ struct BrowserScreen: View {
             if !shown { engineSwipes = 0; engineRevealed = false }
         }
         .onAppear {
-            model.onLongPressVideo = { askAndDownload() }
             model.onNavigated = { withAnimation { showAddress = false } }
             model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
             model.onSwipeLibrary = { openLibrary() }
+            model.onDownloadRequest = { requestDownload() }
+            model.onPick = { itag in pick(itag) }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
     }
 
-    // A small control at the screen's top-right that drops its quality list
-    // right underneath. A soft square, translucent grey, and half the size it
-    // was. Hidden while a web video is full screen; the long-press and the
-    // system menu are untouched.
-    private var topDownload: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            if !model.videoFullscreen {
-                Button { toggleDownload() } label: {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(Color.white.opacity(0.65), lineWidth: 1.5)
-                            .frame(width: 24, height: 24)
-                        if asking { ProgressView().tint(.white).scaleEffect(0.6) }
-                        else {
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                    }
+    /// A video's download button was pressed: ask the page, then either drop the
+    /// quality list into the page (YouTube) or start a plain download.
+    private func requestDownload() {
+        Task {
+            guard let json = await model.offer(),
+                  let data = json.data(using: .utf8),
+                  let offer = try? JSONDecoder().decode(Offer.self, from: data) else {
+                banner = "감지된 미디어가 없습니다"; return
+            }
+            pendingOffer = json
+            pendingTitle = offer.title ?? model.pageTitle
+            if offer.isYouTube {
+                guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
+                    banner = "화질을 찾지 못했습니다"; return
                 }
-                .disabled(asking)
-
-                if showQualities && !qualities.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(qualities) { row in
-                            Button { startYouTube(row); showQualities = false } label: {
-                                HStack {
-                                    Text(row.label).bold()
-                                    Spacer()
-                                    Text(row.detail).font(.caption).foregroundColor(.muted)
-                                }
-                                .padding(.horizontal, 12).padding(.vertical, 10)
-                            }
-                            .foregroundColor(.onSurface)
-                            Divider().background(Color.toolbar)
-                        }
-                    }
-                    .background(Color.chrome)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .frame(width: 250).shadow(radius: 6)
-                }
+                qualities = rows
+                model.sendQualities(qualitiesJSON(rows))
+            } else if let hls = offer.hls, !hls.isEmpty {
+                startURL(hls, isHLS: true, referer: offer.referer ?? "", title: pendingTitle)
+            } else if let media = offer.media, !media.isEmpty {
+                startURL(media, isHLS: false, referer: offer.referer ?? "", title: pendingTitle)
+            } else {
+                banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
             }
         }
-        .padding(.top, 6).padding(.trailing, 10)
     }
 
-    private func toggleDownload() {
-        if showQualities { showQualities = false } else { askAndDownload() }
+    private func pick(_ itag: UInt32) {
+        guard let row = qualities.first(where: { $0.itag == itag }) else { return }
+        startYouTube(row)
     }
 
+    private func qualitiesJSON(_ rows: [YtRow]) -> String {
+        let items = rows.map {
+            "{\"itag\":\($0.itag),\"label\":\(jsonString($0.label)),\"detail\":\(jsonString($0.detail))}"
+        }
+        return "[\(items.joined(separator: ","))]"
+    }
+
+    private func jsonString(_ s: String) -> String {
+        (try? String(data: JSONEncoder().encode(s), encoding: .utf8)) ?? "\"\""
+    }
+
+    // A small control at the screen's top-right that drops its quality list
+    // right underneath. A soft square, translucent grey, and half the size it
     private var addressPanel: some View {
         HStack(spacing: 10) {
             if engineRevealed {
@@ -159,36 +152,6 @@ struct BrowserScreen: View {
             .background(.ultraThinMaterial)
             .cornerRadius(10).padding(.bottom, 16)
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
-    }
-
-    private func askAndDownload() {
-        asking = true
-        Task {
-            defer { asking = false }
-            guard let json = await model.offer(),
-                  let data = json.data(using: .utf8),
-                  let offer = try? JSONDecoder().decode(Offer.self, from: data) else {
-                banner = "감지된 미디어가 없습니다"
-                return
-            }
-            let title = offer.title ?? model.pageTitle
-            if offer.isYouTube {
-                guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
-                    banner = "화질을 찾지 못했습니다"
-                    return
-                }
-                qualities = rows
-                pendingOffer = json
-                pendingTitle = title
-                showQualities = true
-            } else if let hls = offer.hls, !hls.isEmpty {
-                startURL(hls, isHLS: true, referer: offer.referer ?? "", title: title)
-            } else if let media = offer.media, !media.isEmpty {
-                startURL(media, isHLS: false, referer: offer.referer ?? "", title: title)
-            } else {
-                banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
-            }
-        }
     }
 
     private func startYouTube(_ row: YtRow) {
