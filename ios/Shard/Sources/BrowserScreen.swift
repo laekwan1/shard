@@ -110,7 +110,10 @@ struct BrowserScreen: View {
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
 
             URLField(text: $editing) { model.load(editing); withAnimation { showAddress = false } }
-                .padding(.horizontal, 12).padding(.vertical, 7)
+                .frame(height: 22)   // a UITextField wrapper has no height of its
+                                     // own, so without this it stretched the panel
+                                     // to the whole screen.
+                .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(Color.chrome)
                 .clipShape(Capsule())
                 .onChange(of: model.address) { editing = $0 }
