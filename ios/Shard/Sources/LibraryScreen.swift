@@ -147,7 +147,7 @@ struct LibraryScreen: View {
                         }
                     }
                 }
-                .frame(width: 160, maxHeight: 260)
+                .frame(width: 160).frame(maxHeight: 260)
                 .background(Color.chrome)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .transition(.move(edge: .leading).combined(with: .opacity))
