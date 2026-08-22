@@ -36,6 +36,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// keeps its own taps and scrolls.
     var onSwipeAddress: (() -> Void)?
     var onSwipeLibrary: (() -> Void)?
+    /// The page was tapped — used to retreat the address panel.
+    var onWebTap: (() -> Void)?
     /// True while a web video is playing full screen, so the download button hides.
     @Published var videoFullscreen = false
     /// Whether the bypass engine is on (the local proxy is running and the
@@ -85,6 +87,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
         view.allowsBackForwardNavigationGestures = true
+        // Report dark to pages (prefers-color-scheme: dark), so Google and other
+        // sites match the app's dark theme.
+        view.overrideUserInterfaceStyle = .dark
         return view
     }()
 
@@ -191,6 +196,10 @@ struct WebViewContainer: UIViewRepresentable {
             swipe.delegate = context.coordinator
             view.addGestureRecognizer(swipe)
         }
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tapped))
+        tap.cancelsTouchesInView = false
+        tap.delegate = context.coordinator
+        view.addGestureRecognizer(tap)
         return view
     }
 
@@ -206,13 +215,16 @@ struct WebViewContainer: UIViewRepresentable {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.refresh?.endRefreshing() }
         }
 
+        @objc func tapped() { model.onWebTap?() }
+
         @objc func swiped(_ g: UISwipeGestureRecognizer) {
             guard let view = g.view else { return }
             let x = g.location(in: view).x
             let w = view.bounds.width
-            // The outer fifths are left for the web view's own back/forward
-            // swipe; the centre is ours.
-            guard x > w * 0.2, x < w * 0.8 else { return }
+            // Only the very edges (24pt) are left for the web view's own
+            // back/forward swipe; everything inside that is ours, so the reach is
+            // wide and meets the edge gesture exactly.
+            guard x > 24, x < w - 24 else { return }
             if g.direction == .right { model.onSwipeAddress?() }
             else { model.onSwipeLibrary?() }
         }

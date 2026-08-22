@@ -15,9 +15,8 @@ struct BrowserScreen: View {
     @State private var pendingTitle = ""
     @State private var banner: String?
     @State private var showAddress = false
-    // The bypass toggle is hidden until asked for: two more right-swipes on the
-    // open address panel reveal it.
-    @State private var engineSwipes = 0
+    // The bypass toggle is hidden until asked for: a right-swipe on the open
+    // address panel reveals it.
     @State private var engineRevealed = false
 
     @State private var landscape = false
@@ -40,12 +39,13 @@ struct BrowserScreen: View {
             }
         }
         .onChange(of: showAddress) { shown in
-            if !shown { engineSwipes = 0; engineRevealed = false }
+            if !shown { engineRevealed = false }
         }
         .onAppear {
             model.onNavigated = { withAnimation { showAddress = false } }
             model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
-            model.onSwipeLibrary = { model.pauseWebVideos(); openLibrary() }
+            model.onSwipeLibrary = { withAnimation { showAddress = false }; model.pauseWebVideos(); openLibrary() }
+            model.onWebTap = { if showAddress { withAnimation { showAddress = false } } }
             model.onDownloadRequest = { requestDownload() }
             model.onPick = { itag in pick(itag) }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
@@ -122,12 +122,11 @@ struct BrowserScreen: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
-        // Two more right-swipes here reveal the bypass toggle.
+        // One more right-swipe here reveals the bypass toggle.
         .gesture(
             DragGesture(minimumDistance: 24).onEnded { v in
                 guard v.translation.width > 40, abs(v.translation.height) < 60 else { return }
-                engineSwipes += 1
-                if engineSwipes >= 2 { withAnimation { engineRevealed = true } }
+                withAnimation { engineRevealed = true }
             }
         )
     }

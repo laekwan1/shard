@@ -231,7 +231,7 @@ struct PlayerStage: View {
                 Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
             }
             PlayerGestures(
-                onTap: { showBar() },
+                onTap: { toggleBar() },
                 onDoubleTap: { x, w in doubleTap(x, w) },
                 onHold: { active, x, w in hold(active, x, w) },
                 onVerticalDrag: { phase, sx, w, dy in vdrag(phase, sx, w, dy) }
@@ -246,9 +246,17 @@ struct PlayerStage: View {
             if showControls { controlsOverlay.transition(.opacity) }
         }
         .clipped()
-        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         .onAppear { showBar() }
-        .onDisappear { Orientation.shared.free() }
+    }
+
+    /// Tap toggles the bar — up if hidden, away if shown.
+    private func toggleBar() {
+        if showControls {
+            hideWork?.cancel()
+            withAnimation { showControls = false }
+        } else {
+            showBar()
+        }
     }
 
     // MARK: gesture handlers
@@ -324,17 +332,6 @@ struct PlayerStage: View {
         let work = DispatchWorkItem { withAnimation { showControls = false } }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
-    }
-
-    /// Full screen turns a wide video on its side, a tall one (a short) stays up.
-    private func applyOrientation(_ fs: Bool) {
-        guard fs else { Orientation.shared.free(); return }
-        let size = controller.player.videoSize
-        if size.width > size.height {
-            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-        } else {
-            Orientation.shared.lock(.portrait, to: .portrait)
-        }
     }
 
     // MARK: overlays
