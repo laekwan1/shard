@@ -12,20 +12,17 @@ import os
 from PIL import Image, ImageDraw
 
 S = 1024
-SURFACE = (17, 19, 24, 255)     # --surface #111318
+# A light ground like YouTube's and Chrome's icons, so the tile is bright on the
+# home screen rather than a black square. The mark is the accent colour, and its
+# power-cut shows the ground through it.
+BACKGROUND = (255, 255, 255, 255)
 ACCENT = (45, 212, 191, 255)    # --accent  #2dd4bf
-
-
-def u2px(u):
-    """SVG unit in [-1,1] -> pixel."""
-    return (u + 1.0) / 2.0 * S
-
 
 # Supersample for clean edges, then downscale.
 SS = 4
 size = S * SS
 
-img = Image.new("RGBA", (size, size), SURFACE)
+img = Image.new("RGBA", (size, size), BACKGROUND)
 draw = ImageDraw.Draw(img)
 
 
@@ -33,15 +30,19 @@ def p(u):
     return int(round((u + 1.0) / 2.0 * size))
 
 
-# Rounded square in the accent colour.
-x0, y0, x1, y1 = p(-0.72), p(-0.72), p(0.72), p(0.72)
-radius = int(round(0.22 / 2.0 * size))
+# A centred rounded square, half the tile wide, in the accent colour — the logo
+# sits on the light ground rather than filling the whole icon.
+span = 0.5
+x0, y0, x1, y1 = p(-span), p(-span), p(span), p(span)
+radius = int(round(0.16 * (x1 - x0)))
 draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=ACCENT)
 
-# The diagonal power-cut: a stroke of the surface colour from corner to corner,
-# so the gap shows the background through the mark, exactly as the SVG mask does.
-width = int(round(0.22 / 2.0 * size))
-draw.line([p(-1.5), p(-1.5), p(1.5), p(1.5)], fill=SURFACE, width=width)
+# The diagonal power-cut in the background colour, clipped to the mark by only
+# drawing where the mark is (a stroke across the whole tile is fine — outside the
+# square it just repaints the ground its own colour).
+width = int(round(0.15 * (x1 - x0)))
+draw.line([p(-span - 0.2), p(-span - 0.2), p(span + 0.2), p(span + 0.2)],
+          fill=BACKGROUND, width=width)
 
 img = img.resize((S, S), Image.LANCZOS).convert("RGB")
 
