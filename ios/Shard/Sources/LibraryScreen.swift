@@ -39,6 +39,9 @@ struct LibraryScreen: View {
         }
         .background(Color.surface.ignoresSafeArea())
         .foregroundColor(.onSurface)
+        // A finished download adds a file; reloading when the downloads list
+        // changes makes it appear without leaving and coming back.
+        .onChange(of: downloads.items.count) { _ in store.reload() }
         .alert("새 폴더", isPresented: $showNewFolder) {
             TextField("폴더 이름", text: $newFolder)
             Button("만들기") { store.createFolder(newFolder); newFolder = "" }
@@ -278,13 +281,31 @@ struct LibraryScreen: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name).foregroundColor(.onSurface).lineLimit(2)
-                Text(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file))
-                    .font(.caption).foregroundColor(.muted)
+                Text(describe(item)).font(.caption).foregroundColor(.muted)
             }
             Spacer()
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
         .contentShape(Rectangle())
+    }
+
+    /// Size · folder · age — the three things worth knowing, like the phone.
+    private func describe(_ item: Item) -> String {
+        var parts = [ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)]
+        if let folder = item.folder { parts.append(folder) }
+        parts.append(age(item.url))
+        return parts.joined(separator: " · ")
+    }
+
+    private func age(_ url: URL) -> String {
+        guard let date = try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        else { return "" }
+        let days = Calendar.current.dateComponents([.day], from: date, to: Date()).day ?? 0
+        switch days {
+        case 0: return "오늘"
+        case 1: return "어제"
+        default: return "\(days)일 전"
+        }
     }
 
     private func thumbnail(_ item: Item) -> some View {
