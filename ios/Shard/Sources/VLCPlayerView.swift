@@ -209,6 +209,43 @@ private struct VLCSurface: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
+/// A slim seek bar with a small round handle — SwiftUI's Slider thumb cannot be
+/// resized, and its default read as an oversized oval.
+struct SeekSlider: View {
+    @Binding var value: Double            // 0…1
+    var onBegin: () -> Void
+    var onScrub: (Double) -> Void
+    var onEnd: (Double) -> Void
+    @State private var dragging = false
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = max(geo.size.width, 1)
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.3)).frame(height: 3)
+                Capsule().fill(Color.accent).frame(width: w * CGFloat(value), height: 3)
+                Circle().fill(Color.accent)
+                    .frame(width: 9, height: 9)
+                    .offset(x: w * CGFloat(value) - 4.5)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        if !dragging { dragging = true; onBegin() }
+                        onScrub(min(1, max(0, Double(g.location.x / w))))
+                    }
+                    .onEnded { g in
+                        dragging = false
+                        onEnd(min(1, max(0, Double(g.location.x / w))))
+                    }
+            )
+        }
+        .frame(height: 22)
+    }
+}
+
 /// A brief on-screen gauge for a side drag (brightness or sound).
 private struct Gauge: View {
     let icon: String
@@ -251,6 +288,7 @@ struct PlayerStage: View {
     @State private var dragMode: DragMode = .none
     @State private var startBrightness: CGFloat = 0
     @State private var startVolume: Float = 0
+    @State private var holdVolume = false
 
     var body: some View {
         ZStack {
@@ -326,6 +364,14 @@ struct PlayerStage: View {
 
     private func hold(_ active: Bool, _ x: CGFloat, _ w: CGFloat) {
         if active { showBar() }
+        // Windowed: a hold brings up the sound, adjusted by moving the finger up
+        // and down (see the drag handler). Full screen keeps the 2×/rewind hold.
+        if !fullscreen {
+            holdVolume = active
+            if active { startVolume = controller.volume }
+            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
+            return
+        }
         if x > w / 2 {
             controller.holdRate(active ? 2.0 : nil)       // right: 2×
         } else {
@@ -345,6 +391,11 @@ struct PlayerStage: View {
             }
         case .changed:
             let step = Float(-dy / 260)                     // from the current value
+            // A windowed hold turns the finger's up/down into volume anywhere.
+            if holdVolume {
+                let v = max(0, min(1, startVolume + step)); controller.volume = v
+                gauge = ("speaker.wave.2", Double(v)); return
+            }
             if dragMode == .brightness {
                 let b = max(0, min(1, startBrightness + CGFloat(step)))
                 UIScreen.main.brightness = b; gauge = ("sun.max", Double(b))
@@ -423,17 +474,13 @@ struct PlayerStage: View {
             // Seek, with the sound control to its right.
             HStack(spacing: 6) {
                 Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
-                Slider(
-                    value: Binding(
-                        get: { Double(controller.position) },
-                        set: { controller.previewSeek(Float($0)) }
-                    ),
-                    in: 0...1,
-                    onEditingChanged: { editing in
-                        editing ? controller.beginScrub() : controller.endScrub(controller.position)
-                        showBar()
-                    }
-                ).tint(.accent)
+                SeekSlider(
+                    value: Binding(get: { Double(controller.position) },
+                                   set: { controller.previewSeek(Float($0)) }),
+                    onBegin: { controller.beginScrub(); showBar() },
+                    onScrub: { controller.previewSeek(Float($0)) },
+                    onEnd: { controller.endScrub(Float($0)) }
+                )
                 Text(controller.duration).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
                 Button { controller.toggleMute() } label: {
                     Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")

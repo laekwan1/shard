@@ -22,6 +22,8 @@ struct LibraryScreen: View {
     @State private var folderRenameText = ""
     @State private var deletingFolder: String?
     @State private var showSettings = false
+    @State private var fileMenu: Item?
+    @State private var showFolderPick = false
     /// Direction of the last shelf switch, so the list slides in the way the
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
@@ -54,6 +56,12 @@ struct LibraryScreen: View {
             }
             if currentIndex != nil && fullscreen {
                 stage.ignoresSafeArea().zIndex(2)
+            }
+            if let item = fileMenu {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { fileMenu = nil; showFolderPick = false }
+                    .zIndex(6)
+                fileMenuCard(item).zIndex(7)
             }
             if showNewFolder {
                 Color.black.opacity(0.35).ignoresSafeArea()
@@ -107,6 +115,58 @@ struct LibraryScreen: View {
             Button("취소", role: .cancel) { deletingFolder = nil }
         } message: {
             Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
+        }
+    }
+
+    /// The file's own menu, with a folder panel that slides out to the right for
+    /// "move to folder" — half-screen at most, not a full system sheet.
+    private func fileMenuCard(_ item: Item) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(spacing: 0) {
+                menuRow("이름 바꾸기", "pencil") {
+                    renaming = item; renameText = item.name; fileMenu = nil
+                }
+                Divider().background(Color.toolbar)
+                menuRow("폴더로 이동", showFolderPick ? "chevron.right" : "folder") {
+                    withAnimation { showFolderPick.toggle() }
+                }
+                Divider().background(Color.toolbar)
+                menuRow("삭제", "trash", tint: .red) { store.delete(item); fileMenu = nil }
+            }
+            .frame(width: 190)
+            .background(Color.chrome)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+
+            if showFolderPick {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        menuRow("저장소", "house.fill") { store.move(item, to: nil); fileMenu = nil }
+                        ForEach(store.folders.filter { $0 != item.folder }, id: \.self) { folder in
+                            Divider().background(Color.toolbar)
+                            menuRow(folder, "folder") { store.move(item, to: folder); fileMenu = nil }
+                        }
+                    }
+                }
+                .frame(width: 160, maxHeight: 260)
+                .background(Color.chrome)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .shadow(radius: 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func menuRow(_ label: String, _ icon: String, tint: Color = .onSurface, tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            HStack(spacing: 10) {
+                Image(systemName: icon).frame(width: 18)
+                Text(label).font(.subheadline)
+                Spacer()
+            }
+            .foregroundColor(tint)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .contentShape(Rectangle())
         }
     }
 
@@ -356,13 +416,14 @@ struct LibraryScreen: View {
             LazyVStack(spacing: 0) {
                 ForEach(Array(store.visible.enumerated()), id: \.element.id) { index, item in
                     row(item)
-                        // A tap plays; a drag scrolls. Using a tap gesture rather
-                        // than a Button means a scroll that ends over a row no
-                        // longer counts as a press on it.
+                        // A tap plays; a long-press opens the file's own menu (a
+                        // custom one, so "move to folder" can show the folders in
+                        // a panel beside it rather than a giant system sheet).
                         .contentShape(Rectangle())
                         .onTapGesture { play(at: index) }
-                        .onDrag { NSItemProvider(object: item.url as NSURL) }
-                        .contextMenu { menu(item) }
+                        .onLongPressGesture(minimumDuration: 0.4) {
+                            fileMenu = item; showFolderPick = false
+                        }
                     Divider().background(Color.toolbar)
                 }
             }
@@ -371,10 +432,12 @@ struct LibraryScreen: View {
         // right leaves to the web. Left: switch video→music. Works while a video
         // plays too (the player has its own gestures, on the picture itself).
         .simultaneousGesture(
-            DragGesture(minimumDistance: 30)
+            DragGesture(minimumDistance: 40)
                 .onEnded { value in
-                    guard abs(value.translation.width) > 60,
-                          abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
+                    // Clearly horizontal only, so ordinary up/down scrolling is
+                    // never read as a shelf switch.
+                    guard abs(value.translation.width) > 80,
+                          abs(value.translation.width) > abs(value.translation.height) * 2.5 else { return }
                     if value.translation.width > 0 {
                         if store.kind == .music { setKind(.video) }
                         else { close() }
