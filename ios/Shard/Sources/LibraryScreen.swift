@@ -73,7 +73,11 @@ struct LibraryScreen: View {
             title: currentIndex.flatMap { store.visible.indices.contains($0) ? store.visible[$0].name : nil } ?? "",
             fullscreen: $fullscreen,
             onStop: { stopPlayer() },
-            onPullToWeb: { stopPlayer(); close() }
+            onPullToWeb: { stopPlayer(); close() },
+            onPrev: { if let i = currentIndex, i > 0 { play(at: i - 1) } },
+            onNext: { if let i = currentIndex, i + 1 < store.visible.count { play(at: i + 1) } },
+            hasPrev: (currentIndex ?? 0) > 0,
+            hasNext: (currentIndex ?? Int.max) + 1 < store.visible.count
         )
     }
 

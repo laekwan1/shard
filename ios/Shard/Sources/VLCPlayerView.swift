@@ -121,6 +121,10 @@ struct PlayerStage: View {
     @Binding var fullscreen: Bool
     var onStop: () -> Void
     var onPullToWeb: () -> Void
+    var onPrev: () -> Void
+    var onNext: () -> Void
+    var hasPrev: Bool
+    var hasNext: Bool
 
     @State private var showControls = true
     @State private var rewindTimer: Timer?
@@ -132,7 +136,7 @@ struct PlayerStage: View {
         ZStack {
             Color.black
             VLCSurface(controller: controller)
-            halves
+            thirds
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             if showControls { controlsOverlay.transition(.opacity) }
         }
@@ -141,24 +145,31 @@ struct PlayerStage: View {
         .simultaneousGesture(sideDragGesture)
     }
 
-    // Two halves: tap toggles the bar, double-tap seeks, hold runs fast / rewinds.
-    private var halves: some View {
+    // Thirds, like the phone: double-tap the left/right third seeks ±3s (the
+    // middle only toggles the bar); a hold runs 2× on the right and rewinds on
+    // the left, and the middle is left alone.
+    private var thirds: some View {
         HStack(spacing: 0) {
-            half(left: true)
-            half(left: false)
+            column(seek: -3, hold: .rewind)
+            column(seek: 0, hold: .none)
+            column(seek: 3, hold: .fast)
         }
     }
 
-    private func half(left: Bool) -> some View {
+    private enum Hold { case rewind, fast, none }
+
+    private func column(seek: Int32, hold: Hold) -> some View {
         Color.clear
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) { controller.jump(left ? -10 : 10) }
+            .onTapGesture(count: 2) {
+                if seek != 0 { controller.jump(seek) } else { withAnimation { showControls.toggle() } }
+            }
             .onTapGesture { withAnimation { showControls.toggle() } }
             .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
-                if left {
-                    pressing ? startRewind() : stopRewind()
-                } else {
-                    controller.holdRate(pressing ? 2.0 : nil)
+                switch hold {
+                case .rewind: pressing ? startRewind() : stopRewind()
+                case .fast: controller.holdRate(pressing ? 2.0 : nil)
+                case .none: break
                 }
             }, perform: {})
     }
@@ -233,11 +244,13 @@ struct PlayerStage: View {
     private var transport: some View {
         VStack(spacing: 8) {
             HStack(spacing: 18) {
-                Button { controller.jump(-10) } label: { Image(systemName: "gobackward.10") }
+                Button { onPrev() } label: { Image(systemName: "backward.end.fill") }
+                    .disabled(!hasPrev)
                 Button { controller.toggle() } label: {
                     Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title2)
                 }
-                Button { controller.jump(10) } label: { Image(systemName: "goforward.10") }
+                Button { onNext() } label: { Image(systemName: "forward.end.fill") }
+                    .disabled(!hasNext)
                 Spacer()
                 Button { controller.cycleRate() } label: {
                     Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
