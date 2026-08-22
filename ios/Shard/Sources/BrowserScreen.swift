@@ -16,17 +16,33 @@ struct BrowserScreen: View {
     @State private var pendingTitle = ""
     @State private var banner: String?
     @State private var asking = false
+    @State private var showAddress = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            topBar
-            ZStack(alignment: .bottom) {
-                WebViewContainer(model: model)
-                if let banner = banner { self.banner(banner) }
+        ZStack(alignment: .top) {
+            Color.surface.ignoresSafeArea()
+            WebViewContainer(model: model).ignoresSafeArea(edges: .bottom)
+
+            // Edge zones: swipe in from the left for the address panel, from the
+            // right for the library — the phone app's two swipes.
+            HStack {
+                edge(open: true)
+                Spacer()
+                edge(open: false)
+            }
+
+            if showAddress {
+                addressPanel.transition(.move(edge: .top))
+            }
+            if asking {
+                ProgressView().tint(.accent).padding(8)
+                    .background(.ultraThinMaterial).clipShape(Circle())
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 6)
+            }
+            if let banner = banner {
+                self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
-        .background(Color.surface)
-        .overlay(alignment: .trailing) { rightEdgeSwipe }
         .onAppear {
             model.onLongPressVideo = { askAndDownload() }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
@@ -39,7 +55,24 @@ struct BrowserScreen: View {
         }
     }
 
-    private var topBar: some View {
+    private func edge(open address: Bool) -> some View {
+        Color.clear
+            .frame(width: 22)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 20)
+                    .onEnded { v in
+                        guard abs(v.translation.width) > 40, abs(v.translation.height) < 70 else { return }
+                        if address, v.translation.width > 0 {
+                            withAnimation(.easeOut(duration: 0.18)) { showAddress = true }
+                        } else if !address, v.translation.width < 0 {
+                            openLibrary()
+                        }
+                    }
+            )
+    }
+
+    private var addressPanel: some View {
         HStack(spacing: 10) {
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
@@ -53,12 +86,12 @@ struct BrowserScreen: View {
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Color.chrome)
                 .clipShape(Capsule())
-                .onSubmit { model.load(editing) }
+                .onSubmit { model.load(editing); withAnimation { showAddress = false } }
                 .onChange(of: model.address) { editing = $0 }
 
             iconButton(model.isLoading ? "xmark" : "arrow.clockwise") { model.reload() }
-            if asking { ProgressView().tint(.accent).frame(width: 26) }
             iconButton("square.stack") { openLibrary() }
+            iconButton("chevron.up") { withAnimation { showAddress = false } }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
@@ -70,21 +103,6 @@ struct BrowserScreen: View {
         }
         .disabled(!enabled)
         .frame(width: 26)
-    }
-
-    /// A slim strip down the right edge: dragging left from it opens the library.
-    private var rightEdgeSwipe: some View {
-        Color.clear
-            .frame(width: 24)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { value in
-                        if value.translation.width < -40 && abs(value.translation.height) < 60 {
-                            openLibrary()
-                        }
-                    }
-            )
     }
 
     private func banner(_ text: String) -> some View {

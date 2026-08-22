@@ -116,9 +116,33 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     }
 }
 
-/// Hosts the model's WKWebView inside SwiftUI.
+/// Hosts the model's WKWebView inside SwiftUI, with pull-to-refresh — a drag
+/// down from the top of the page reloads it, like the phone app.
 struct WebViewContainer: UIViewRepresentable {
     let model: WebModel
-    func makeUIView(context: Context) -> WKWebView { model.webView }
+
+    func makeCoordinator() -> Coordinator { Coordinator(model) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let view = model.webView
+        let refresh = UIRefreshControl()
+        refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload), for: .valueChanged)
+        view.scrollView.refreshControl = refresh
+        context.coordinator.refresh = refresh
+        return view
+    }
+
     func updateUIView(_ uiView: WKWebView, context: Context) {}
+
+    final class Coordinator {
+        let model: WebModel
+        weak var refresh: UIRefreshControl?
+        init(_ model: WebModel) { self.model = model }
+        @objc func reload() {
+            model.reload()
+            // The spinner is only a gesture cue; the page's own load drives the
+            // real progress, so end it promptly.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.refresh?.endRefreshing() }
+        }
+    }
 }

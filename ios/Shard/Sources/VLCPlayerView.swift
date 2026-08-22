@@ -131,6 +131,7 @@ struct PlayerStage: View {
     var onNext: () -> Void
     var hasPrev: Bool
     var hasNext: Bool
+    var isMusic: Bool = false
 
     @State private var showControls = true
     @State private var rewindTimer: Timer?
@@ -143,6 +144,10 @@ struct PlayerStage: View {
         ZStack {
             Color.black
             VLCSurface(controller: controller)
+            if isMusic {
+                Image(systemName: "music.note")
+                    .font(.system(size: 64)).foregroundColor(.white.opacity(0.5))
+            }
             thirds
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             if showControls { controlsOverlay.transition(.opacity) }

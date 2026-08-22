@@ -77,7 +77,8 @@ struct LibraryScreen: View {
             onPrev: { if let i = currentIndex, i > 0 { play(at: i - 1) } },
             onNext: { if let i = currentIndex, i + 1 < store.visible.count { play(at: i + 1) } },
             hasPrev: (currentIndex ?? 0) > 0,
-            hasNext: (currentIndex ?? Int.max) + 1 < store.visible.count
+            hasNext: (currentIndex ?? Int.max) + 1 < store.visible.count,
+            isMusic: store.kind == .music
         )
     }
 
