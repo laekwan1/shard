@@ -21,6 +21,7 @@ struct LibraryScreen: View {
     @State private var renamingFolder: String?
     @State private var folderRenameText = ""
     @State private var deletingFolder: String?
+    @State private var showSettings = false
 
     var body: some View {
         ZStack {
@@ -32,7 +33,8 @@ struct LibraryScreen: View {
                 if currentIndex != nil && !fullscreen {
                     stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .background(Color.black)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.toolbar, lineWidth: 1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.toolbar, lineWidth: 1))
                         .padding(.horizontal, 10).padding(.bottom, 6)
                 }
                 if !downloads.items.isEmpty { downloadsStrip }
@@ -46,6 +48,12 @@ struct LibraryScreen: View {
             }
             if currentIndex != nil && fullscreen {
                 stage.ignoresSafeArea().zIndex(2)
+            }
+            if showSettings {
+                settingsPanel
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 48).padding(.trailing, 12)
+                    .zIndex(3)
             }
         }
         .background(Color.surface.ignoresSafeArea())
@@ -89,6 +97,35 @@ struct LibraryScreen: View {
             Button("취소", role: .cancel) { deletingFolder = nil }
         } message: {
             Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
+        }
+    }
+
+    /// Playback settings, the phone's way: each mode lit accent when on, grey
+    /// when off — a plain panel, not a system menu (which flickered).
+    private var settingsPanel: some View {
+        VStack(spacing: 0) {
+            settingRow("순서대로", "arrow.right.to.line", on: prefs.end == .next) { prefs.toggleEnd(.next) }
+            Divider().background(Color.toolbar)
+            settingRow("무작위", "shuffle", on: prefs.end == .shuffle) { prefs.toggleEnd(.shuffle) }
+            Divider().background(Color.toolbar)
+            settingRow("백그라운드 재생", "moon.fill", on: prefs.background) { prefs.background.toggle() }
+        }
+        .frame(width: 180)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .shadow(radius: 8)
+    }
+
+    private func settingRow(_ label: String, _ icon: String, on: Bool, tap: @escaping () -> Void) -> some View {
+        Button(action: tap) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                Text(label).font(.subheadline)
+                Spacer()
+            }
+            .foregroundColor(on ? .accent : .muted)
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .contentShape(Rectangle())
         }
     }
 
@@ -157,19 +194,7 @@ struct LibraryScreen: View {
             Spacer()
             Text(store.current ?? "보관함").font(.headline)
             Spacer()
-            Menu {
-                Button { prefs.toggleEnd(.next) } label: {
-                    Label("순서대로", systemImage: prefs.end == .next ? "checkmark" : "arrow.right.to.line")
-                }
-                Button { prefs.toggleEnd(.shuffle) } label: {
-                    Label("무작위", systemImage: prefs.end == .shuffle ? "checkmark" : "shuffle")
-                }
-                Button { prefs.background.toggle() } label: {
-                    Label("백그라운드 재생", systemImage: prefs.background ? "checkmark" : "moon")
-                }
-            } label: {
-                Image(systemName: "gearshape").font(.title3)
-            }
+            Button { showSettings.toggle() } label: { Image(systemName: "gearshape").font(.title3) }
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
     }
@@ -310,16 +335,20 @@ struct LibraryScreen: View {
                 }
             }
         }
-        // Horizontal fling on the list: right leaves to the web, left switches
-        // shelf. Off while a video is up, so seeking it does not switch shelves.
+        // Horizontal fling on the list. Right: switch music→video, then a second
+        // right leaves to the web. Left: switch video→music. Works while a video
+        // plays too (the player has its own gestures, on the picture itself).
         .simultaneousGesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
-                    guard currentIndex == nil,
-                          abs(value.translation.width) > 60,
+                    guard abs(value.translation.width) > 60,
                           abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
-                    if value.translation.width > 0 { close() }
-                    else { switchShelf(value.translation.width) }
+                    if value.translation.width > 0 {
+                        if store.kind == .music { withAnimation { store.kind = .video } }
+                        else { close() }
+                    } else {
+                        if store.kind == .video { withAnimation { store.kind = .music } }
+                    }
                 }
         )
     }

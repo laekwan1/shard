@@ -8,9 +8,9 @@ extension Color {
     static let toolbar = Color(hex: 0x2C2E32)
     static let onSurface = Color(hex: 0xE8E6E3)
     static let muted = Color(hex: 0x8A8A90)
-    // The accent is the app icon's own colour, so the tint through the UI and the
-    // icon on the home screen read as one thing.
-    static let accent = Color(hex: 0x2DD4BF)
+    // The accent is the app icon's own colour, a touch deeper than the raw
+    // desktop teal so it doesn't read as brighter on the phone's display.
+    static let accent = Color(hex: 0x18B6A4)
     static let onAccent = Color(hex: 0x0E0E10)
 
     init(hex: UInt32) {

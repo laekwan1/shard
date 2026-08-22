@@ -85,7 +85,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
-    func attach(to view: UIView) { player.drawable = view }
+    func attach(to view: UIView) {
+        // Only when it actually changed — re-pointing the drawable on every
+        // SwiftUI update flickered the picture to black.
+        if (player.drawable as? UIView) !== view { player.drawable = view }
+    }
 
     func open(_ url: URL) {
         currentURL = url
@@ -211,87 +215,97 @@ struct PlayerStage: View {
     @State private var hideWork: DispatchWorkItem?
     @State private var gauge: (icon: String, value: Double)?
     @State private var zoom: CGFloat = 1
+    /// A brief double-tap flash: (rightward, seconds).
+    @State private var seekFlash: (right: Bool, secs: Int)?
 
-    /// True while a brightness/sound drag is showing its gauge, so the collapse
-    /// swipe does not fire mid-adjust.
-    private var gaugeActive: Bool { gauge != nil }
-    @State private var dragStartBrightness: CGFloat = 0
-    @State private var dragStartVolume: Float = 0
+    private enum DragMode { case brightness, volume, swipe, none }
+    @State private var dragMode: DragMode = .none
+    @State private var startBrightness: CGFloat = 0
+    @State private var startVolume: Float = 0
 
     var body: some View {
         ZStack {
             Color.black
-            VLCSurface(controller: controller)
-                .scaleEffect(zoom)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { zoom = min(3, max(1, $0)) }
-                        .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
-                )
+            VLCSurface(controller: controller).scaleEffect(zoom)
             if isMusic {
-                Image(systemName: "music.note")
-                    .font(.system(size: 64)).foregroundColor(.white.opacity(0.5))
+                Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
             }
-            thirds
+            PlayerGestures(
+                onTap: { showBar() },
+                onDoubleTap: { x, w in doubleTap(x, w) },
+                onHold: { active, x, w in hold(active, x, w) },
+                onVerticalDrag: { phase, sx, w, dy in vdrag(phase, sx, w, dy) }
+            )
+            .gesture(
+                MagnificationGesture()
+                    .onChanged { zoom = min(3, max(1, $0)) }
+                    .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
+            )
+            if let f = seekFlash { seekFlashView(f) }
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             if showControls { controlsOverlay.transition(.opacity) }
         }
         .clipped()
-        .simultaneousGesture(swipeGesture)
-        .simultaneousGesture(sideDragGesture)
-        .onChange(of: showControls) { shown in if shown { scheduleAutoHide() } }
         .onChange(of: fullscreen) { fs in applyOrientation(fs) }
-        .onAppear { scheduleAutoHide() }
+        .onAppear { showBar() }
         .onDisappear { Orientation.shared.free() }
     }
 
-    /// Full screen turns a wide video on its side, like the phone; a tall one
-    /// (a short) stays upright. Leaving full screen frees rotation again.
-    private func applyOrientation(_ fs: Bool) {
-        guard fs else { Orientation.shared.free(); return }
-        let size = controller.player.videoSize
-        if size.width > size.height {
-            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+    // MARK: gesture handlers
+
+    private func doubleTap(_ x: CGFloat, _ w: CGFloat) {
+        let third = w / 3
+        if x < third {
+            controller.jump(-3); flash(right: false)
+        } else if x > third * 2 {
+            controller.jump(3); flash(right: true)
         } else {
-            Orientation.shared.lock(.portrait, to: .portrait)
+            showBar()
         }
     }
 
-    /// Fade the bar out after a few idle seconds, like the phone player.
-    private func scheduleAutoHide() {
-        hideWork?.cancel()
-        let work = DispatchWorkItem { withAnimation { showControls = false } }
-        hideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+    private func flash(right: Bool) {
+        seekFlash = (right, 3)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { seekFlash = nil }
     }
 
-    // Thirds, like the phone: double-tap the left/right third seeks ±3s (the
-    // middle only toggles the bar); a hold runs 2× on the right and rewinds on
-    // the left, and the middle is left alone.
-    private var thirds: some View {
-        HStack(spacing: 0) {
-            column(seek: -3, hold: .rewind)
-            column(seek: 0, hold: .none)
-            column(seek: 3, hold: .fast)
+    private func hold(_ active: Bool, _ x: CGFloat, _ w: CGFloat) {
+        if active { showBar() }
+        if x > w / 2 {
+            controller.holdRate(active ? 2.0 : nil)       // right: 2×
+        } else {
+            active ? startRewind() : stopRewind()          // left: rewind
         }
     }
 
-    private enum Hold { case rewind, fast, none }
-
-    private func column(seek: Int32, hold: Hold) -> some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                if seek != 0 { controller.jump(seek) } else { withAnimation { showControls.toggle() } }
+    private func vdrag(_ phase: PlayerGestures.Phase, _ startX: CGFloat, _ w: CGFloat, _ dy: CGFloat) {
+        switch phase {
+        case .began:
+            if startX < w * 0.2 && fullscreen {
+                dragMode = .brightness; startBrightness = UIScreen.main.brightness
+            } else if startX > w * 0.8 {
+                dragMode = .volume; startVolume = controller.volume
+            } else {
+                dragMode = .swipe
             }
-            .onTapGesture { withAnimation { showControls.toggle() } }
-            .onLongPressGesture(minimumDuration: 0.35, pressing: { pressing in
-                switch hold {
-                case .rewind: pressing ? startRewind() : stopRewind()
-                case .fast: controller.holdRate(pressing ? 2.0 : nil)
-                case .none: break
-                }
-            }, perform: {})
+        case .changed:
+            let step = Float(-dy / 260)                     // from the current value
+            if dragMode == .brightness {
+                let b = max(0, min(1, startBrightness + CGFloat(step)))
+                UIScreen.main.brightness = b; gauge = ("sun.max", Double(b))
+            } else if dragMode == .volume {
+                let v = max(0, min(1, startVolume + step)); controller.volume = v
+                gauge = ("speaker.wave.2", Double(v))
+            }
+        case .ended:
+            if dragMode == .swipe {
+                if dy < -60 { fullscreen = true }
+                else if dy > 60 { fullscreen = false }
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
+            }
+            dragMode = .none
+        }
     }
 
     private func startRewind() {
@@ -302,58 +316,56 @@ struct PlayerStage: View {
     }
     private func stopRewind() { rewindTimer?.invalidate(); rewindTimer = nil }
 
-    // Only up and down on the picture: up to full screen, down to the window.
-    // Left/right are gone — sideways is for brightness and sound, and leaving to
-    // the web is a swipe on the list, not the picture.
-    private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: 40)
-            .onEnded { v in
-                guard abs(v.translation.height) > abs(v.translation.width) else { return }
-                if v.translation.height < -50 { fullscreen = true }
-                else if v.translation.height > 50, !gaugeActive { fullscreen = false }
-            }
+    /// Show the bar and keep it up for three idle seconds, refreshed by any
+    /// interaction that calls this.
+    private func showBar() {
+        withAnimation { showControls = true }
+        hideWork?.cancel()
+        let work = DispatchWorkItem { withAnimation { showControls = false } }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
     }
 
-    // A slow vertical drag sets sound on the right (always) and brightness on the
-    // left (full screen only), with a gauge while it moves.
-    private var sideDragGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
-            .onChanged { v in
-                guard abs(v.translation.height) > abs(v.translation.width) else { return }
-                let onLeft = v.startLocation.x < UIScreen.main.bounds.width / 2
-                if onLeft && !fullscreen { return }
-                if gauge == nil {
-                    dragStartBrightness = UIScreen.main.brightness
-                    dragStartVolume = controller.volume
-                }
-                let delta = Float(-v.translation.height / 200)
-                if onLeft {
-                    let b = max(0, min(1, dragStartBrightness + CGFloat(delta)))
-                    UIScreen.main.brightness = b
-                    gauge = ("sun.max", Double(b))
-                } else {
-                    let vol = max(0, min(1, dragStartVolume + delta))
-                    controller.volume = vol
-                    gauge = ("speaker.wave.2", Double(vol))
-                }
+    /// Full screen turns a wide video on its side, a tall one (a short) stays up.
+    private func applyOrientation(_ fs: Bool) {
+        guard fs else { Orientation.shared.free(); return }
+        let size = controller.player.videoSize
+        if size.width > size.height {
+            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+        } else {
+            Orientation.shared.lock(.portrait, to: .portrait)
+        }
+    }
+
+    // MARK: overlays
+
+    /// A YouTube-style double-tap cue: a triangle with "3s" inside a translucent
+    /// circle, on the side that was tapped.
+    private func seekFlashView(_ f: (right: Bool, secs: Int)) -> some View {
+        HStack {
+            if f.right { Spacer() }
+            ZStack {
+                Circle().fill(Color.black.opacity(0.45)).frame(width: 74, height: 74)
+                VStack(spacing: 2) {
+                    Image(systemName: f.right ? "forward.fill" : "backward.fill").font(.title3)
+                    Text("\(f.secs)초").font(.caption2)
+                }.foregroundColor(.white)
             }
-            .onEnded { _ in
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
-            }
+            .padding(.horizontal, 40)
+            if !f.right { Spacer() }
+        }
     }
 
     private var controlsOverlay: some View {
         VStack {
             HStack {
-                Text(title).font(.subheadline).foregroundColor(.white).lineLimit(1)
-                    .shadow(radius: 2)
+                Text(title).font(.subheadline).foregroundColor(.white).lineLimit(1).shadow(radius: 2)
                 Spacer()
                 Button { fullscreen ? (fullscreen = false) : onStop() } label: {
                     Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark")
-                        .font(.subheadline.bold()).foregroundColor(.white)
+                        .font(.system(size: 15, weight: .bold)).foregroundColor(.white)
                         .frame(width: 30, height: 30)
-                        .background(Color.black.opacity(0.4))
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(Circle().stroke(Color.black.opacity(0.55), lineWidth: 1.5))
                 }
             }
             .padding(10)
@@ -363,8 +375,8 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: 6) {
-            // Seek above the buttons, the way the phone bar is laid out.
+        VStack(spacing: 8) {
+            // Seek, with the sound control to its right.
             HStack(spacing: 8) {
                 Text(controller.elapsed).font(.caption2).foregroundColor(.white).monospacedDigit()
                 Slider(
@@ -375,25 +387,27 @@ struct PlayerStage: View {
                     in: 0...1,
                     onEditingChanged: { editing in
                         editing ? controller.beginScrub() : controller.endScrub(controller.position)
+                        showBar()
                     }
                 ).tint(.accent)
                 Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
-            }
-            HStack(spacing: 18) {
-                Button { onPrev() } label: { Image(systemName: "backward.end.fill") }
-                    .disabled(!hasPrev)
-                Button { controller.toggle() } label: {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title2)
-                }
-                Button { onNext() } label: { Image(systemName: "forward.end.fill") }
-                    .disabled(!hasNext)
-                Spacer()
                 Button { controller.toggleMute() } label: {
                     Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                        .font(.subheadline)
                 }
+            }
+            // Speed at the far left; transport centred; full-screen at the right.
+            HStack(spacing: 22) {
                 Button { controller.cycleRate() } label: {
                     Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
                 }
+                Spacer()
+                Button { onPrev() } label: { Image(systemName: "backward.end.fill") }.disabled(!hasPrev)
+                Button { controller.toggle() } label: {
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title3)
+                }
+                Button { onNext() } label: { Image(systemName: "forward.end.fill") }.disabled(!hasNext)
+                Spacer()
                 Button { fullscreen.toggle() } label: {
                     Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
                                                   : "arrow.up.left.and.arrow.down.right")
@@ -401,7 +415,9 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        .padding(10)
+        .padding(.horizontal, 12).padding(.vertical, 8)
         .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .padding(.horizontal, 8).padding(.bottom, 8)
     }
 }

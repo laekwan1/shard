@@ -33,6 +33,10 @@ struct RootView: View {
             if showLibrary {
                 LibraryScreen(store: library, downloads: downloads, prefs: prefs, player: player) {
                     withAnimation(.easeIn(duration: 0.18)) { showLibrary = false }
+                    // Leaving the library stops the player unless background play
+                    // is on — otherwise the sound kept going after the screen was
+                    // gone.
+                    if !prefs.background { player.stop() }
                 }
                 .transition(.move(edge: .trailing))
                 .zIndex(1)

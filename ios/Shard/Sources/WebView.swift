@@ -21,6 +21,14 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func sendQualities(_ json: String) {
         webView.evaluateJavaScript("window.__shardQualities(\(json))", completionHandler: nil)
     }
+
+    /// Pause anything the page is playing — called when the library opens over
+    /// it, so the page's sound does not run under the library's player.
+    func pauseWebVideos() {
+        webView.evaluateJavaScript(
+            "document.querySelectorAll('video').forEach(function(v){try{v.pause()}catch(e){}})",
+            completionHandler: nil)
+    }
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
     /// Centre swipes: a rightward one opens the address panel, a leftward one the
@@ -100,7 +108,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         if trimmed.isEmpty { return "about:blank" }
         if trimmed.contains(" ") || !trimmed.contains(".") {
             let q = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? trimmed
-            return "https://duckduckgo.com/?q=\(q)"
+            return "https://www.google.com/search?q=\(q)"
         }
         if trimmed.hasPrefix("http://") || trimmed.hasPrefix("https://") { return trimmed }
         return "https://\(trimmed)"

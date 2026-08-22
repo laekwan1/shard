@@ -45,7 +45,7 @@ struct BrowserScreen: View {
         .onAppear {
             model.onNavigated = { withAnimation { showAddress = false } }
             model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
-            model.onSwipeLibrary = { openLibrary() }
+            model.onSwipeLibrary = { model.pauseWebVideos(); openLibrary() }
             model.onDownloadRequest = { requestDownload() }
             model.onPick = { itag in pick(itag) }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
