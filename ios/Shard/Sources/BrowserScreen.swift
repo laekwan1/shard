@@ -17,6 +17,10 @@ struct BrowserScreen: View {
     @State private var banner: String?
     @State private var asking = false
     @State private var showAddress = false
+    // The bypass toggle is hidden until asked for: two more right-swipes on the
+    // open address panel reveal it.
+    @State private var engineSwipes = 0
+    @State private var engineRevealed = false
 
     @State private var landscape = false
 
@@ -49,6 +53,9 @@ struct BrowserScreen: View {
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
+        }
+        .onChange(of: showAddress) { shown in
+            if !shown { engineSwipes = 0; engineRevealed = false }
         }
         .onAppear {
             model.onLongPressVideo = { askAndDownload() }
@@ -115,6 +122,13 @@ struct BrowserScreen: View {
 
     private var addressPanel: some View {
         HStack(spacing: 10) {
+            if engineRevealed {
+                // The bypass ON/OFF, lit amber when the engine is on.
+                Button { model.toggleEngine() } label: {
+                    Image(systemName: "power").foregroundColor(model.engineOn ? .accent : .muted)
+                }
+                .frame(width: 24)
+            }
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
 
@@ -128,6 +142,14 @@ struct BrowserScreen: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
+        // Two more right-swipes here reveal the bypass toggle.
+        .gesture(
+            DragGesture(minimumDistance: 24).onEnded { v in
+                guard v.translation.width > 40, abs(v.translation.height) < 60 else { return }
+                engineSwipes += 1
+                if engineSwipes >= 2 { withAnimation { engineRevealed = true } }
+            }
+        )
     }
 
     private func rotate() {

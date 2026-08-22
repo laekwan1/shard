@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import Network
 
 /// The page. Owns the WKWebView so navigation state lives in one observable
 /// place the UI binds to. Media is not tracked continuously any more — the app
@@ -16,6 +17,37 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     var onNavigated: (() -> Void)?
     /// True while a web video is playing full screen, so the download button hides.
     @Published var videoFullscreen = false
+    /// Whether the bypass engine is on (the local proxy is running and the
+    /// WebView is pointed at it).
+    @Published var engineOn = false
+
+    /// Turn the DPI/SNI-bypass engine on or off. Starts the local proxy and aims
+    /// the WebView at it (iOS 17+, where WKWebView takes a proxy); reloads so the
+    /// change takes effect.
+    func toggleEngine() {
+        if engineOn {
+            shard_stop()
+            setProxy(port: 0)
+            engineOn = false
+        } else {
+            let bound = shard_start(nil, 0)
+            guard bound > 0 else { return }
+            setProxy(port: UInt16(bound))
+            engineOn = true
+        }
+        webView.reload()
+    }
+
+    private func setProxy(port: UInt16) {
+        guard #available(iOS 17.0, *) else { return }
+        let store = webView.configuration.websiteDataStore
+        if port > 0, let p = NWEndpoint.Port(rawValue: port) {
+            let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: p)
+            store.proxyConfigurations = [ProxyConfiguration(httpCONNECTProxy: endpoint)]
+        } else {
+            store.proxyConfigurations = []
+        }
+    }
 
     lazy var webView: WKWebView = {
         let controller = WKUserContentController()

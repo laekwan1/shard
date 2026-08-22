@@ -43,6 +43,13 @@ char *shard_download_youtube(const char *offer_json, uint32_t itag,
                              const char *into_dir, ShardProgress progress,
                              ShardCancel cancel, void *ctx);
 
+// The bypass engine: a local HTTP/CONNECT proxy that applies the DPI/SNI
+// desync. shard_start binds 127.0.0.1:<port> (0 = any free port) and returns the
+// bound port, or a negative error. The WebView is then pointed at that port.
+int shard_start(const char *config_dir, uint16_t port);
+void shard_stop(void);
+int shard_is_running(void);
+
 // Release a string returned by this library.
 void shard_string_free(char *ptr);
 
