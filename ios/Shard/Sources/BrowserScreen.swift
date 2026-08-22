@@ -41,7 +41,7 @@ struct BrowserScreen: View {
                     .gesture(bandGesture(openAddress: false))
             }
 
-            floatingDownload
+            topDownload
 
             if showAddress {
                 addressPanel.transition(.move(edge: .top))
@@ -55,12 +55,50 @@ struct BrowserScreen: View {
             model.onNavigated = { withAnimation { showAddress = false } }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
-        .confirmationDialog("받을 화질을 고르세요", isPresented: $showQualities, titleVisibility: .visible) {
-            ForEach(qualities) { row in
-                Button("\(row.label) — \(row.detail)") { startYouTube(row) }
+    }
+
+    // Top-right of the page, over the windowed video: an arrow-down button that
+    // drops its quality list right underneath. Hidden while a web video is full
+    // screen. The long-press and the system menu are left as they were.
+    private var topDownload: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            if !model.videoFullscreen {
+                Button { toggleDownload() } label: {
+                    ZStack {
+                        Circle().fill(Color.accent.opacity(0.9)).frame(width: 40, height: 40).shadow(radius: 3)
+                        if asking { ProgressView().tint(.white) }
+                        else { Image(systemName: "arrow.down").font(.headline).foregroundColor(.white) }
+                    }
+                }
+                .disabled(asking)
+
+                if showQualities && !qualities.isEmpty {
+                    VStack(spacing: 0) {
+                        ForEach(qualities) { row in
+                            Button { startYouTube(row); showQualities = false } label: {
+                                HStack {
+                                    Text(row.label).bold()
+                                    Spacer()
+                                    Text(row.detail).font(.caption).foregroundColor(.muted)
+                                }
+                                .padding(.horizontal, 12).padding(.vertical, 10)
+                            }
+                            .foregroundColor(.onSurface)
+                            Divider().background(Color.toolbar)
+                        }
+                    }
+                    .background(Color.chrome)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(width: 250).shadow(radius: 6)
+                }
             }
-            Button("취소", role: .cancel) {}
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, 8).padding(.trailing, 12)
+    }
+
+    private func toggleDownload() {
+        if showQualities { showQualities = false } else { askAndDownload() }
     }
 
     private func bandGesture(openAddress: Bool) -> some Gesture {
@@ -73,23 +111,6 @@ struct BrowserScreen: View {
                     openLibrary()
                 }
             }
-    }
-
-    // A small download control floating over the page: reliable where a
-    // long-press is not (YouTube claims the long-press for its own 2× and the
-    // system claims it for copy/look-up). It saves whatever the page is playing.
-    private var floatingDownload: some View {
-        Button { askAndDownload() } label: {
-            Image(systemName: asking ? "arrow.down.circle" : "arrow.down.to.line")
-                .font(.title2).foregroundColor(.white)
-                .frame(width: 46, height: 46)
-                .background(Color.accent.opacity(0.9)).clipShape(Circle())
-                .shadow(radius: 3)
-                .overlay { if asking { ProgressView().tint(.white) } }
-        }
-        .disabled(asking)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, 16).padding(.bottom, 24)
     }
 
     private var addressPanel: some View {

@@ -4,7 +4,7 @@ import WebKit
 /// The page. Owns the WKWebView so navigation state lives in one observable
 /// place the UI binds to. Media is not tracked continuously any more — the app
 /// asks the page for an offer (Ask.js) at the moment the user wants to download.
-final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler, WKUIDelegate {
+final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScriptMessageHandler {
     @Published var address: String = ""
     @Published var pageTitle: String = ""
     @Published var canGoBack = false
@@ -14,6 +14,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     var onLongPressVideo: (() -> Void)?
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
+    /// True while a web video is playing full screen, so the download button hides.
+    @Published var videoFullscreen = false
 
     lazy var webView: WKWebView = {
         let controller = WKUserContentController()
@@ -29,11 +31,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
         let view = WKWebView(frame: .zero, configuration: config)
         view.navigationDelegate = self
-        view.uiDelegate = self
         view.allowsBackForwardNavigationGestures = true
-        // No system link preview / callout menu — long-press is ours, for
-        // downloading, not iOS's open-link/copy/share sheet.
-        view.allowsLinkPreview = false
         return view
     }()
 
@@ -81,18 +79,12 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     // MARK: WKScriptMessageHandler
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == "shard",
-              let body = message.body as? [String: Any],
-              body["type"] as? String == "longpress" else { return }
-        onLongPressVideo?()
-    }
-
-    // MARK: WKUIDelegate — suppress the long-press link menu
-
-    func webView(_ webView: WKWebView,
-                 contextMenuConfigurationForElement elementInfo: WKContextMenuElementInfo,
-                 completionHandler: @escaping (UIContextMenuConfiguration?) -> Void) {
-        completionHandler(nil)
+        guard message.name == "shard", let body = message.body as? [String: Any] else { return }
+        switch body["type"] as? String {
+        case "longpress": onLongPressVideo?()
+        case "fullscreen": videoFullscreen = (body["on"] as? Bool) ?? false
+        default: break
+        }
     }
 
     // MARK: WKNavigationDelegate

@@ -92,20 +92,25 @@
   document.addEventListener("DOMContentLoaded", keepInline);
   setInterval(keepInline, 1000);
 
-  // Kill the iOS callout (open link / copy / share) on long-press, so a hold on
-  // a video is ours to act on, not the system's.
-  try {
-    var style = document.createElement("style");
-    // Everything: the callout (copy / look up / translate) and text selection
-    // both hijack a long-press, and this is a browser for saving video, not
-    // reading. Inputs keep selection so an address or search box still works.
-    style.textContent =
-      "* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; }" +
-      "input, textarea, [contenteditable] { -webkit-user-select: text !important; }";
-    (document.head || document.documentElement).appendChild(style);
-  } catch (e) {}
+  // Tell the native side when a web video goes full screen, so the download
+  // button (which belongs over the windowed page) can hide there.
+  function reportFullscreen(on) {
+    try {
+      window.webkit.messageHandlers.shard.postMessage({ type: "fullscreen", on: !!on });
+    } catch (e) {}
+  }
+  document.addEventListener("fullscreenchange", function () {
+    reportFullscreen(document.fullscreenElement);
+  }, true);
+  document.addEventListener("webkitfullscreenchange", function () {
+    reportFullscreen(document.webkitFullscreenElement);
+  }, true);
+  // iOS's own native video full screen fires these on the <video> element.
+  document.addEventListener("webkitbeginfullscreen", function () { reportFullscreen(true); }, true);
+  document.addEventListener("webkitendfullscreen", function () { reportFullscreen(false); }, true);
 
-  // Long-press a video to download it, the way the phone app does. Both the
+  // Long-press a video to download it (kept alongside the system's own
+  // long-press menu; the button is the reliable path). Both the
   // touch timer and the contextmenu can fire for one press, so a short debounce
   // keeps it to a single message.
   var lastPress = 0;
