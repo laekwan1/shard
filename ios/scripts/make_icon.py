@@ -1,51 +1,51 @@
 #!/usr/bin/env python3
-"""Generate the iOS app icon from the desktop's SHARD_MARK.
+"""Generate the iOS app icon: the SHARD_MARK, modernised.
 
-The desktop logo (assets/ui/app.js, SHARD_MARK) is a rounded square in the
-accent colour with a diagonal "power-cut" gap crossing it. We reproduce it
-full-bleed on the app's dark surface so the phone icon reads the same.
-
-Coordinates follow the SVG: a 2x2 viewBox, the square spanning -0.72..0.72,
-corner radius 0.22, and a diagonal stroke of width 0.22 removed from it.
+The mark stays the desktop's rounded square with a diagonal power-cut, but it is
+filled with a teal→emerald gradient (not a flat block, which read as dated) on a
+light ground, with soft corners and clean anti-aliased edges. The cut shows the
+ground through the mark.
 """
 import os
+import numpy as np
 from PIL import Image, ImageDraw
 
 S = 1024
-# A light ground like YouTube's and Chrome's icons, so the tile is bright on the
-# home screen rather than a black square. The mark is the accent colour, and its
-# power-cut shows the ground through it.
-BACKGROUND = (255, 255, 255, 255)
-ACCENT = (45, 212, 191, 255)    # --accent  #2dd4bf
-
-# Supersample for clean edges, then downscale.
-SS = 4
+SS = 4                      # supersample for smooth edges
 size = S * SS
 
-img = Image.new("RGBA", (size, size), BACKGROUND)
-draw = ImageDraw.Draw(img)
+BG = np.array([255, 255, 255], dtype=float)      # light ground, like YouTube/Chrome
+TOP = np.array([0x3E, 0xE3, 0xCF], dtype=float)  # bright teal (top-left)
+BOT = np.array([0x0E, 0x94, 0x88], dtype=float)  # deep teal / emerald (bottom-right)
 
 
 def p(u):
     return int(round((u + 1.0) / 2.0 * size))
 
 
-# The original full-bleed rounded square (spans -0.72..0.72), in the accent
-# colour — the mark fills the tile as before; only the ground behind it changed
-# from black to light.
+# --- the mark's shape as an alpha mask (rounded square minus the diagonal cut) -
+mask = Image.new("L", (size, size), 0)
+d = ImageDraw.Draw(mask)
 x0, y0, x1, y1 = p(-0.72), p(-0.72), p(0.72), p(0.72)
-radius = int(round(0.22 / 2.0 * size))
-draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=ACCENT)
+radius = int(round(0.26 * (x1 - x0)))            # softer corners than before
+d.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=255)
+# Carve the power-cut back out (0 alpha) so the ground shows through it.
+cut = int(round(0.20 * (x1 - x0)))
+d.line([p(-1.5), p(-1.5), p(1.5), p(1.5)], fill=0, width=cut)
 
-# The diagonal power-cut in the background colour, corner to corner.
-width = int(round(0.22 / 2.0 * size))
-draw.line([p(-1.5), p(-1.5), p(1.5), p(1.5)], fill=BACKGROUND, width=width)
+# --- a diagonal teal→emerald gradient ----------------------------------------
+yy, xx = np.mgrid[0:size, 0:size]
+t = ((xx + yy) / (2.0 * (size - 1)))[..., None]  # 0 at top-left → 1 at bottom-right
+grad = (TOP * (1 - t) + BOT * t)                 # (size, size, 3)
 
-img = img.resize((S, S), Image.LANCZOS).convert("RGB")
+# --- composite gradient over the ground using the mask -----------------------
+alpha = (np.asarray(mask, dtype=float) / 255.0)[..., None]
+out = grad * alpha + BG * (1 - alpha)
+img = Image.fromarray(out.astype(np.uint8), "RGB").resize((S, S), Image.LANCZOS)
 
 out_dir = os.path.join(os.path.dirname(__file__), "..",
                        "Shard", "Assets.xcassets", "AppIcon.appiconset")
 os.makedirs(out_dir, exist_ok=True)
-out = os.path.join(out_dir, "icon-1024.png")
-img.save(out, "PNG")
-print("wrote", out, img.size)
+path = os.path.join(out_dir, "icon-1024.png")
+img.save(path, "PNG")
+print("wrote", path, img.size)
