@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The library, over the browser: a header with the video/music switch, folder
 /// chips, and the list — the shape of the Android app's library. Playing a row
@@ -85,10 +86,26 @@ struct LibraryScreen: View {
         )
     }
 
+    /// A row dropped on a folder chip moves that file into the folder (nil =
+    /// the top level).
+    private func drop(_ providers: [NSItemProvider], to folder: String?) -> Bool {
+        guard let provider = providers.first else { return false }
+        provider.loadObject(ofClass: NSURL.self) { object, _ in
+            guard let url = (object as? NSURL) as URL? else { return }
+            DispatchQueue.main.async {
+                if let item = store.items.first(where: { $0.url == url }) { store.move(item, to: folder) }
+            }
+        }
+        return true
+    }
+
     private func play(at index: Int) {
         guard store.visible.indices.contains(index) else { return }
         currentIndex = index
         player.onEnded = { advanceOnEnd() }
+        player.nowPlayingTitle = store.visible[index].name
+        player.onRemoteNext = { if let i = currentIndex, i + 1 < store.visible.count { play(at: i + 1) } }
+        player.onRemotePrev = { if let i = currentIndex, i > 0 { play(at: i - 1) } }
         player.open(store.visible[index].url)
     }
 
@@ -179,10 +196,12 @@ struct LibraryScreen: View {
                 chip(active: store.current == nil, tap: { store.current = nil }) {
                     Image(systemName: "house.fill").font(.subheadline)
                 }
+                .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: nil) }
                 ForEach(store.folders, id: \.self) { folder in
                     chip(active: store.current == folder, tap: { store.current = folder }) {
                         Text(folder).font(.subheadline)
                     }
+                    .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: folder) }
                     .contextMenu {
                         Button { renamingFolder = folder; folderRenameText = folder } label: {
                             Label("이름 바꾸기", systemImage: "pencil")
@@ -220,13 +239,23 @@ struct LibraryScreen: View {
                     HStack {
                         Text(item.title).font(.caption).lineLimit(1)
                         Spacer()
-                        if item.status == .running {
+                        switch item.status {
+                        case .running:
                             Button { downloads.cancel(item.id) } label: {
                                 Image(systemName: "xmark.circle").font(.caption)
                             }
+                        case .finished:
+                            Image(systemName: "checkmark.circle.fill").font(.caption).foregroundColor(.green)
+                        case .cancelled:
+                            Text("취소됨").font(.caption2).foregroundColor(.muted)
+                        case .failed(let message):
+                            Text(message).font(.caption2).foregroundColor(.red).lineLimit(1)
                         }
                     }
-                    if item.status == .running { ProgressView(value: item.fraction).tint(.accent) }
+                    if item.status == .running {
+                        ProgressView(value: item.fraction).tint(.accent)
+                        Text(item.detail).font(.caption2).foregroundColor(.muted).lineLimit(1)
+                    }
                 }
             }
         }
@@ -250,6 +279,7 @@ struct LibraryScreen: View {
                         // longer counts as a press on it.
                         .contentShape(Rectangle())
                         .onTapGesture { play(at: index) }
+                        .onDrag { NSItemProvider(object: item.url as NSURL) }
                         .contextMenu { menu(item) }
                     Divider().background(Color.toolbar)
                 }
@@ -309,13 +339,18 @@ struct LibraryScreen: View {
     }
 
     private func thumbnail(_ item: Item) -> some View {
+        // Music files often carry embedded cover art, which the thumbnailer
+        // returns just like a video frame — so try the image first for both, and
+        // fall back to a kind icon.
         Group {
-            if item.kind == .music {
-                ZStack { Color.toolbar; Image(systemName: "music.note").foregroundColor(.muted) }
-            } else if let image = probe.result(for: item.url)?.image {
+            if let image = probe.result(for: item.url)?.image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
-                ZStack { Color.toolbar; Image(systemName: "film").foregroundColor(.muted) }
+                ZStack {
+                    Color.toolbar
+                    Image(systemName: item.kind == .music ? "music.note" : "film")
+                        .foregroundColor(.muted)
+                }
             }
         }
         .frame(width: 104, height: 58)

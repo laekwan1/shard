@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import MediaPlayer
 import MobileVLCKit
 
 /// Drives one libVLC player and publishes what the controls need. libVLC plays
@@ -15,6 +16,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var muted = false
     var scrubbing = false
     var onEnded: (() -> Void)?
+    /// Lock-screen / headset next & previous reach the playlist through these.
+    var onRemoteNext: (() -> Void)?
+    var onRemotePrev: (() -> Void)?
+    var nowPlayingTitle = ""
 
     func toggleMute() {
         muted.toggle()
@@ -31,6 +36,35 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback)
         try? session.setActive(true)
+        setupRemoteCommands()
+    }
+
+    /// Lock screen and headset controls, so a video listened to like music is
+    /// controlled like music.
+    private func setupRemoteCommands() {
+        let center = MPRemoteCommandCenter.shared()
+        center.playCommand.addTarget { [weak self] _ in self?.player.play(); return .success }
+        center.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); return .success }
+        center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.toggle(); return .success }
+        center.nextTrackCommand.addTarget { [weak self] _ in self?.onRemoteNext?(); return .success }
+        center.previousTrackCommand.addTarget { [weak self] _ in self?.onRemotePrev?(); return .success }
+        center.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let self = self,
+                  let e = event as? MPChangePlaybackPositionCommandEvent,
+                  let length = self.player.media?.length.intValue, length > 0 else { return .commandFailed }
+            self.seek(to: Float(e.positionTime * 1000 / Double(length)))
+            return .success
+        }
+    }
+
+    private func updateNowPlaying() {
+        var info: [String: Any] = [MPMediaItemPropertyTitle: nowPlayingTitle]
+        if let length = player.media?.length.intValue, length > 0 {
+            info[MPMediaItemPropertyPlaybackDuration] = Double(length) / 1000
+        }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(player.time.intValue) / 1000
+        info[MPNowPlayingInfoPropertyPlaybackRate] = player.isPlaying ? Double(rate) : 0
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
     }
 
     func attach(to view: UIView) { player.drawable = view }
@@ -78,10 +112,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         isPlaying = player.isPlaying
         elapsed = Self.clock(player.time.intValue)
         if let length = player.media?.length.intValue, length > 0 { duration = Self.clock(length) }
+        updateNowPlaying()
     }
 
     func mediaPlayerStateChanged(_ notification: Notification) {
         isPlaying = player.isPlaying
+        updateNowPlaying()
         if player.state == .ended { onEnded?() }
     }
 
@@ -137,6 +173,7 @@ struct PlayerStage: View {
     @State private var rewindTimer: Timer?
     @State private var hideWork: DispatchWorkItem?
     @State private var gauge: (icon: String, value: Double)?
+    @State private var zoom: CGFloat = 1
     @State private var dragStartBrightness: CGFloat = 0
     @State private var dragStartVolume: Float = 0
 
@@ -144,6 +181,12 @@ struct PlayerStage: View {
         ZStack {
             Color.black
             VLCSurface(controller: controller)
+                .scaleEffect(zoom)
+                .gesture(
+                    MagnificationGesture()
+                        .onChanged { zoom = min(3, max(1, $0)) }
+                        .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
+                )
             if isMusic {
                 Image(systemName: "music.note")
                     .font(.system(size: 64)).foregroundColor(.white.opacity(0.5))

@@ -9,10 +9,28 @@ struct Download: Identifiable {
     var status: Status = .running
     let task: DownloadTask
     var savedName: String?
+    /// Bytes per second, smoothed a little between samples.
+    var rate: Double = 0
+    var lastDone: UInt64 = 0
+    var lastTime: Date = Date()
 
     enum Status: Equatable { case running, finished, failed(String), cancelled }
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
+
+    /// "12.3 MB / 45.0 MB · 3.1 MB/s · 남은 10초", as far as it is known.
+    var detail: String {
+        let f = ByteCountFormatter.string(fromByteCount: Int64(done), countStyle: .file)
+        var parts = [total > 0 ? "\(f) / \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : f]
+        if rate > 0 {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(rate), countStyle: .file) + "/s")
+            if total > done {
+                let secs = Int(Double(total - done) / rate)
+                parts.append(secs >= 60 ? "남은 \(secs / 60)분" : "남은 \(secs)초")
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// Every download at once — the engine runs them in parallel, so the UI stops
@@ -37,7 +55,19 @@ final class DownloadsStore: ObservableObject {
         Task {
             do {
                 let saved = try await run(task) { [weak self] done, total in
-                    self?.update(id) { $0.done = done; $0.total = total }
+                    self?.update(id) { d in
+                        // Rate from the gap since the last sample, at least a
+                        // fifth of a second apart so a burst of callbacks does
+                        // not read as an impossible speed.
+                        let now = Date()
+                        let dt = now.timeIntervalSince(d.lastTime)
+                        if dt >= 0.2 {
+                            let instant = Double(done - d.lastDone) / dt
+                            d.rate = d.rate == 0 ? instant : d.rate * 0.6 + instant * 0.4
+                            d.lastDone = done; d.lastTime = now
+                        }
+                        d.done = done; d.total = total
+                    }
                 }
                 update(id) { $0.status = .finished; $0.savedName = saved.lastPathComponent }
             } catch {
