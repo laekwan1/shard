@@ -377,10 +377,10 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 3) {
             // Seek, with the sound control to its right.
-            HStack(spacing: 8) {
-                Text(controller.elapsed).font(.caption2).foregroundColor(.white).monospacedDigit()
+            HStack(spacing: 6) {
+                Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
                 Slider(
                     value: Binding(
                         get: { Double(controller.position) },
@@ -392,34 +392,32 @@ struct PlayerStage: View {
                         showBar()
                     }
                 ).tint(.accent)
-                Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
+                Text(controller.duration).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
                 Button { controller.toggleMute() } label: {
                     Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.subheadline)
+                        .font(.system(size: 13))
                 }
             }
             // Speed at the far left; transport centred; full-screen at the right.
-            HStack(spacing: 22) {
+            HStack(spacing: 20) {
                 Button { controller.cycleRate() } label: {
-                    Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
+                    Text(String(format: "%g×", controller.rate)).font(.system(size: 13, weight: .bold))
                 }
                 Spacer()
-                Button { onPrev() } label: { Image(systemName: "backward.end.fill") }.disabled(!hasPrev)
+                Button { onPrev() } label: { Image(systemName: "backward.end.fill").font(.system(size: 14)) }.disabled(!hasPrev)
                 Button { controller.toggle() } label: {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.title3)
+                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 18))
                 }
-                Button { onNext() } label: { Image(systemName: "forward.end.fill") }.disabled(!hasNext)
+                Button { onNext() } label: { Image(systemName: "forward.end.fill").font(.system(size: 14)) }.disabled(!hasNext)
                 Spacer()
                 Button { fullscreen.toggle() } label: {
                     Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
-                                                  : "arrow.up.left.and.arrow.down.right")
+                                                  : "arrow.up.left.and.arrow.down.right").font(.system(size: 14))
                 }
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 10).padding(.top, 5).padding(.bottom, 4)
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .padding(.horizontal, 8).padding(.bottom, 8)
     }
 }

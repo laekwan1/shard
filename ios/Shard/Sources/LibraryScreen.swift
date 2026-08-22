@@ -56,6 +56,9 @@ struct LibraryScreen: View {
                 stage.ignoresSafeArea().zIndex(2)
             }
             if showSettings {
+                Color.black.opacity(0.001).ignoresSafeArea()
+                    .onTapGesture { showSettings = false }
+                    .zIndex(2.5)
                 settingsPanel
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                     .padding(.top, 48).padding(.trailing, 12)
@@ -125,11 +128,11 @@ struct LibraryScreen: View {
     private func settingRow(_ label: String, _ icon: String, on: Bool, tap: @escaping () -> Void) -> some View {
         Button(action: tap) {
             HStack(spacing: 10) {
-                Image(systemName: icon)
-                Text(label).font(.subheadline)
+                // Only the icon changes colour when on; the label stays readable.
+                Image(systemName: icon).foregroundColor(on ? .accent : .muted)
+                Text(label).font(.subheadline).foregroundColor(.onSurface)
                 Spacer()
             }
-            .foregroundColor(on ? .accent : .muted)
             .padding(.horizontal, 14).padding(.vertical, 11)
             .contentShape(Rectangle())
         }

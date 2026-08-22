@@ -44,7 +44,12 @@ struct BrowserScreen: View {
         .onAppear {
             model.onNavigated = { withAnimation { showAddress = false } }
             model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
-            model.onSwipeLibrary = { withAnimation { showAddress = false }; model.pauseWebVideos(); openLibrary() }
+            model.onSwipeLibrary = {
+                // If the address panel is open, the first left-swipe just puts it
+                // away; the next one opens the library.
+                if showAddress { withAnimation(.easeOut(duration: 0.18)) { showAddress = false } }
+                else { model.pauseWebVideos(); openLibrary() }
+            }
             model.onWebTap = { withAnimation(.easeOut(duration: 0.15)) { showAddress = false } }
             model.onDownloadRequest = { requestDownload() }
             model.onPick = { itag in pick(itag) }
@@ -55,6 +60,9 @@ struct BrowserScreen: View {
     /// A video's download button was pressed: ask the page, then either drop the
     /// quality list into the page (YouTube) or start a plain download.
     private func requestDownload() {
+        // Immediate, synchronous feedback so it is clear the button reached the
+        // app even before the page is asked.
+        banner = "다운로드 확인 중…"
         Task { @MainActor in
             guard let json = await model.offer(),
                   let data = json.data(using: .utf8),

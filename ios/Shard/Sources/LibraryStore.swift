@@ -25,11 +25,27 @@ struct Item: Identifiable, Hashable {
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published var items: [Item] = []
-    @Published var folders: [String] = []
     /// The folder being viewed, or nil for the top level.
     @Published var current: String?
     /// Which shelf is shown — video or music.
     @Published var kind: MediaKind = .video
+
+    /// Folders shown for the current shelf: video and music keep separate lists,
+    /// so a folder made on one does not appear on the other. A folder is listed
+    /// if it holds a file of this kind or was created for this kind.
+    var folders: [String] {
+        let withFiles = Set(items.filter { $0.kind == kind && $0.folder != nil }.compactMap { $0.folder })
+        return Array(withFiles.union(remembered(kind))).sorted()
+    }
+
+    private func remembered(_ kind: MediaKind) -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: "folders_\(kind.rawValue)") ?? [])
+    }
+    private func remember(_ name: String, _ kind: MediaKind, add: Bool) {
+        var set = remembered(kind)
+        if add { set.insert(name) } else { set.remove(name) }
+        UserDefaults.standard.set(Array(set), forKey: "folders_\(kind.rawValue)")
+    }
 
     private var root: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -42,15 +58,12 @@ final class LibraryStore: ObservableObject {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isDirectoryKey, .contentModificationDateKey, .creationDateKey]
         var found: [Item] = []
-        var dirs: [String] = []
 
-        // Top level: files and folder directories.
         let top = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: keys,
                                                options: [.skipsHiddenFiles])) ?? []
         for url in top {
             let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
             if isDir {
-                dirs.append(url.lastPathComponent)
                 let inside = (try? fm.contentsOfDirectory(at: url, includingPropertiesForKeys: keys,
                                                           options: [.skipsHiddenFiles])) ?? []
                 for f in inside where Self.mediaExts.contains(f.pathExtension.lowercased()) {
@@ -62,7 +75,6 @@ final class LibraryStore: ObservableObject {
         }
         // Newest first: what was just downloaded should sit at the top.
         items = found.sorted { Self.modified($0.url) > Self.modified($1.url) }
-        folders = dirs.sorted()
     }
 
     private static func modified(_ url: URL) -> Date {
@@ -78,6 +90,7 @@ final class LibraryStore: ObservableObject {
         guard !clean.isEmpty else { return }
         try? FileManager.default.createDirectory(at: root.appendingPathComponent(clean),
                                                  withIntermediateDirectories: true)
+        remember(clean, kind, add: true)   // this shelf's folder, not the other's
         reload()
     }
 
@@ -111,6 +124,7 @@ final class LibraryStore: ObservableObject {
         let src = root.appendingPathComponent(from)
         let dst = root.appendingPathComponent(clean)
         try? FileManager.default.moveItem(at: src, to: dst)
+        remember(from, kind, add: false); remember(clean, kind, add: true)
         if current == from { current = clean }
         reload()
     }
@@ -128,6 +142,7 @@ final class LibraryStore: ObservableObject {
             }
         }
         try? FileManager.default.removeItem(at: dir)
+        remember(name, kind, add: false)
         if current == name { current = nil }
         reload()
     }
