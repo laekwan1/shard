@@ -29,23 +29,11 @@ struct BrowserScreen: View {
             Color.surface.ignoresSafeArea()
             // The page keeps clear of the home-indicator area at the bottom, so a
             // player's own seek bar sitting right at the screen edge (YouTube
-            // Shorts) is reachable instead of under the indicator.
+            // Shorts) is reachable instead of under the indicator. The centre
+            // swipes for address/library are recognizers on the web view itself
+            // (see WebViewContainer) so they never swallow the page's touches.
             WebViewContainer(model: model)
-
-            // Centre bands, so the screen edges are left for the web view's own
-            // back/forward swipe: a right-drag left-of-centre opens the address
-            // panel, a left-drag right-of-centre opens the library.
-            GeometryReader { geo in
-                let w = geo.size.width
-                Color.clear.frame(width: w * 0.2).position(x: w * 0.36, y: geo.size.height / 2)
-                    .contentShape(Rectangle())
-                    .gesture(bandGesture(openAddress: true))
-                Color.clear.frame(width: w * 0.2).position(x: w * 0.64, y: geo.size.height / 2)
-                    .contentShape(Rectangle())
-                    .gesture(bandGesture(openAddress: false))
-            }
-
-            topDownload
+                .overlay(alignment: .topTrailing) { topDownload }
 
             if showAddress {
                 addressPanel.transition(.move(edge: .top))
@@ -60,21 +48,30 @@ struct BrowserScreen: View {
         .onAppear {
             model.onLongPressVideo = { askAndDownload() }
             model.onNavigated = { withAnimation { showAddress = false } }
+            model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
+            model.onSwipeLibrary = { openLibrary() }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
     }
 
-    // Top-right of the page, over the windowed video: an arrow-down button that
-    // drops its quality list right underneath. Hidden while a web video is full
-    // screen. The long-press and the system menu are left as they were.
+    // A small control at the screen's top-right that drops its quality list
+    // right underneath. A soft square, translucent grey, and half the size it
+    // was. Hidden while a web video is full screen; the long-press and the
+    // system menu are untouched.
     private var topDownload: some View {
         VStack(alignment: .trailing, spacing: 6) {
             if !model.videoFullscreen {
                 Button { toggleDownload() } label: {
                     ZStack {
-                        Circle().fill(Color.accent.opacity(0.9)).frame(width: 40, height: 40).shadow(radius: 3)
-                        if asking { ProgressView().tint(.white) }
-                        else { Image(systemName: "arrow.down").font(.headline).foregroundColor(.white) }
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Color.gray.opacity(0.35))
+                            .frame(width: 24, height: 24)
+                        if asking { ProgressView().tint(.white).scaleEffect(0.6) }
+                        else {
+                            Image(systemName: "arrow.down")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
                     }
                 }
                 .disabled(asking)
@@ -100,24 +97,11 @@ struct BrowserScreen: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, 8).padding(.trailing, 12)
+        .padding(.top, 6).padding(.trailing, 10)
     }
 
     private func toggleDownload() {
         if showQualities { showQualities = false } else { askAndDownload() }
-    }
-
-    private func bandGesture(openAddress: Bool) -> some Gesture {
-        DragGesture(minimumDistance: 24)
-            .onEnded { v in
-                guard abs(v.translation.width) > 45, abs(v.translation.height) < 70 else { return }
-                if openAddress, v.translation.width > 0 {
-                    withAnimation(.easeOut(duration: 0.18)) { showAddress = true }
-                } else if !openAddress, v.translation.width < 0 {
-                    openLibrary()
-                }
-            }
     }
 
     private var addressPanel: some View {

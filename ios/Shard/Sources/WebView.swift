@@ -15,6 +15,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     var onLongPressVideo: (() -> Void)?
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
+    /// Centre swipes: a rightward one opens the address panel, a leftward one the
+    /// library. Bound to gesture recognizers on the web view itself so the page
+    /// keeps its own taps and scrolls.
+    var onSwipeAddress: (() -> Void)?
+    var onSwipeLibrary: (() -> Void)?
     /// True while a web video is playing full screen, so the download button hides.
     @Published var videoFullscreen = false
     /// Whether the bypass engine is on (the local proxy is running and the
@@ -156,20 +161,47 @@ struct WebViewContainer: UIViewRepresentable {
         refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload), for: .valueChanged)
         view.scrollView.refreshControl = refresh
         context.coordinator.refresh = refresh
+
+        // Centre swipes for address/library, added to the web view rather than
+        // an overlay so the page still gets its own taps and scrolls (the
+        // overlay approach swallowed every touch). cancelsTouchesInView = false
+        // and simultaneous recognition keep the web working underneath.
+        for direction in [UISwipeGestureRecognizer.Direction.right, .left] {
+            let swipe = UISwipeGestureRecognizer(target: context.coordinator,
+                                                 action: #selector(Coordinator.swiped(_:)))
+            swipe.direction = direction
+            swipe.cancelsTouchesInView = false
+            swipe.delegate = context.coordinator
+            view.addGestureRecognizer(swipe)
+        }
         return view
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
-    final class Coordinator {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let model: WebModel
         weak var refresh: UIRefreshControl?
         init(_ model: WebModel) { self.model = model }
+
         @objc func reload() {
             model.reload()
-            // The spinner is only a gesture cue; the page's own load drives the
-            // real progress, so end it promptly.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.refresh?.endRefreshing() }
         }
+
+        @objc func swiped(_ g: UISwipeGestureRecognizer) {
+            guard let view = g.view else { return }
+            let x = g.location(in: view).x
+            let w = view.bounds.width
+            // The outer fifths are left for the web view's own back/forward
+            // swipe; the centre is ours.
+            guard x > w * 0.2, x < w * 0.8 else { return }
+            if g.direction == .right { model.onSwipeAddress?() }
+            else { model.onSwipeLibrary?() }
+        }
+
+        // Ride alongside the web view's own gestures rather than blocking them.
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
     }
 }
