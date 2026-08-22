@@ -119,10 +119,12 @@ struct LibraryScreen: View {
             HStack(spacing: 10) {
                 Button("취소") { showNewFolder = false; newFolder = "" }
                     .frame(maxWidth: .infinity)
-                Button("만들기") {
+                Button {
                     store.createFolder(newFolder); newFolder = ""; showNewFolder = false
+                } label: {
+                    Text("만들기").bold().frame(maxWidth: .infinity)
                 }
-                .frame(maxWidth: .infinity).foregroundColor(.accent).bold()
+                .foregroundColor(.accent)
             }
         }
         .padding(18)
