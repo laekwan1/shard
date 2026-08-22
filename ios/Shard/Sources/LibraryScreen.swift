@@ -55,6 +55,12 @@ struct LibraryScreen: View {
             if currentIndex != nil && fullscreen {
                 stage.ignoresSafeArea().zIndex(2)
             }
+            if showNewFolder {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { showNewFolder = false; newFolder = "" }
+                    .zIndex(4)
+                newFolderCard.zIndex(5)
+            }
             if showSettings {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { showSettings = false }
@@ -81,11 +87,6 @@ struct LibraryScreen: View {
                 currentIndex = store.visible.firstIndex(where: { $0.url == url })
             }
         }
-        .alert("새 폴더", isPresented: $showNewFolder) {
-            TextField("폴더 이름", text: $newFolder)
-            Button("만들기") { store.createFolder(newFolder); newFolder = "" }
-            Button("취소", role: .cancel) {}
-        }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("새 이름", text: $renameText)
             Button("바꾸기") { if let item = renaming { store.rename(item, to: renameText) }; renaming = nil }
@@ -107,6 +108,28 @@ struct LibraryScreen: View {
         } message: {
             Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
         }
+    }
+
+    private var newFolderCard: some View {
+        VStack(spacing: 14) {
+            Text("새 폴더").font(.headline)
+            TextField("폴더 이름", text: $newFolder)
+                .textFieldStyle(.roundedBorder)
+                .autocapitalization(.none)
+            HStack(spacing: 10) {
+                Button("취소") { showNewFolder = false; newFolder = "" }
+                    .frame(maxWidth: .infinity)
+                Button("만들기") {
+                    store.createFolder(newFolder); newFolder = ""; showNewFolder = false
+                }
+                .frame(maxWidth: .infinity).foregroundColor(.accent).bold()
+            }
+        }
+        .padding(18)
+        .frame(width: 280)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(radius: 20)
     }
 
     /// Playback settings, the phone's way: each mode lit accent when on, grey

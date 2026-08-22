@@ -133,7 +133,9 @@
       e.preventDefault(); e.stopPropagation();
       removeList();
       anchor = b;
-      send({ type: "download" });
+      var r = b.getBoundingClientRect();
+      // Send where the button is, so the native list can drop right under it.
+      send({ type: "download", right: r.right, bottom: r.bottom });
     });
     document.documentElement.appendChild(b);
     return b;

@@ -16,6 +16,7 @@ struct BrowserScreen: View {
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
+    @State private var listAnchor: CGPoint = .zero
     // The bypass toggle is hidden until asked for: a right-swipe on the open
     // address panel reveals it.
     @State private var engineRevealed = false
@@ -39,8 +40,9 @@ struct BrowserScreen: View {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { withAnimation { showList = false } }
                 qualityList
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.top, 8).padding(.trailing, 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.leading, max(8, min(listAnchor.x - listWidth, UIScreen.main.bounds.width - listWidth - 8)))
+                    .padding(.top, listAnchor.y + topInset + 6)
             }
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
@@ -59,7 +61,10 @@ struct BrowserScreen: View {
                 else { model.pauseWebVideos(); openLibrary() }
             }
             model.onWebTap = { withAnimation(.easeOut(duration: 0.15)) { showAddress = false } }
-            model.onDownloadRequest = { requestDownload() }
+            model.onDownloadRequest = { right, bottom in
+                listAnchor = CGPoint(x: right, y: bottom)
+                requestDownload()
+            }
             model.onPick = { itag in pick(itag) }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
@@ -163,26 +168,38 @@ struct BrowserScreen: View {
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
     }
 
+    private let listWidth: CGFloat = 264
+
+    private var topInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }.first?.keyWindow?.safeAreaInsets.top ?? 47
+    }
+
     private var qualityList: some View {
         VStack(spacing: 0) {
-            ForEach(qualities) { row in
+            ForEach(Array(qualities.enumerated()), id: \.element.id) { i, row in
                 Button { startYouTube(row) } label: {
-                    HStack {
-                        Text(row.label).bold()
+                    HStack(spacing: 10) {
+                        Image(systemName: row.isAudioOnly ? "music.note" : "film")
+                            .font(.system(size: 13)).foregroundColor(.accent).frame(width: 18)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(row.label).font(.subheadline.weight(.semibold))
+                            Text(row.detail).font(.caption2).foregroundColor(.muted)
+                        }
                         Spacer()
-                        Text(row.detail).font(.caption).foregroundColor(.muted)
                     }
-                    .padding(.horizontal, 12).padding(.vertical, 11)
+                    .padding(.horizontal, 14).padding(.vertical, 13)
                     .contentShape(Rectangle())
                 }
                 .foregroundColor(.onSurface)
-                Divider().background(Color.toolbar)
+                if i < qualities.count - 1 { Divider().background(Color.toolbar).padding(.leading, 42) }
             }
         }
-        .frame(width: 250)
+        .frame(width: listWidth)
         .background(Color.chrome)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .shadow(radius: 8)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.toolbar, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.4), radius: 12, y: 4)
     }
 
     private func startYouTube(_ row: YtRow) {

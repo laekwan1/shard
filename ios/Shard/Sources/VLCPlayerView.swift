@@ -275,7 +275,25 @@ struct PlayerStage: View {
             if showControls { controlsOverlay.transition(.opacity) }
         }
         .clipped()
+        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         .onAppear { showBar() }
+        .onDisappear { Orientation.shared.free() }
+    }
+
+    /// Full screen lays a wide video on its side; a tall one (a short) stays up.
+    /// Leaving full screen turns back to portrait, then frees rotation again.
+    private func applyOrientation(_ fs: Bool) {
+        if fs {
+            let s = controller.player.videoSize
+            if s.width > s.height {
+                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+            } else {
+                Orientation.shared.lock(.portrait, to: .portrait)
+            }
+        } else {
+            Orientation.shared.lock(.portrait, to: .portrait)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
+        }
     }
 
     /// Tap toggles the bar — up if hidden, away if shown.
@@ -426,6 +444,7 @@ struct PlayerStage: View {
             HStack(spacing: 20) {
                 Button { controller.cycleRate() } label: {
                     Text(String(format: "%g×", controller.rate)).font(.system(size: 13, weight: .bold))
+                        .frame(width: 46, alignment: .leading)   // fixed, so 1×→1.25× does not shove the buttons
                 }
                 Spacer()
                 Button { onPrev() } label: { Image(systemName: "backward.end.fill").font(.system(size: 14)) }.disabled(!hasPrev)

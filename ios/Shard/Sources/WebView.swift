@@ -11,9 +11,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
-    /// The download button on a video was pressed — the browser fetches the
-    /// quality rows and hands them back with `sendQualities`.
-    var onDownloadRequest: (() -> Void)?
+    /// The download button on a video was pressed, with its bottom-right corner
+    /// (in web points) so the list can drop right under it.
+    var onDownloadRequest: ((_ right: CGFloat, _ bottom: CGFloat) -> Void)?
     /// A quality row in the in-page list was chosen (its itag).
     var onPick: ((UInt32) -> Void)?
 
@@ -139,7 +139,10 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard message.name == "shard", let body = message.body as? [String: Any] else { return }
         switch body["type"] as? String {
-        case "download": onDownloadRequest?()
+        case "download":
+            let right = (body["right"] as? NSNumber)?.doubleValue ?? 0
+            let bottom = (body["bottom"] as? NSNumber)?.doubleValue ?? 0
+            onDownloadRequest?(CGFloat(right), CGFloat(bottom))
         case "pick": if let itag = (body["itag"] as? NSNumber)?.uint32Value { onPick?(itag) }
         case "fullscreen": videoFullscreen = (body["on"] as? Bool) ?? false
         default: break
