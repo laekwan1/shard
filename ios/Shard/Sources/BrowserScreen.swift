@@ -45,7 +45,7 @@ struct BrowserScreen: View {
             model.onNavigated = { withAnimation { showAddress = false } }
             model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
             model.onSwipeLibrary = { withAnimation { showAddress = false }; model.pauseWebVideos(); openLibrary() }
-            model.onWebTap = { if showAddress { withAnimation { showAddress = false } } }
+            model.onWebTap = { withAnimation(.easeOut(duration: 0.15)) { showAddress = false } }
             model.onDownloadRequest = { requestDownload() }
             model.onPick = { itag in pick(itag) }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
@@ -55,7 +55,7 @@ struct BrowserScreen: View {
     /// A video's download button was pressed: ask the page, then either drop the
     /// quality list into the page (YouTube) or start a plain download.
     private func requestDownload() {
-        Task {
+        Task { @MainActor in
             guard let json = await model.offer(),
                   let data = json.data(using: .utf8),
                   let offer = try? JSONDecoder().decode(Offer.self, from: data) else {
@@ -122,11 +122,12 @@ struct BrowserScreen: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
-        // One more right-swipe here reveals the bypass toggle.
+        // Right-swipe reveals the bypass toggle; left-swipe closes the panel.
         .gesture(
             DragGesture(minimumDistance: 24).onEnded { v in
-                guard v.translation.width > 40, abs(v.translation.height) < 60 else { return }
-                withAnimation { engineRevealed = true }
+                guard abs(v.translation.width) > 40, abs(v.translation.height) < 60 else { return }
+                if v.translation.width > 0 { withAnimation { engineRevealed = true } }
+                else { withAnimation(.easeOut(duration: 0.18)) { showAddress = false } }
             }
         )
     }

@@ -164,20 +164,25 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 }
 
-/// The bare drawing surface libVLC renders into.
+/// The drawing surface libVLC renders into. It attaches the player in
+/// `layoutSubviews`, once the view has a real size — attaching at make-time (a
+/// zero-size view) left the full-screen picture black.
+final class PlayerHostView: UIView {
+    weak var controller: VLCController?
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.width > 1, bounds.height > 1 { controller?.attach(to: self) }
+    }
+}
+
 private struct VLCSurface: UIViewRepresentable {
     let controller: VLCController
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(); view.backgroundColor = .black
-        controller.attach(to: view)
+    func makeUIView(context: Context) -> PlayerHostView {
+        let view = PlayerHostView(); view.backgroundColor = .black
+        view.controller = controller
         return view
     }
-    // Re-point the player at whichever surface is on screen. Without this the
-    // full-screen surface (a different view) stayed black — the player was still
-    // drawing into the windowed one.
-    func updateUIView(_ uiView: UIView, context: Context) {
-        controller.attach(to: uiView)
-    }
+    func updateUIView(_ uiView: PlayerHostView, context: Context) {}
 }
 
 /// A brief on-screen gauge for a side drag (brightness or sound).
@@ -253,7 +258,7 @@ struct PlayerStage: View {
     private func toggleBar() {
         if showControls {
             hideWork?.cancel()
-            withAnimation { showControls = false }
+            withAnimation(.easeOut(duration: 0.12)) { showControls = false }
         } else {
             showBar()
         }
@@ -327,7 +332,7 @@ struct PlayerStage: View {
     /// Show the bar and keep it up for three idle seconds, refreshed by any
     /// interaction that calls this.
     private func showBar() {
-        withAnimation { showControls = true }
+        withAnimation(.easeOut(duration: 0.12)) { showControls = true }
         hideWork?.cancel()
         let work = DispatchWorkItem { withAnimation { showControls = false } }
         hideWork = work

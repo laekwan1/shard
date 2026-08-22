@@ -22,6 +22,9 @@ struct LibraryScreen: View {
     @State private var folderRenameText = ""
     @State private var deletingFolder: String?
     @State private var showSettings = false
+    /// Direction of the last shelf switch, so the list slides in the way the
+    /// finger went: to music (a left swipe) the new list enters from the right.
+    @State private var toMusic = true
 
     var body: some View {
         ZStack {
@@ -41,9 +44,12 @@ struct LibraryScreen: View {
                 if store.visible.isEmpty {
                     empty
                 } else {
-                    // Keyed by shelf so switching slides the list sideways in the
-                    // direction of the swipe, rather than dropping in from above.
-                    list.id(store.kind).transition(.slide)
+                    // Slide in the direction of the switch: to music the new list
+                    // enters from the right and the old leaves to the left.
+                    list.id(store.kind).transition(.asymmetric(
+                        insertion: .move(edge: toMusic ? .trailing : .leading),
+                        removal: .move(edge: toMusic ? .leading : .trailing)
+                    ))
                 }
             }
             if currentIndex != nil && fullscreen {
@@ -212,9 +218,7 @@ struct LibraryScreen: View {
 
     private func shelfTab(_ kind: MediaKind, _ label: String, _ icon: String) -> some View {
         let on = store.kind == kind
-        return Button {
-            withAnimation(.easeInOut(duration: 0.15)) { store.kind = kind }
-        } label: {
+        return Button { setKind(kind) } label: {
             HStack(spacing: 6) {
                 Image(systemName: icon)
                 Text(label).bold()
@@ -228,11 +232,11 @@ struct LibraryScreen: View {
         }
     }
 
-    /// Fling left/right anywhere on the list to switch shelves, like Android.
-    private func switchShelf(_ translationX: CGFloat) {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            store.kind = translationX < 0 ? .music : .video
-        }
+    /// Switch shelf, remembering the direction so the list slides accordingly.
+    private func setKind(_ kind: MediaKind) {
+        guard store.kind != kind else { return }
+        toMusic = (kind == .music)
+        withAnimation(.easeInOut(duration: 0.2)) { store.kind = kind }
     }
 
     private var folderBar: some View {
@@ -344,10 +348,10 @@ struct LibraryScreen: View {
                     guard abs(value.translation.width) > 60,
                           abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
                     if value.translation.width > 0 {
-                        if store.kind == .music { withAnimation { store.kind = .video } }
+                        if store.kind == .music { setKind(.video) }
                         else { close() }
                     } else {
-                        if store.kind == .video { withAnimation { store.kind = .music } }
+                        if store.kind == .video { setKind(.music) }
                     }
                 }
         )

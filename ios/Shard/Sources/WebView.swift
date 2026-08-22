@@ -200,6 +200,11 @@ struct WebViewContainer: UIViewRepresentable {
         tap.cancelsTouchesInView = false
         tap.delegate = context.coordinator
         view.addGestureRecognizer(tap)
+        // A drag/scroll on the page also retreats the address panel.
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.panned(_:)))
+        pan.cancelsTouchesInView = false
+        pan.delegate = context.coordinator
+        view.addGestureRecognizer(pan)
         return view
     }
 
@@ -216,6 +221,7 @@ struct WebViewContainer: UIViewRepresentable {
         }
 
         @objc func tapped() { model.onWebTap?() }
+        @objc func panned(_ g: UIPanGestureRecognizer) { if g.state == .began { model.onWebTap?() } }
 
         @objc func swiped(_ g: UISwipeGestureRecognizer) {
             guard let view = g.view else { return }
