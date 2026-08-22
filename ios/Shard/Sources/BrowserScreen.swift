@@ -23,7 +23,10 @@ struct BrowserScreen: View {
     var body: some View {
         ZStack(alignment: .top) {
             Color.surface.ignoresSafeArea()
-            WebViewContainer(model: model).ignoresSafeArea(edges: .bottom)
+            // The page keeps clear of the home-indicator area at the bottom, so a
+            // player's own seek bar sitting right at the screen edge (YouTube
+            // Shorts) is reachable instead of under the indicator.
+            WebViewContainer(model: model)
 
             // Centre bands, so the screen edges are left for the web view's own
             // back/forward swipe: a right-drag left-of-centre opens the address
