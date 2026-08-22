@@ -96,6 +96,21 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.rate = rate
     }
 
+    /// Scrubbing the desktop's way: while dragging, only the knob and the clock
+    /// move — the player is not touched. It seeks once, on release. That is the
+    /// change made on PC after live-seeking-per-pixel proved unpleasant: no
+    /// storm of seeks, so none of the overlapping audio bursts a drag produced.
+    func beginScrub() { scrubbing = true }
+
+    /// While dragging: move the shown position only. No seek.
+    func previewSeek(_ p: Float) { position = max(0, min(1, p)) }
+
+    /// Let go: seek once to the final spot.
+    func endScrub(_ p: Float) {
+        scrubbing = false
+        player.position = max(0, min(1, p))
+    }
+
     func toggle() {
         if player.state == .ended {
             // A finished player will not resume on play() — put it back to the
@@ -364,10 +379,12 @@ struct PlayerStage: View {
                 Slider(
                     value: Binding(
                         get: { Double(controller.position) },
-                        set: { controller.position = Float($0); controller.seek(to: Float($0)) }
+                        set: { controller.previewSeek(Float($0)) }
                     ),
                     in: 0...1,
-                    onEditingChanged: { controller.scrubbing = $0 }
+                    onEditingChanged: { editing in
+                        editing ? controller.beginScrub() : controller.endScrub(controller.position)
+                    }
                 ).tint(.accent)
                 Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
             }
