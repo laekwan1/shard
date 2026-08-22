@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct ShardApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         WindowGroup {
             RootView().preferredColorScheme(.dark)
@@ -15,6 +16,9 @@ struct RootView: View {
     @StateObject private var downloads = DownloadsStore()
     @StateObject private var library = LibraryStore()
     @StateObject private var prefs = PlaybackPrefs()
+    // One player for the whole app, owned here — so it is never duplicated when
+    // the library view comes and goes, which was stacking playback.
+    @StateObject private var player = VLCController()
     @State private var showLibrary = false
 
     var body: some View {
@@ -27,7 +31,7 @@ struct RootView: View {
             }
 
             if showLibrary {
-                LibraryScreen(store: library, downloads: downloads, prefs: prefs) {
+                LibraryScreen(store: library, downloads: downloads, prefs: prefs, player: player) {
                     withAnimation(.easeIn(duration: 0.18)) { showLibrary = false }
                 }
                 .transition(.move(edge: .trailing))

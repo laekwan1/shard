@@ -39,6 +39,23 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         setupRemoteCommands()
     }
 
+    deinit {
+        // Without this a controller that goes out of view kept its player alive
+        // and playing in the background — pick another file and two (then three)
+        // were heard at once. Stop it, and drop the remote-command handlers so
+        // the lock screen does not talk to a dead player.
+        player.stop()
+        let center = MPRemoteCommandCenter.shared()
+        for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
+                  center.nextTrackCommand, center.previousTrackCommand, center.changePlaybackPositionCommand] {
+            c.removeTarget(nil)
+        }
+    }
+
+    /// Whether a file is loaded, so the library can show the stage again after
+    /// coming back from the background instead of losing it.
+    var hasMedia: Bool { player.media != nil }
+
     /// Lock screen and headset controls, so a video listened to like music is
     /// controlled like music.
     private func setupRemoteCommands() {
@@ -79,7 +96,16 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.rate = rate
     }
 
-    func toggle() { player.isPlaying ? player.pause() : player.play() }
+    func toggle() {
+        if player.state == .ended {
+            // A finished player will not resume on play() — put it back to the
+            // start and go, so the button replays instead of doing nothing.
+            player.position = 0
+            player.play()
+        } else {
+            player.isPlaying ? player.pause() : player.play()
+        }
+    }
     func seek(to p: Float) { player.position = max(0, min(1, p)) }
     func jump(_ seconds: Int32) { seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds) }
     func rewindStep() { player.jumpBackward(1) }
@@ -136,7 +162,12 @@ private struct VLCSurface: UIViewRepresentable {
         controller.attach(to: view)
         return view
     }
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    // Re-point the player at whichever surface is on screen. Without this the
+    // full-screen surface (a different view) stayed black — the player was still
+    // drawing into the windowed one.
+    func updateUIView(_ uiView: UIView, context: Context) {
+        controller.attach(to: uiView)
+    }
 }
 
 /// A brief on-screen gauge for a side drag (brightness or sound).
@@ -174,6 +205,10 @@ struct PlayerStage: View {
     @State private var hideWork: DispatchWorkItem?
     @State private var gauge: (icon: String, value: Double)?
     @State private var zoom: CGFloat = 1
+
+    /// True while a brightness/sound drag is showing its gauge, so the collapse
+    /// swipe does not fire mid-adjust.
+    private var gaugeActive: Bool { gauge != nil }
     @State private var dragStartBrightness: CGFloat = 0
     @State private var dragStartVolume: Float = 0
 
@@ -199,7 +234,21 @@ struct PlayerStage: View {
         .simultaneousGesture(swipeGesture)
         .simultaneousGesture(sideDragGesture)
         .onChange(of: showControls) { shown in if shown { scheduleAutoHide() } }
+        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         .onAppear { scheduleAutoHide() }
+        .onDisappear { Orientation.shared.free() }
+    }
+
+    /// Full screen turns a wide video on its side, like the phone; a tall one
+    /// (a short) stays upright. Leaving full screen frees rotation again.
+    private func applyOrientation(_ fs: Bool) {
+        guard fs else { Orientation.shared.free(); return }
+        let size = controller.player.videoSize
+        if size.width > size.height {
+            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+        } else {
+            Orientation.shared.lock(.portrait, to: .portrait)
+        }
     }
 
     /// Fade the bar out after a few idle seconds, like the phone player.
@@ -247,28 +296,26 @@ struct PlayerStage: View {
     }
     private func stopRewind() { rewindTimer?.invalidate(); rewindTimer = nil }
 
-    // A flick: up expands, down collapses, left stops, right leaves to the web.
+    // Only up and down on the picture: up to full screen, down to the window.
+    // Left/right are gone — sideways is for brightness and sound, and leaving to
+    // the web is a swipe on the list, not the picture.
     private var swipeGesture: some Gesture {
         DragGesture(minimumDistance: 40)
             .onEnded { v in
-                let dx = v.translation.width, dy = v.translation.height
-                if abs(dy) > abs(dx) {
-                    if dy < -50 { fullscreen = true }
-                    else if dy > 50 { fullscreen = false }
-                } else {
-                    if dx > 60 { onPullToWeb() }
-                    else if dx < -60 { onStop() }
-                }
+                guard abs(v.translation.height) > abs(v.translation.width) else { return }
+                if v.translation.height < -50 { fullscreen = true }
+                else if v.translation.height > 50, !gaugeActive { fullscreen = false }
             }
     }
 
-    // Full screen only: a slow vertical drag on the left sets brightness, on the
-    // right sets sound, with a gauge while it moves.
+    // A slow vertical drag sets sound on the right (always) and brightness on the
+    // left (full screen only), with a gauge while it moves.
     private var sideDragGesture: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { v in
-                guard fullscreen, abs(v.translation.height) > abs(v.translation.width) else { return }
+                guard abs(v.translation.height) > abs(v.translation.width) else { return }
                 let onLeft = v.startLocation.x < UIScreen.main.bounds.width / 2
+                if onLeft && !fullscreen { return }
                 if gauge == nil {
                     dragStartBrightness = UIScreen.main.brightness
                     dragStartVolume = controller.volume
@@ -296,8 +343,11 @@ struct PlayerStage: View {
                     .shadow(radius: 2)
                 Spacer()
                 Button { fullscreen ? (fullscreen = false) : onStop() } label: {
-                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark.circle.fill")
-                        .font(.title3).foregroundColor(.white.opacity(0.9))
+                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark")
+                        .font(.subheadline.bold()).foregroundColor(.white)
+                        .frame(width: 30, height: 30)
+                        .background(Color.black.opacity(0.4))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 }
             }
             .padding(10)
@@ -307,7 +357,20 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 6) {
+            // Seek above the buttons, the way the phone bar is laid out.
+            HStack(spacing: 8) {
+                Text(controller.elapsed).font(.caption2).foregroundColor(.white).monospacedDigit()
+                Slider(
+                    value: Binding(
+                        get: { Double(controller.position) },
+                        set: { controller.position = Float($0); controller.seek(to: Float($0)) }
+                    ),
+                    in: 0...1,
+                    onEditingChanged: { controller.scrubbing = $0 }
+                ).tint(.accent)
+                Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
+            }
             HStack(spacing: 18) {
                 Button { onPrev() } label: { Image(systemName: "backward.end.fill") }
                     .disabled(!hasPrev)
@@ -329,19 +392,6 @@ struct PlayerStage: View {
                 }
             }
             .foregroundColor(.white)
-
-            HStack(spacing: 8) {
-                Text(controller.elapsed).font(.caption2).foregroundColor(.white).monospacedDigit()
-                Slider(
-                    value: Binding(
-                        get: { Double(controller.position) },
-                        set: { controller.position = Float($0); controller.seek(to: Float($0)) }
-                    ),
-                    in: 0...1,
-                    onEditingChanged: { controller.scrubbing = $0 }
-                ).tint(.white)
-                Text(controller.duration).font(.caption2).foregroundColor(.white).monospacedDigit()
-            }
         }
         .padding(10)
         .background(.ultraThinMaterial)

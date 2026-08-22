@@ -18,26 +18,30 @@ struct BrowserScreen: View {
     @State private var asking = false
     @State private var showAddress = false
 
+    @State private var landscape = false
+
     var body: some View {
         ZStack(alignment: .top) {
             Color.surface.ignoresSafeArea()
             WebViewContainer(model: model).ignoresSafeArea(edges: .bottom)
 
-            // Edge zones: swipe in from the left for the address panel, from the
-            // right for the library — the phone app's two swipes.
-            HStack {
-                edge(open: true)
-                Spacer()
-                edge(open: false)
+            // Centre bands, so the screen edges are left for the web view's own
+            // back/forward swipe: a right-drag left-of-centre opens the address
+            // panel, a left-drag right-of-centre opens the library.
+            GeometryReader { geo in
+                let w = geo.size.width
+                Color.clear.frame(width: w * 0.2).position(x: w * 0.36, y: geo.size.height / 2)
+                    .contentShape(Rectangle())
+                    .gesture(bandGesture(openAddress: true))
+                Color.clear.frame(width: w * 0.2).position(x: w * 0.64, y: geo.size.height / 2)
+                    .contentShape(Rectangle())
+                    .gesture(bandGesture(openAddress: false))
             }
+
+            floatingDownload
 
             if showAddress {
                 addressPanel.transition(.move(edge: .top))
-            }
-            if asking {
-                ProgressView().tint(.accent).padding(8)
-                    .background(.ultraThinMaterial).clipShape(Circle())
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).padding(.top, 6)
             }
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
@@ -45,6 +49,7 @@ struct BrowserScreen: View {
         }
         .onAppear {
             model.onLongPressVideo = { askAndDownload() }
+            model.onNavigated = { withAnimation { showAddress = false } }
             if model.address.isEmpty { model.load("https://m.youtube.com") }
         }
         .confirmationDialog("받을 화질을 고르세요", isPresented: $showQualities, titleVisibility: .visible) {
@@ -55,21 +60,33 @@ struct BrowserScreen: View {
         }
     }
 
-    private func edge(open address: Bool) -> some View {
-        Color.clear
-            .frame(width: 22)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 20)
-                    .onEnded { v in
-                        guard abs(v.translation.width) > 40, abs(v.translation.height) < 70 else { return }
-                        if address, v.translation.width > 0 {
-                            withAnimation(.easeOut(duration: 0.18)) { showAddress = true }
-                        } else if !address, v.translation.width < 0 {
-                            openLibrary()
-                        }
-                    }
-            )
+    private func bandGesture(openAddress: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 24)
+            .onEnded { v in
+                guard abs(v.translation.width) > 45, abs(v.translation.height) < 70 else { return }
+                if openAddress, v.translation.width > 0 {
+                    withAnimation(.easeOut(duration: 0.18)) { showAddress = true }
+                } else if !openAddress, v.translation.width < 0 {
+                    openLibrary()
+                }
+            }
+    }
+
+    // A small download control floating over the page: reliable where a
+    // long-press is not (YouTube claims the long-press for its own 2× and the
+    // system claims it for copy/look-up). It saves whatever the page is playing.
+    private var floatingDownload: some View {
+        Button { askAndDownload() } label: {
+            Image(systemName: asking ? "arrow.down.circle" : "arrow.down.to.line")
+                .font(.title2).foregroundColor(.white)
+                .frame(width: 46, height: 46)
+                .background(Color.accent.opacity(0.9)).clipShape(Circle())
+                .shadow(radius: 3)
+                .overlay { if asking { ProgressView().tint(.white) } }
+        }
+        .disabled(asking)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.trailing, 16).padding(.bottom, 24)
     }
 
     private var addressPanel: some View {
@@ -77,24 +94,25 @@ struct BrowserScreen: View {
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
 
-            TextField("주소 또는 검색", text: $editing)
-                .textFieldStyle(.plain)
-                .autocapitalization(.none)
-                .disableAutocorrection(true)
-                .keyboardType(.webSearch)
-                .foregroundColor(.onSurface)
+            URLField(text: $editing) { model.load(editing); withAnimation { showAddress = false } }
                 .padding(.horizontal, 12).padding(.vertical, 7)
                 .background(Color.chrome)
                 .clipShape(Capsule())
-                .onSubmit { model.load(editing); withAnimation { showAddress = false } }
                 .onChange(of: model.address) { editing = $0 }
 
-            iconButton(model.isLoading ? "xmark" : "arrow.clockwise") { model.reload() }
-            iconButton("square.stack") { openLibrary() }
-            iconButton("chevron.up") { withAnimation { showAddress = false } }
+            iconButton(landscape ? "rotate.left" : "rotate.right") { rotate() }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
+    }
+
+    private func rotate() {
+        landscape.toggle()
+        if landscape {
+            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+        } else {
+            Orientation.shared.lock(.portrait, to: .portrait)
+        }
     }
 
     private func iconButton(_ name: String, enabled: Bool = true, _ tap: @escaping () -> Void) -> some View {

@@ -8,10 +8,10 @@ struct LibraryScreen: View {
     @ObservedObject var store: LibraryStore
     @ObservedObject var downloads: DownloadsStore
     @ObservedObject var prefs: PlaybackPrefs
+    @ObservedObject var player: VLCController
     var close: () -> Void
 
     @StateObject private var probe = MediaProbe()
-    @StateObject private var player = VLCController()
     @State private var currentIndex: Int?
     @State private var fullscreen = false
     @State private var showNewFolder = false
@@ -27,12 +27,22 @@ struct LibraryScreen: View {
             VStack(spacing: 0) {
                 header
                 shelfSwitch
-                if store.kind == .video { folderBar }
+                    .padding(.bottom, 12)   // wider gap above the folders…
+                folderBar
                 if currentIndex != nil && !fullscreen {
                     stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
+                        .background(Color.black)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.toolbar, lineWidth: 1))
+                        .padding(.horizontal, 10).padding(.bottom, 6)
                 }
                 if !downloads.items.isEmpty { downloadsStrip }
-                if store.visible.isEmpty { empty } else { list }
+                if store.visible.isEmpty {
+                    empty
+                } else {
+                    // Keyed by shelf so switching slides the list sideways in the
+                    // direction of the swipe, rather than dropping in from above.
+                    list.id(store.kind).transition(.slide)
+                }
             }
             if currentIndex != nil && fullscreen {
                 stage.ignoresSafeArea().zIndex(2)
@@ -190,34 +200,38 @@ struct LibraryScreen: View {
     }
 
     private var folderBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // The top level is home — a house, like the desktop's storage tab.
-                chip(active: store.current == nil, tap: { store.current = nil }) {
-                    Image(systemName: "house.fill").font(.subheadline)
-                }
-                .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: nil) }
-                ForEach(store.folders, id: \.self) { folder in
-                    chip(active: store.current == folder, tap: { store.current = folder }) {
-                        Text(folder).font(.subheadline)
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    // The top level is home — a house, like the desktop's storage tab.
+                    chip(active: store.current == nil, tap: { store.current = nil }) {
+                        Image(systemName: "house.fill").font(.subheadline)
                     }
-                    .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: folder) }
-                    .contextMenu {
-                        Button { renamingFolder = folder; folderRenameText = folder } label: {
-                            Label("이름 바꾸기", systemImage: "pencil")
+                    .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: nil) }
+                    ForEach(store.folders, id: \.self) { folder in
+                        chip(active: store.current == folder, tap: { store.current = folder }) {
+                            Text(folder).font(.subheadline)
                         }
-                        Button(role: .destructive) { deletingFolder = folder } label: {
-                            Label("폴더 삭제", systemImage: "trash")
+                        .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: folder) }
+                        .contextMenu {
+                            Button { renamingFolder = folder; folderRenameText = folder } label: {
+                                Label("이름 바꾸기", systemImage: "pencil")
+                            }
+                            Button(role: .destructive) { deletingFolder = folder } label: {
+                                Label("폴더 삭제", systemImage: "trash")
+                            }
                         }
                     }
                 }
-                Button { showNewFolder = true } label: {
-                    Image(systemName: "plus").foregroundColor(.muted)
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                }
+                .padding(.leading, 16)
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
+            // The make-folder button stays pinned at the right, not among the tabs.
+            Button { showNewFolder = true } label: {
+                Image(systemName: "folder.badge.plus").foregroundColor(.muted).padding(8)
+            }
+            .padding(.trailing, 12)
         }
+        .padding(.bottom, 4)
     }
 
     private func chip<Content: View>(
@@ -285,14 +299,16 @@ struct LibraryScreen: View {
                 }
             }
         }
-        // Fling left/right to switch shelf, without blocking the vertical scroll.
+        // Horizontal fling on the list: right leaves to the web, left switches
+        // shelf. Off while a video is up, so seeking it does not switch shelves.
         .simultaneousGesture(
             DragGesture(minimumDistance: 30)
                 .onEnded { value in
-                    if abs(value.translation.width) > 60 &&
-                        abs(value.translation.width) > abs(value.translation.height) * 1.5 {
-                        switchShelf(value.translation.width)
-                    }
+                    guard currentIndex == nil,
+                          abs(value.translation.width) > 60,
+                          abs(value.translation.width) > abs(value.translation.height) * 1.5 else { return }
+                    if value.translation.width > 0 { close() }
+                    else { switchShelf(value.translation.width) }
                 }
         )
     }
@@ -319,12 +335,10 @@ struct LibraryScreen: View {
         .contentShape(Rectangle())
     }
 
-    /// Size · folder · age — the three things worth knowing, like the phone.
+    /// Size · age — the folder is the chip you are already in, so it is not
+    /// repeated on every row.
     private func describe(_ item: Item) -> String {
-        var parts = [ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)]
-        if let folder = item.folder { parts.append(folder) }
-        parts.append(age(item.url))
-        return parts.joined(separator: " · ")
+        "\(ByteCountFormatter.string(fromByteCount: item.size, countStyle: .file)) · \(age(item.url))"
     }
 
     private func age(_ url: URL) -> String {

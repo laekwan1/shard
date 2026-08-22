@@ -12,6 +12,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     @Published var isLoading = false
     /// Called when a video is long-pressed, so the browser can offer to download.
     var onLongPressVideo: (() -> Void)?
+    /// Called when the page starts navigating, so the address panel can retreat.
+    var onNavigated: (() -> Void)?
 
     lazy var webView: WKWebView = {
         let controller = WKUserContentController()
@@ -97,6 +99,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        onNavigated?()
         sync()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

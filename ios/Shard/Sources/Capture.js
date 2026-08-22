@@ -96,8 +96,12 @@
   // a video is ours to act on, not the system's.
   try {
     var style = document.createElement("style");
+    // Everything: the callout (copy / look up / translate) and text selection
+    // both hijack a long-press, and this is a browser for saving video, not
+    // reading. Inputs keep selection so an address or search box still works.
     style.textContent =
-      "video, a, img { -webkit-touch-callout: none !important; }";
+      "* { -webkit-touch-callout: none !important; -webkit-user-select: none !important; }" +
+      "input, textarea, [contenteditable] { -webkit-user-select: text !important; }";
     (document.head || document.documentElement).appendChild(style);
   } catch (e) {}
 
