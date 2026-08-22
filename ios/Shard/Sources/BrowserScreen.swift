@@ -15,6 +15,7 @@ struct BrowserScreen: View {
     @State private var pendingTitle = ""
     @State private var banner: String?
     @State private var showAddress = false
+    @State private var showList = false
     // The bypass toggle is hidden until asked for: a right-swipe on the open
     // address panel reveals it.
     @State private var engineRevealed = false
@@ -33,6 +34,13 @@ struct BrowserScreen: View {
 
             if showAddress {
                 addressPanel.transition(.move(edge: .top))
+            }
+            if showList {
+                Color.black.opacity(0.001).ignoresSafeArea()
+                    .onTapGesture { withAnimation { showList = false } }
+                qualityList
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .padding(.top, 8).padding(.trailing, 12)
             }
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
@@ -75,8 +83,9 @@ struct BrowserScreen: View {
                 guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
                     banner = "화질을 찾지 못했습니다"; return
                 }
+                banner = nil
                 qualities = rows
-                model.sendQualities(qualitiesJSON(rows))
+                withAnimation { showList = true }
             } else if let hls = offer.hls, !hls.isEmpty {
                 startURL(hls, isHLS: true, referer: offer.referer ?? "", title: pendingTitle)
             } else if let media = offer.media, !media.isEmpty {
@@ -90,17 +99,6 @@ struct BrowserScreen: View {
     private func pick(_ itag: UInt32) {
         guard let row = qualities.first(where: { $0.itag == itag }) else { return }
         startYouTube(row)
-    }
-
-    private func qualitiesJSON(_ rows: [YtRow]) -> String {
-        let items = rows.map {
-            "{\"itag\":\($0.itag),\"label\":\(jsonString($0.label)),\"detail\":\(jsonString($0.detail))}"
-        }
-        return "[\(items.joined(separator: ","))]"
-    }
-
-    private func jsonString(_ s: String) -> String {
-        (try? String(data: JSONEncoder().encode(s), encoding: .utf8)) ?? "\"\""
     }
 
     // A small control at the screen's top-right that drops its quality list
@@ -165,7 +163,30 @@ struct BrowserScreen: View {
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
     }
 
+    private var qualityList: some View {
+        VStack(spacing: 0) {
+            ForEach(qualities) { row in
+                Button { startYouTube(row) } label: {
+                    HStack {
+                        Text(row.label).bold()
+                        Spacer()
+                        Text(row.detail).font(.caption).foregroundColor(.muted)
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 11)
+                    .contentShape(Rectangle())
+                }
+                .foregroundColor(.onSurface)
+                Divider().background(Color.toolbar)
+            }
+        }
+        .frame(width: 250)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .shadow(radius: 8)
+    }
+
     private func startYouTube(_ row: YtRow) {
+        withAnimation { showList = false }
         let offer = pendingOffer
         let label = row.isAudioOnly ? "\(pendingTitle) (음악)" : "\(pendingTitle) · \(row.label)"
         downloads.start(title: label) { task, report in

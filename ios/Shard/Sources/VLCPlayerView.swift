@@ -26,6 +26,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.audio?.isMuted = muted
     }
 
+    /// The one surface VLC draws into, reparented between windowed and full
+    /// screen so its render layer is never torn down.
+    lazy var hostView: PlayerHostView = {
+        let v = PlayerHostView(); v.controller = self; v.backgroundColor = .black
+        return v
+    }()
+
     /// The file currently loaded, so the library can put its stage back when you
     /// return to it.
     private(set) var currentURL: URL?
@@ -164,25 +171,42 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 }
 
-/// The drawing surface libVLC renders into. It attaches the player in
-/// `layoutSubviews`, once the view has a real size — attaching at make-time (a
-/// zero-size view) left the full-screen picture black.
+/// The drawing surface libVLC renders into. It attaches the player once it has a
+/// real size — attaching at make-time (a zero-size view) left the picture black.
 final class PlayerHostView: UIView {
     weak var controller: VLCController?
+    private var attached = false
     override func layoutSubviews() {
         super.layoutSubviews()
-        if bounds.width > 1, bounds.height > 1 { controller?.attach(to: self) }
+        if !attached, bounds.width > 1, bounds.height > 1 {
+            controller?.attach(to: self)
+            attached = true
+        }
     }
 }
 
+/// Reparents the controller's ONE persistent host view into whatever container
+/// SwiftUI makes (windowed or full screen). Moving the same view keeps VLC's
+/// render layer alive — recreating the surface on every window/full-screen swap
+/// is what turned the picture black.
 private struct VLCSurface: UIViewRepresentable {
     let controller: VLCController
-    func makeUIView(context: Context) -> PlayerHostView {
-        let view = PlayerHostView(); view.backgroundColor = .black
-        view.controller = controller
-        return view
+    func makeUIView(context: Context) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .black
+        let host = controller.hostView
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.removeFromSuperview()
+        container.addSubview(host)
+        NSLayoutConstraint.activate([
+            host.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            host.topAnchor.constraint(equalTo: container.topAnchor),
+            host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        return container
     }
-    func updateUIView(_ uiView: PlayerHostView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 /// A brief on-screen gauge for a side drag (brightness or sound).
