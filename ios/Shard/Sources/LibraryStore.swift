@@ -70,8 +70,12 @@ final class LibraryStore: ObservableObject {
         return v?.contentModificationDate ?? v?.creationDate ?? .distantPast
     }
 
-    /// The items shown for the current folder and shelf (video/music).
-    var visible: [Item] { items.filter { $0.folder == current && $0.kind == kind } }
+    /// The items shown for the current shelf. Music is one flat list (folders
+    /// are a video idea, matching the phone); video is filtered to the folder.
+    var visible: [Item] {
+        if kind == .music { return items.filter { $0.kind == .music } }
+        return items.filter { $0.folder == current && $0.kind == .video }
+    }
 
     func createFolder(_ name: String) {
         let clean = name.trimmingCharacters(in: .whitespaces)

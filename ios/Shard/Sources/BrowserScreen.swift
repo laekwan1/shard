@@ -57,24 +57,11 @@ struct BrowserScreen: View {
                 .onChange(of: model.address) { editing = $0 }
 
             iconButton(model.isLoading ? "xmark" : "arrow.clockwise") { model.reload() }
-            downloadButton
+            if asking { ProgressView().tint(.accent).frame(width: 26) }
             iconButton("square.stack") { openLibrary() }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
-    }
-
-    private var downloadButton: some View {
-        Button { askAndDownload() } label: {
-            if asking {
-                ProgressView().tint(.accent)
-            } else {
-                Image(systemName: "arrow.down.circle")
-                    .foregroundColor(.accent)
-            }
-        }
-        .disabled(asking)
-        .frame(width: 30)
     }
 
     private func iconButton(_ name: String, enabled: Bool = true, _ tap: @escaping () -> Void) -> some View {

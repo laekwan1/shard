@@ -12,8 +12,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var elapsed = "0:00"
     @Published var duration = "0:00"
     @Published var rate: Float = 1
+    @Published var muted = false
     var scrubbing = false
     var onEnded: (() -> Void)?
+
+    func toggleMute() {
+        muted.toggle()
+        player.audio?.isMuted = muted
+    }
 
     private var currentURL: URL?
     private var pendingSeek: Float?
@@ -128,6 +134,7 @@ struct PlayerStage: View {
 
     @State private var showControls = true
     @State private var rewindTimer: Timer?
+    @State private var hideWork: DispatchWorkItem?
     @State private var gauge: (icon: String, value: Double)?
     @State private var dragStartBrightness: CGFloat = 0
     @State private var dragStartVolume: Float = 0
@@ -143,6 +150,16 @@ struct PlayerStage: View {
         .clipped()
         .simultaneousGesture(swipeGesture)
         .simultaneousGesture(sideDragGesture)
+        .onChange(of: showControls) { shown in if shown { scheduleAutoHide() } }
+        .onAppear { scheduleAutoHide() }
+    }
+
+    /// Fade the bar out after a few idle seconds, like the phone player.
+    private func scheduleAutoHide() {
+        hideWork?.cancel()
+        let work = DispatchWorkItem { withAnimation { showControls = false } }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
     }
 
     // Thirds, like the phone: double-tap the left/right third seeks ±3s (the
@@ -252,6 +269,9 @@ struct PlayerStage: View {
                 Button { onNext() } label: { Image(systemName: "forward.end.fill") }
                     .disabled(!hasNext)
                 Spacer()
+                Button { controller.toggleMute() } label: {
+                    Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                }
                 Button { controller.cycleRate() } label: {
                     Text(String(format: "%g×", controller.rate)).font(.subheadline.bold())
                 }

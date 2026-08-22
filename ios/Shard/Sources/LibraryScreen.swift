@@ -26,7 +26,7 @@ struct LibraryScreen: View {
             VStack(spacing: 0) {
                 header
                 shelfSwitch
-                folderBar
+                if store.kind == .video { folderBar }
                 if currentIndex != nil && !fullscreen {
                     stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
                 }
