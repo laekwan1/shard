@@ -30,19 +30,16 @@ def p(u):
     return int(round((u + 1.0) / 2.0 * size))
 
 
-# A centred rounded square, half the tile wide, in the accent colour — the logo
-# sits on the light ground rather than filling the whole icon.
-span = 0.5
-x0, y0, x1, y1 = p(-span), p(-span), p(span), p(span)
-radius = int(round(0.16 * (x1 - x0)))
+# The original full-bleed rounded square (spans -0.72..0.72), in the accent
+# colour — the mark fills the tile as before; only the ground behind it changed
+# from black to light.
+x0, y0, x1, y1 = p(-0.72), p(-0.72), p(0.72), p(0.72)
+radius = int(round(0.22 / 2.0 * size))
 draw.rounded_rectangle([x0, y0, x1, y1], radius=radius, fill=ACCENT)
 
-# The diagonal power-cut in the background colour, clipped to the mark by only
-# drawing where the mark is (a stroke across the whole tile is fine — outside the
-# square it just repaints the ground its own colour).
-width = int(round(0.15 * (x1 - x0)))
-draw.line([p(-span - 0.2), p(-span - 0.2), p(span + 0.2), p(span + 0.2)],
-          fill=BACKGROUND, width=width)
+# The diagonal power-cut in the background colour, corner to corner.
+width = int(round(0.22 / 2.0 * size))
+draw.line([p(-1.5), p(-1.5), p(1.5), p(1.5)], fill=BACKGROUND, width=width)
 
 img = img.resize((S, S), Image.LANCZOS).convert("RGB")
 
