@@ -64,13 +64,13 @@ struct BrowserScreen: View {
                 Button { toggleDownload() } label: {
                     ZStack {
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .fill(Color.gray.opacity(0.35))
+                            .stroke(Color.white.opacity(0.65), lineWidth: 1.5)
                             .frame(width: 24, height: 24)
                         if asking { ProgressView().tint(.white).scaleEffect(0.6) }
                         else {
                             Image(systemName: "arrow.down")
                                 .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(.white.opacity(0.85))
                         }
                     }
                 }
