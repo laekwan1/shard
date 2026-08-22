@@ -53,6 +53,17 @@ struct LibraryScreen: View {
         // A finished download adds a file; reloading when the downloads list
         // changes makes it appear without leaving and coming back.
         .onChange(of: downloads.items.count) { _ in store.reload() }
+        // Coming back to the library, put the last-played file's stage back where
+        // it was — the player kept running (or stayed paused) in the meantime, so
+        // it just needs the stage drawn onto it again.
+        .onAppear {
+            if currentIndex == nil, let url = player.currentURL,
+               let item = store.items.first(where: { $0.url == url }) {
+                store.kind = item.kind
+                store.current = item.folder
+                currentIndex = store.visible.firstIndex(where: { $0.url == url })
+            }
+        }
         .alert("새 폴더", isPresented: $showNewFolder) {
             TextField("폴더 이름", text: $newFolder)
             Button("만들기") { store.createFolder(newFolder); newFolder = "" }

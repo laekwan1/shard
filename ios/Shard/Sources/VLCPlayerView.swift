@@ -26,8 +26,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.audio?.isMuted = muted
     }
 
-    private var currentURL: URL?
-    private var pendingSeek: Float?
+    /// The file currently loaded, so the library can put its stage back when you
+    /// return to it.
+    private(set) var currentURL: URL?
     private static let rates: [Float] = [1, 1.25, 1.5, 2, 0.5, 0.75]
 
     override init() {
@@ -87,14 +88,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func attach(to view: UIView) { player.drawable = view }
 
     func open(_ url: URL) {
-        savePosition()
         currentURL = url
         player.media = VLCMedia(url: url)
-        let saved = UserDefaults.standard.float(forKey: "pos:\(url.lastPathComponent)")
-        pendingSeek = saved > 0.01 && saved < 0.98 ? saved : nil
         player.play()
         player.rate = rate
     }
+
+    func pause() { player.pause() }
 
     /// Scrubbing the desktop's way: while dragging, only the knob and the clock
     /// move — the player is not touched. It seeks once, on release. That is the
@@ -137,18 +137,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     func holdRate(_ value: Float?) { player.rate = value ?? rate }
 
-    func stop() { savePosition(); player.stop() }
-
-    private func savePosition() {
-        guard let url = currentURL, player.position > 0.01 else { return }
-        UserDefaults.standard.set(player.position, forKey: "pos:\(url.lastPathComponent)")
-    }
+    func stop() { player.stop(); currentURL = nil }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
-        if let seek = pendingSeek, player.isSeekable {
-            player.position = seek
-            pendingSeek = nil
-        }
         if !scrubbing { position = player.position }
         isPlaying = player.isPlaying
         elapsed = Self.clock(player.time.intValue)
