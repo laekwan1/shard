@@ -193,8 +193,21 @@ struct LibraryScreen: View {
             }
             if !targets.isEmpty {
                 Divider().background(Color.toolbar)
-                menuRow("폴더로 이동", showFolderPick ? "chevron.right" : "folder") {
-                    toggleFolderMove()
+                Button { toggleFolderMove() } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "folder").frame(width: 18)   // stays a folder, does not become the arrow
+                        Text("폴더로 이동").font(.subheadline)
+                        Spacer()
+                        // A chevron appears on the right when the panel is open, and
+                        // goes away when it closes.
+                        if showFolderPick {
+                            Image(systemName: "chevron.right").font(.caption).foregroundColor(.muted)
+                                .transition(.opacity)
+                        }
+                    }
+                    .foregroundColor(.onSurface)
+                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .contentShape(Rectangle())
                 }
             }
             Divider().background(Color.toolbar)
@@ -435,32 +448,30 @@ struct LibraryScreen: View {
         let gen = orientGen
         // Hide the video behind black while the interface turns, so the ugly
         // mid-rotation squish is not seen — reveal once it has settled.
+        // Paint the black cover FIRST (this render), then request the rotation on
+        // the next runloop — otherwise the rotation began before the black was up
+        // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
             if gen == orientGen { player.settling = false }
         }
         guard fs else {
-            Orientation.shared.lock(.portrait, to: .portrait)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                if gen == orientGen { Orientation.shared.free() }
+            DispatchQueue.main.async {
+                Orientation.shared.lock(.portrait, to: .portrait)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                    if gen == orientGen { Orientation.shared.free() }
+                }
             }
             return
         }
         let apply = {
             guard gen == orientGen else { return }
             let s = player.player.videoSize
-            if s.width > 0 {
-                // Size is known (the video was already playing windowed), so decide
-                // once — no landscape-then-portrait flip for a short.
-                Orientation.shared.lock(s.height > s.width ? .portrait : .landscapeRight,
-                                        to: s.height > s.width ? .portrait : .landscapeRight)
-            } else {
-                // Not known yet (a fresh track): assume wide, re-check when a frame
-                // has landed.
-                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-            }
+            let portrait = s.height > s.width && s.width > 0
+            Orientation.shared.lock(portrait ? .portrait : .landscapeRight,
+                                    to: portrait ? .portrait : .landscapeRight)
         }
-        apply()
+        DispatchQueue.main.async(execute: apply)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { apply() }
     }
 

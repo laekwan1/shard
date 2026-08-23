@@ -230,14 +230,19 @@ struct WebViewContainer: UIViewRepresentable {
             // itself in the right order — letting the pan close it here first made
             // the swipe skip straight to the library.
             guard g.state == .began else { return }
+            // Leave the bottom strip (Shorts progress bar) to the page.
+            if let view = g.view, g.location(in: view).y > view.bounds.height * 0.85 { return }
             let v = g.velocity(in: g.view)
             if abs(v.y) > abs(v.x) { model.onWebTap?() }
         }
 
         @objc func swiped(_ g: UISwipeGestureRecognizer) {
             guard let view = g.view else { return }
-            let x = g.location(in: view).x
-            let w = view.bounds.width
+            let p = g.location(in: view)
+            let x = p.x, w = view.bounds.width
+            // Leave the bottom strip to the page: that is where YouTube Shorts puts
+            // its draggable progress bar, and our swipes were stealing it.
+            guard p.y < view.bounds.height * 0.85 else { return }
             // Only the very edges (24pt) are left for the web view's own
             // back/forward swipe; everything inside that is ours, so the reach is
             // wide and meets the edge gesture exactly.

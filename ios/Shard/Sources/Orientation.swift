@@ -9,24 +9,22 @@ final class Orientation {
     /// Force the interface to an orientation and hold it there.
     func lock(_ mask: UIInterfaceOrientationMask, to orientation: UIInterfaceOrientation) {
         self.mask = mask
-        if #available(iOS 16.0, *) {
-            // Update the controller's reported orientations FIRST, then ask the
-            // active scene to rotate. Doing it in the other order let the system
-            // reject the geometry update against the still-old mask, which is why
-            // a wide video stayed portrait. Target the foreground-active scene
-            // specifically — connectedScenes.first was sometimes a background one.
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            let active = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-            active?.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-            active?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
-                // Silent: nothing actionable if the system declines, and it logs
-                // its own reason.
-                _ = error
-            }
-        } else {
-            UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
-            UIViewController.attemptRotationToDeviceOrientation()
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        // Tell EVERY controller in the active scene its allowed orientations have
+        // changed, not just the root — the SwiftUI host stack has more than one and
+        // the geometry request is judged against the top-most one.
+        active?.windows.forEach { window in
+            var vc = window.rootViewController
+            while let v = vc { v.setNeedsUpdateOfSupportedInterfaceOrientations(); vc = v.presentedViewController }
         }
+        if #available(iOS 16.0, *) {
+            active?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
+        }
+        // Also nudge the device orientation — on some builds the geometry request
+        // alone did not turn the interface, and this kicks it.
+        UIDevice.current.setValue(orientation.rawValue, forKey: "orientation")
+        UIViewController.attemptRotationToDeviceOrientation()
     }
 
     /// Back to free rotation.

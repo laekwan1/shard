@@ -6,12 +6,24 @@ import MobileVLCKit
 /// Drives one libVLC player and publishes what the controls need. libVLC plays
 /// everything the engine writes — mp4, and the mkv/webm (VP9/Opus) AVPlayer
 /// refuses — so the library needs one player, not a per-format guess.
-final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    let player = VLCMediaPlayer()
+/// The fast-changing playback numbers, split off the controller so the seek bar
+/// can observe them without the whole library re-rendering four times a second
+/// (which made the folder dialogs flicker). Only the thin seek row watches this.
+final class PlayerUI: ObservableObject {
     @Published var position: Float = 0
-    @Published var isPlaying = false
     @Published var elapsed = "0:00"
     @Published var duration = "0:00"
+}
+
+final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
+    let player = VLCMediaPlayer()
+    let ui = PlayerUI()
+    /// Forwarders so the rest of the code reads/writes these as before, but the
+    /// publishing happens on `ui`, not on the controller the library observes.
+    var position: Float { get { ui.position } set { ui.position = newValue } }
+    var elapsed: String { get { ui.elapsed } set { ui.elapsed = newValue } }
+    var duration: String { get { ui.duration } set { ui.duration = newValue } }
+    @Published var isPlaying = false
     @Published var rate: Float = 1
     @Published var muted = false
     /// True while the stream is opening/buffering, so the stage can show a spinner
@@ -53,10 +65,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var pendingSeek: Float?
     private var interruptedAt: Float?
     private var tick = 0
-    /// Set when a fresh stream is opened: hold the audio silent through the opening
-    /// glitch, then bring it up the instant real playback begins — so the sound
-    /// arrives with the picture, not seconds late, and without the start "pop".
-    private var pendingFade = false
 
     override init() {
         super.init()
@@ -101,7 +109,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
-        fadeTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -150,38 +157,19 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func open(_ url: URL) {
         currentURL = url
-        reachedEnd = false
         buffering = true
         position = 0          // jump the bar to the start at once, not a beat later
-        // Stop before loading new media, always. A player left in .ended (or an
-        // error) state wedged when handed new media — the replayed file, and
-        // then every file after it, refused to start until the app was killed.
-        // A clean stop first is what makes reuse reliable.
-        player.stop()
+        // Stop ONLY when the player is actually finished/errored/idle. That full
+        // stop tears down the audio unit, and rebuilding it on the next play took
+        // ~1s — which is why the sound lagged the picture. Swapping media on a
+        // still-playing player keeps the audio unit alive, so sound and picture
+        // start together. The stop is still there for the .ended wedge case.
+        let s = player.state
+        if reachedEnd || s == .ended || s == .error || s == .stopped { player.stop() }
+        reachedEnd = false
         player.media = VLCMedia(url: url)
         player.play()
-        player.audio?.volume = 0     // silent through the opening glitch (audio exists after play)
         player.rate = rate
-        pendingFade = true           // brought up on the first real frame
-    }
-
-    /// Ramp the volume up from silence over ~0.4s. libVLC starts a stream at full
-    /// gain, so the first audio arrived as a hard "pop" — on open, on the jump to
-    /// the next track, and after a seek. Fading in smooths all three.
-    private var fadeTimer: Timer?
-    /// A short (~0.15s) swell to the target so the first sample does not click —
-    /// short enough that the audio still feels immediate with the picture.
-    private func fadeIn() {
-        fadeTimer?.invalidate()
-        let target = max(1, targetVolume)
-        player.audio?.volume = 0
-        var v: Int32 = 0
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] t in
-            guard let self = self else { t.invalidate(); return }
-            v += max(1, target / 8)
-            if v >= target { v = target; t.invalidate() }
-            if !self.muted { self.player.audio?.volume = v }
-        }
     }
 
     func pause() { player.pause() }
@@ -201,7 +189,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
         // "finished" and snaps back — cap just short so the far end is reachable.
         player.position = max(0, min(0.999, p))
-        fadeIn()   // a seek pops the audio too; ramp it back up
     }
 
     func toggle() {
@@ -213,7 +200,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             player.pause()
         } else {
             player.play()
-            fadeIn()   // resuming pops too; ramp the audio back up
         }
     }
     func seek(to p: Float) { player.position = max(0, min(1, p)) }
@@ -246,11 +232,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the reliable "actually playing" signal (a state change to .playing does
         // not always arrive).
         if buffering { buffering = false }
-        // Picture is up and running — now bring the (held-silent) audio up quickly.
-        if pendingFade, player.isPlaying {
-            pendingFade = false
-            if !muted { fadeIn() }
-        }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
             player.position = p; pendingSeek = nil
@@ -367,20 +348,44 @@ struct SeekSlider: View {
     }
 }
 
+/// The seek bar plus its two time labels. Observes only `PlayerUI`, so it is the
+/// one thing that re-renders as playback advances.
+private struct SeekRow: View {
+    @ObservedObject var ui: PlayerUI
+    var onBegin: () -> Void
+    var onScrub: (Double) -> Void
+    var onEnd: (Double) -> Void
+    var body: some View {
+        HStack(spacing: 6) {
+            // Fixed width so the bar does not grow/shrink as the elapsed time
+            // gains or loses a digit (0:09 → 0:10 → 1:00:00).
+            Text(ui.elapsed).font(.system(size: 10)).foregroundColor(.white)
+                .monospacedDigit().frame(width: 46, alignment: .trailing)
+            SeekSlider(value: Binding(get: { Double(ui.position) }, set: { onScrub($0) }),
+                       onBegin: onBegin, onScrub: onScrub, onEnd: onEnd)
+            Text(ui.duration).font(.system(size: 10)).foregroundColor(.white)
+                .monospacedDigit().frame(width: 46, alignment: .leading)
+        }
+    }
+}
+
 /// A brief on-screen gauge for a side drag (brightness or sound).
 private struct Gauge: View {
     let icon: String
     let value: Double
     var body: some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon).font(.system(size: 11))
-            Capsule().fill(Color.white.opacity(0.3)).frame(width: 52, height: 3)
-                .overlay(alignment: .leading) {
-                    Capsule().fill(Color.white).frame(width: 52 * max(0, min(1, value)), height: 3)
+        // Vertical: the finger moves up/down to set it, so the gauge fills bottom-up
+        // to match the gesture.
+        VStack(spacing: 6) {
+            Capsule().fill(Color.white.opacity(0.3)).frame(width: 3, height: 60)
+                .overlay(alignment: .bottom) {
+                    Capsule().fill(Color.white).frame(width: 3, height: 60 * max(0, min(1, value)))
                 }
+            Image(systemName: icon).font(.system(size: 11))
         }
-        .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(.regularMaterial, in: Capsule()).foregroundColor(.white)
+        .padding(.horizontal, 9).padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .foregroundColor(.white)
     }
 }
 
@@ -417,7 +422,10 @@ struct PlayerStage: View {
 
     private enum DragMode { case brightness, volume, swipe, none }
     @State private var dragMode: DragMode = .none
-    @State private var startBrightness: CGFloat = 0
+    /// Video-only brightness: a dimming overlay on the picture (1 = full, 0 =
+    /// black), so it does not touch the phone's own screen brightness.
+    @State private var videoBrightness: Double = 1
+    @State private var startBrightness: Double = 1
     @State private var startVolume: Float = 0
     @State private var holdVolume = false
     @State private var showRatePicker = false
@@ -441,6 +449,10 @@ struct PlayerStage: View {
                 } else {
                     Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
                 }
+            }
+            // Video-only brightness — dim the picture, never the phone screen.
+            if videoBrightness < 1 {
+                Color.black.opacity(1 - videoBrightness).allowsHitTesting(false)
             }
             if controller.buffering && !controller.isPlaying {
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
@@ -529,7 +541,7 @@ struct PlayerStage: View {
         switch phase {
         case .began:
             if startX < w * 0.2 && fullscreen {
-                dragMode = .brightness; startBrightness = UIScreen.main.brightness
+                dragMode = .brightness; startBrightness = videoBrightness
             } else if startX > w * 0.8 {
                 dragMode = .volume; startVolume = SystemVolume.shared.level
             } else {
@@ -545,8 +557,8 @@ struct PlayerStage: View {
                 gauge = ("speaker.wave.2", Double(v)); return
             }
             if dragMode == .brightness {
-                let b = max(0, min(1, startBrightness + CGFloat(step)))
-                UIScreen.main.brightness = b; gauge = ("sun.max", Double(b))
+                let b = max(0.1, min(1, startBrightness + Double(step)))
+                videoBrightness = b; gauge = ("sun.max", b)
             } else if dragMode == .volume {
                 let v = max(0, min(1, startVolume + step)); SystemVolume.shared.set(v)
                 gauge = ("speaker.wave.2", Double(v))
@@ -625,7 +637,7 @@ struct PlayerStage: View {
     /// How far to pull the controls in from the edges in full screen: clear of the
     /// notch/home-indicator on the sides, plus enough to sit around the seek bar's
     /// span rather than jammed against the very edge.
-    private var sideInset: CGFloat { max(safeInsets.left, safeInsets.right) + 28 }
+    private var sideInset: CGFloat { max(safeInsets.left, safeInsets.right) + 12 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -634,7 +646,8 @@ struct PlayerStage: View {
                 Spacer()
                 closeButton
             }
-            .padding(.horizontal, fullscreen ? sideInset : 12)
+            .padding(.leading, fullscreen ? safeInsets.left + 16 : 12)
+            .padding(.trailing, fullscreen ? safeInsets.right + 16 : 12)
             .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
             .padding(.bottom, 8)
             Spacer()
@@ -667,7 +680,7 @@ struct PlayerStage: View {
                 }
             }
         }
-        .padding(6).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(6).background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
@@ -689,40 +702,31 @@ struct PlayerStage: View {
         }
         .frame(width: 220)
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
     private var transport: some View {
         VStack(spacing: fullscreen ? 22 : 10) {
-            // Top row: the seek bar only.
-            HStack(spacing: 6) {
-                // Fixed width so the seek bar does not grow/shrink as the elapsed
-                // time gains or loses a digit (0:09 → 0:10 → 1:00:00).
-                Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white)
-                    .monospacedDigit().frame(width: 46, alignment: .trailing)
-                SeekSlider(
-                    value: Binding(get: { Double(controller.position) },
-                                   set: { controller.previewSeek(Float($0)) }),
+            // Top row: the seek bar only — its own subview so it (and only it)
+            // re-renders as the position ticks, leaving the library still.
+            SeekRow(ui: controller.ui,
                     onBegin: { controller.beginScrub(); interacting = true; keepBar() },
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },
-                    onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() }
-                )
-                Text(controller.duration).font(.system(size: 10)).foregroundColor(.white)
-                    .monospacedDigit().frame(width: 46, alignment: .leading)
-            }
+                    onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() })
+                .padding(.horizontal, fullscreen ? 24 : 0)   // bar spans to the buttons
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
-                HStack(spacing: 28) {
+                HStack(spacing: fullscreen ? 44 : 28) {
                     Button { onPrev(); showBar() } label: { Image(systemName: "backward.end.fill").font(.system(size: 15)) }.disabled(!hasPrev)
                     Button { controller.toggle(); showBar() } label: {
                         Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19))
                     }
                     Button { onNext(); showBar() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
-                .padding(.leading, 10)      // off the very left edge — the back button was hard to hit
+                .padding(.leading, fullscreen ? 24 : 10)   // in to meet the seek bar
                 Spacer()
-                HStack(spacing: 20) {
+                HStack(spacing: fullscreen ? 28 : 20) {
                     Button { controller.toggleMute(); showBar() } label: {
                         Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15))
                     }
@@ -748,12 +752,16 @@ struct PlayerStage: View {
                                                       : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
                     }
                 }
-                .padding(.trailing, 10)     // off the very right edge, to match the left cluster
+                .padding(.trailing, fullscreen ? 24 : 10)  // in to meet the seek bar
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, fullscreen ? sideInset : 12).padding(.top, fullscreen ? 18 : 8)
-        .padding(.bottom, fullscreen ? 34 : 16)   // room under the buttons; more in full screen for a short's edge
+        // Only the safe-area inset on the background, so the playbar itself stays
+        // wide (not shrunken); the seek bar and buttons carry their own inner inset.
+        .padding(.leading, fullscreen ? safeInsets.left + 8 : 12)
+        .padding(.trailing, fullscreen ? safeInsets.right + 8 : 12)
+        .padding(.top, fullscreen ? 18 : 8)
+        .padding(.bottom, fullscreen ? 34 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over

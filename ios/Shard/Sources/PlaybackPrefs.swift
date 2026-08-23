@@ -6,12 +6,19 @@ import SwiftUI
 enum PlaybackEnd: String { case stop, next, shuffle }
 
 final class PlaybackPrefs: ObservableObject {
-    @AppStorage("playbackEnd") private var endRaw = PlaybackEnd.stop.rawValue
     @AppStorage("backgroundPlayback") var background = false
 
-    var end: PlaybackEnd {
-        get { PlaybackEnd(rawValue: endRaw) ?? .stop }
-        set { endRaw = newValue.rawValue; objectWillChange.send() }
+    // A real @Published, not a computed view over @AppStorage: inside an
+    // ObservableObject the @AppStorage wrapper does not reliably fire
+    // objectWillChange, so the shelf's end-mode read stale — shuffle behaved like
+    // sequential because `end` never actually reported .shuffle to the player.
+    @Published var end: PlaybackEnd {
+        didSet { UserDefaults.standard.set(end.rawValue, forKey: "playbackEnd") }
+    }
+
+    init() {
+        let raw = UserDefaults.standard.string(forKey: "playbackEnd")
+        end = raw.flatMap(PlaybackEnd.init(rawValue:)) ?? .stop
     }
 
     /// Toggle a mode, turning it back to stop if it was already on — matching the
