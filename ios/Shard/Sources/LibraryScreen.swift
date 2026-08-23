@@ -637,6 +637,26 @@ struct LibraryScreen: View {
         Text(store.kind == .music ? "저장한 음악이 없습니다" : "저장한 영상이 없습니다")
             .foregroundColor(.muted)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())                 // make the empty area swipeable
+            .simultaneousGesture(shelfSwitchGesture)    // so an empty shelf can still switch
+    }
+
+    /// The horizontal fling that switches shelves — shared so it works on the list
+    /// AND on an empty shelf (it used to live only on the list, so a video shelf
+    /// with no items could not be swiped away).
+    private var shelfSwitchGesture: some Gesture {
+        DragGesture(minimumDistance: 40)
+            .onEnded { value in
+                // Clearly horizontal only, so ordinary up/down scrolling is never
+                // read as a shelf switch.
+                guard abs(value.translation.width) > 80,
+                      abs(value.translation.width) > abs(value.translation.height) * 2.5 else { return }
+                if value.translation.width > 0 {
+                    if store.kind == .music { setKind(.video) } else { close() }
+                } else {
+                    if store.kind == .video { setKind(.music) }
+                }
+            }
     }
 
     private var list: some View {
@@ -658,24 +678,9 @@ struct LibraryScreen: View {
                 }
             }
         }
-        // Horizontal fling on the list. Right: switch music→video, then a second
-        // right leaves to the web. Left: switch video→music. Works while a video
-        // plays too (the player has its own gestures, on the picture itself).
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 40)
-                .onEnded { value in
-                    // Clearly horizontal only, so ordinary up/down scrolling is
-                    // never read as a shelf switch.
-                    guard abs(value.translation.width) > 80,
-                          abs(value.translation.width) > abs(value.translation.height) * 2.5 else { return }
-                    if value.translation.width > 0 {
-                        if store.kind == .music { setKind(.video) }
-                        else { close() }
-                    } else {
-                        if store.kind == .video { setKind(.music) }
-                    }
-                }
-        )
+        // Horizontal fling switches shelves (right: music→video then leave to web;
+        // left: video→music) — works while a video plays too.
+        .simultaneousGesture(shelfSwitchGesture)
     }
 
     private func row(_ item: Item) -> some View {
