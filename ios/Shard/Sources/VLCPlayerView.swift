@@ -249,6 +249,19 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // direct item→item swap is seamless.
         removeAVObservers()
         let item = AVPlayerItem(url: url)
+        // Sample-accurate volume ramp over the first 60ms: whatever the "텁" is in
+        // the opening samples (encoder-delay priming, a DC step), a fade masks it —
+        // and an AVAudioMix ramp applies to the signal itself, independent of the
+        // system volume, so it actually lands (unlike libVLC's late audio object).
+        if let track = item.asset.tracks(withMediaType: .audio).first {
+            let params = AVMutableAudioMixInputParameters(track: track)
+            params.setVolumeRamp(fromStartVolume: 0, toEndVolume: 1,
+                                 timeRange: CMTimeRange(start: .zero,
+                                                        duration: CMTime(seconds: 0.06, preferredTimescale: 600)))
+            let mix = AVMutableAudioMix()
+            mix.inputParameters = [params]
+            item.audioMix = mix
+        }
         av.replaceCurrentItem(with: item)
         av.isMuted = muted
         av.play()
@@ -763,13 +776,12 @@ struct PlayerStage: View {
 
     /// Tap toggles the bar — up if hidden, away if shown.
     private func toggleBar() {
-        // Any tap outside the functional controls toggles the WHOLE bar — showing
-        // it, or hiding it (and taking any open picker down with it). The picker
-        // popup and the buttons handle their own taps, so this only fires on the
-        // video and the bar's empty background.
+        // A tap while a picker is open just dismisses the picker (keeping the bar).
+        if showRatePicker || showVolumeBar {
+            showRatePicker = false; showVolumeBar = false; showBar(); return
+        }
         if showControls {
             hideWork?.cancel()
-            showRatePicker = false; showVolumeBar = false
             withAnimation(.easeOut(duration: 0.12)) { showControls = false }
         } else {
             showBar()
@@ -1049,14 +1061,7 @@ struct PlayerStage: View {
         // edge — the band above the seek is what was overlapping the video.
         .padding(.top, fullscreen ? 0 : 8)
         .padding(.bottom, fullscreen ? 26 : 16)
-        .background(
-            // A tap on the bar's own empty background (not a button) lowers the whole
-            // bar — the same as tapping the video. The band is hit-testable, so the
-            // video-area gesture could not reach here; this handles it directly.
-            Color.black.opacity(0.3)
-                .contentShape(Rectangle())
-                .onTapGesture { toggleBar() }
-        )
+        .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over
         // the sound / speed buttons it belongs to.
