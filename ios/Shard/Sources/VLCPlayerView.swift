@@ -708,6 +708,11 @@ struct PlayerStage: View {
     @State private var startBrightness: Double = 1
     @State private var startVolume: Float = 0
     @State private var holdVolume = false
+    // Full-screen hold state: whether a hold is active, whether a vertical swipe
+    // has turned it into a brightness/volume drag, and which side it began on.
+    @State private var holdActive = false
+    @State private var holdCancelled = false
+    @State private var heldRight = false
     @State private var showRatePicker = false
     @State private var showVolumeBar = false
     /// The volume bar's shown value, kept locally so the thumb follows the finger
@@ -818,15 +823,31 @@ struct PlayerStage: View {
             else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
             return
         }
-        // The left/right EDGES are for the brightness/volume vertical drag — a hold
-        // that starts there must NOT also fire 2×/rewind (both were applying at
-        // once). Only a hold in the centre band runs 2×/rewind.
-        guard x >= w * 0.2, x <= w * 0.8 else { return }
-        if x > w / 2 {
-            controller.holdRate(active ? 2.0 : nil)       // right: 2×
+        // A hold starts 2×/rewind immediately (right = 2×, left = rewind). If the
+        // finger then swipes up/down, the drag handler CANCELS this and switches to
+        // brightness/volume — so a stationary hold keeps 2×/rewind, a moving one
+        // adjusts sound/brightness.
+        if active {
+            holdActive = true
+            holdCancelled = false
+            heldRight = x > w / 2
+            startBrightness = controller.brightness
+            startVolume = SystemVolume.shared.level
+            if heldRight { controller.holdRate(2.0) } else { startRewind() }
         } else {
-            active ? startRewind() : stopRewind()          // left: rewind
+            holdActive = false
+            if !holdCancelled {           // stationary hold released: undo 2×/rewind
+                if heldRight { controller.holdRate(nil) } else { stopRewind() }
+            }
         }
+    }
+
+    /// Cancel the hold's 2×/rewind the moment a vertical swipe begins, so the drag
+    /// can take over as brightness/volume.
+    private func cancelHoldForDrag() {
+        guard holdActive, !holdCancelled else { return }
+        holdCancelled = true
+        if heldRight { controller.holdRate(nil) } else { stopRewind() }
     }
 
     private func vdrag(_ phase: PlayerGestures.Phase, _ startX: CGFloat, _ w: CGFloat, _ dy: CGFloat) {
@@ -841,6 +862,20 @@ struct PlayerStage: View {
             }
         case .changed:
             let step = Float(-dy / 160)                     // from the current value
+            // A hold that then swipes up/down cancels 2×/rewind and becomes a
+            // brightness (left) / volume (right) adjust — following the side the
+            // hold began on.
+            if holdActive, abs(dy) > 12 {
+                cancelHoldForDrag()
+                if heldRight {
+                    let v = max(0, min(1, startVolume + Float(-dy / 130)))
+                    SystemVolume.shared.set(v); gauge = ("speaker.wave.2", Double(v))
+                } else {
+                    let b = max(0.1, min(1, startBrightness + Double(-dy / 200)))
+                    controller.brightness = b; gauge = ("sun.max", b)
+                }
+                return
+            }
             // A windowed hold turns the finger's up/down into volume anywhere —
             // a shorter reach than brightness so it responds quickly.
             if holdVolume {
@@ -856,7 +891,11 @@ struct PlayerStage: View {
                 gauge = ("speaker.wave.2", Double(v))
             }
         case .ended:
-            if dragMode == .swipe {
+            // A hold-turned-drag (or any hold) must not also fire the swipe
+            // enter/exit-fullscreen.
+            if holdActive || holdCancelled {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
+            } else if dragMode == .swipe {
                 if dy < -42 { if !fullscreen { onEnterFullscreen() } }
                 else if dy > 42 { if fullscreen { onExitFullscreen() } }
             } else {
