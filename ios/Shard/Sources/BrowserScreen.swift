@@ -170,11 +170,16 @@ struct BrowserScreen: View {
     }
 
     private func rotate() {
-        landscape.toggle()
-        if landscape {
-            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-        } else {
+        // Decide from the ACTUAL current orientation, not a stored flag — the flag
+        // fell out of sync after the library forced portrait, so the first press
+        // did nothing and it took two to turn.
+        let isLandscape = UIScreen.main.bounds.width > UIScreen.main.bounds.height
+        if isLandscape {
+            landscape = false
             Orientation.shared.lock(.portrait, to: .portrait)
+        } else {
+            landscape = true
+            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
         }
     }
 

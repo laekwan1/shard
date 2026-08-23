@@ -208,6 +208,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var rampTimer: Timer?
     private func rampUp() {
         rampTimer?.invalidate()
+        player.audio?.volume = 0   // 0 before the first tick, so nothing leaks at full
         var v: Int32 = 0
         rampTimer = Timer.scheduledTimer(withTimeInterval: 0.015, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
@@ -575,7 +576,10 @@ struct PlayerStage: View {
             )
             if let f = seekFlash { seekFlashView(f) }
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
-            if showControls { controlsOverlay.transition(.opacity) }
+            // Hide the controls while the interface is rotating — otherwise they
+            // were seen jumping from the windowed/portrait insets to the landscape
+            // ones as the black cover cleared. They reappear already in place.
+            if showControls && !controller.settling { controlsOverlay.transition(.opacity) }
         }
         .clipped()
         // When playback stops or reaches the end, surface the bar so the play
