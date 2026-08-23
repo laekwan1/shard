@@ -195,9 +195,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func rampUp() {
         rampTimer?.invalidate()
         var v: Int32 = 0
-        rampTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] t in
+        rampTimer = Timer.scheduledTimer(withTimeInterval: 0.015, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            v += 20
+            v += 8
             if v >= 100 { v = 100; t.invalidate() }
             self.player.audio?.volume = v
         }
@@ -338,6 +338,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         case .ended, .error, .stopped: buffering = false
         default: break   // .playing keeps the cover until the delayed reveal frees it
         }
+        // Hold the volume at 0 through every state update until the first frame —
+        // the audio object is created late, so a single volume=0 in open() could be
+        // set on a nil/old object and the first buffer slipped through at full gain
+        // ("텁"). Re-applying here guarantees silence until we ramp up.
+        if pendingUnmute { player.audio?.volume = 0 }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
@@ -646,8 +651,8 @@ struct PlayerStage: View {
             }
         case .ended:
             if dragMode == .swipe {
-                if dy < -60 { if !fullscreen { onEnterFullscreen() } }
-                else if dy > 60 { if fullscreen { onExitFullscreen() } }
+                if dy < -42 { if !fullscreen { onEnterFullscreen() } }
+                else if dy > 42 { if fullscreen { onExitFullscreen() } }
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
             }
@@ -854,7 +859,7 @@ struct PlayerStage: View {
         // Full screen: a small top inset (thin band above the seek bar) but a
         // larger bottom inset so the seek bar and buttons sit higher, off the very
         // edge — the band above the seek is what was overlapping the video.
-        .padding(.top, fullscreen ? 4 : 8)
+        .padding(.top, fullscreen ? 0 : 8)
         .padding(.bottom, fullscreen ? 26 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
