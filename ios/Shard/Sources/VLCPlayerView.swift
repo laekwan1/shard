@@ -90,6 +90,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
+        fadeTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -139,6 +140,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func open(_ url: URL) {
         currentURL = url
         reachedEnd = false
+        position = 0          // jump the bar to the start at once, not a beat later
         // Stop before loading new media, always. A player left in .ended (or an
         // error) state wedged when handed new media — the replayed file, and
         // then every file after it, refused to start until the app was killed.
@@ -147,6 +149,24 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.media = VLCMedia(url: url)
         player.play()
         player.rate = rate
+        fadeIn()
+    }
+
+    /// Ramp the volume up from silence over ~0.4s. libVLC starts a stream at full
+    /// gain, so the first audio arrived as a hard "pop" — on open, on the jump to
+    /// the next track, and after a seek. Fading in smooths all three.
+    private var fadeTimer: Timer?
+    private func fadeIn() {
+        fadeTimer?.invalidate()
+        let target = max(1, targetVolume)
+        player.audio?.volume = 0
+        var v: Int32 = 0
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            v += max(1, target / 10)
+            if v >= target { v = target; t.invalidate() }
+            if !self.muted { self.player.audio?.volume = v }
+        }
     }
 
     func pause() { player.pause() }
@@ -166,6 +186,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
         // "finished" and snaps back — cap just short so the far end is reachable.
         player.position = max(0, min(0.999, p))
+        fadeIn()   // a seek pops the audio too; ramp it back up
     }
 
     func toggle() {
@@ -181,10 +202,16 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func jump(_ seconds: Int32) { seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds) }
     func rewindStep() { player.jumpBackward(1) }
 
-    /// libVLC volume runs 0–200; we drive 0–1 from the drag.
+    /// libVLC volume runs 0–200; we drive 0–1 from the drag. The last set value is
+    /// remembered as the fade-in target so a ramp lands on what the user chose.
+    private var targetVolume: Int32 = 100
     var volume: Float {
         get { Float(player.audio?.volume ?? 100) / 200 }
-        set { player.audio?.volume = Int32(max(0, min(1, newValue)) * 200) }
+        set {
+            let raw = Int32(max(0, min(1, newValue)) * 200)
+            player.audio?.volume = raw
+            targetVolume = raw
+        }
     }
 
     func cycleRate() {
@@ -375,36 +402,14 @@ struct PlayerStage: View {
             if showControls { controlsOverlay.transition(.opacity) }
         }
         .clipped()
-        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         // When playback stops or reaches the end, surface the bar so the play
         // button is right there — otherwise a finished video sat with no controls.
         .onChange(of: controller.isPlaying) { playing in if !playing { showBar() } }
         .onAppear { showBar() }
-        .onDisappear { Orientation.shared.free() }
-    }
-
-    /// Full screen lays a wide video on its side; a tall one (a short) stays up.
-    /// Leaving full screen turns back to portrait, then frees rotation again.
-    private func applyOrientation(_ fs: Bool) {
-        if fs {
-            // Default to landscape at once (most videos are wide). videoSize is
-            // often 0 the instant full screen opens, so decide again a beat later
-            // once a frame has arrived — only a clearly tall video (a short) is
-            // flipped back to portrait.
-            let decide = {
-                let s = controller.player.videoSize
-                if s.height > s.width, s.width > 0 {
-                    Orientation.shared.lock(.portrait, to: .portrait)
-                } else {
-                    Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-                }
-            }
-            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: decide)
-        } else {
-            Orientation.shared.lock(.portrait, to: .portrait)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
-        }
+        // Orientation is NOT driven from here: entering full screen swaps this view
+        // for a fresh instance born with fullscreen==true, so onChange never fires
+        // and onDisappear of the old instance would free the lock the new one just
+        // set. LibraryScreen owns the lock instead (it persists across the swap).
     }
 
     /// Tap toggles the bar — up if hidden, away if shown.
@@ -559,23 +564,19 @@ struct PlayerStage: View {
                 closeButton
             }
             .padding(.horizontal, 12)
-            .padding(.top, fullscreen ? topInset + 6 : 10)
+            .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
             .padding(.bottom, 8)
             Spacer()
-            // Right-aligned and flush to the transport (spacing 0) so a picker
-            // reads as attached right above the sound / speed buttons it belongs to.
-            VStack(alignment: .trailing, spacing: 0) {
-                if showRatePicker { ratePicker }
-                if showVolumeBar { volumeBar }
-                transport
-            }
+            transport
         }
     }
 
     /// A white ✕ with only a hairline dark edge on the glyph itself.
     private var closeButton: some View {
+        // Always an ✕ — in full screen it drops back to the window, windowed it
+        // stops. The collapse-arrows glyph was not wanted.
         Button { fullscreen ? (fullscreen = false) : onStop() } label: {
-            Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark")
+            Image(systemName: "xmark")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.white)
                 .shadow(color: .black.opacity(0.5), radius: 0.5)
@@ -595,8 +596,8 @@ struct PlayerStage: View {
                 }
             }
         }
-        .padding(6).background(Color.chrome).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(.trailing, 12).padding(.bottom, 6)
+        .padding(6).background(Color.toolbar).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.trailing, 2)
     }
 
     private var volumeBar: some View {
@@ -616,8 +617,8 @@ struct PlayerStage: View {
         }
         .frame(width: 220)
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.chrome).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .padding(.trailing, 12).padding(.bottom, 6)
+        .background(Color.toolbar).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.trailing, 2)
     }
 
     private var transport: some View {
@@ -638,6 +639,11 @@ struct PlayerStage: View {
                 Text(controller.duration).font(.system(size: 10)).foregroundColor(.white)
                     .monospacedDigit().frame(width: 46, alignment: .leading)
             }
+            // A picker opens right here — between the seek bar and the buttons,
+            // pushed to the right so it sits directly over the sound / speed
+            // buttons it belongs to.
+            if showRatePicker { ratePicker.frame(maxWidth: .infinity, alignment: .trailing) }
+            if showVolumeBar { volumeBar.frame(maxWidth: .infinity, alignment: .trailing) }
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
                 HStack(spacing: 28) {

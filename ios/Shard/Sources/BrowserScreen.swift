@@ -34,12 +34,14 @@ struct BrowserScreen: View {
             // (see WebViewContainer) so they never swallow the page's touches.
             WebViewContainer(model: model)
 
-            if showAddress {
-                // Animate on the value, not only on each caller's withAnimation,
-                // so the panel slides back up on close exactly as it slid down on
-                // open — some close paths were tearing it off with no animation.
-                addressPanel.transition(.move(edge: .top))
-            }
+            // Always mounted and slid by an offset — a conditional `if` with a
+            // .transition popped away on close no matter how the flag was animated.
+            // An offset is a plain layout move, so open and close are the same
+            // slide. allowsHitTesting keeps the hidden panel from eating top taps.
+            addressPanel
+                .offset(y: showAddress ? 0 : -200)
+                .opacity(showAddress ? 1 : 0)
+                .allowsHitTesting(showAddress)
             if showList {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { withAnimation { showList = false } }
@@ -93,7 +95,15 @@ struct BrowserScreen: View {
             }
             pendingOffer = json
             pendingTitle = offer.title ?? model.pageTitle
-            pendingThumb = offer.thumb ?? ""
+            // Prefer the page's thumbnail; if it was empty, build a clean one from
+            // the video id so a cover is still fetched.
+            if let t = offer.thumb, !t.isEmpty {
+                pendingThumb = t
+            } else if let id = offer.videoId, !id.isEmpty {
+                pendingThumb = "https://i.ytimg.com/vi/\(id)/maxresdefault.jpg"
+            } else {
+                pendingThumb = ""
+            }
             if offer.isYouTube {
                 guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
                     banner = "화질을 찾지 못했습니다"; return

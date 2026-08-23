@@ -162,6 +162,7 @@ struct Offer: Decodable {
     let referer: String?
     let title: String?
     let thumb: String?
+    let videoId: String?
     struct Fmt: Decodable { let itag: Int? }
 
     var isYouTube: Bool { !(formats?.isEmpty ?? true) }

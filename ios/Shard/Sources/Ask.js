@@ -123,6 +123,7 @@
     referer: location.href,
     title: (data.videoDetails || {}).title || "",
     thumb: thumb(data),
+    videoId: (data.videoDetails || {}).videoId || "",
     templateUrl: captured ? captured.url : "",
     templateBody: captured ? captured.body : "",
     reason: captured ? "" : "not-played"

@@ -31,6 +31,7 @@ struct LibraryScreen: View {
     /// Direction of the last shelf switch, so the list slides in the way the
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
+    @Namespace private var shelfNS
 
     var body: some View {
         ZStack {
@@ -50,12 +51,11 @@ struct LibraryScreen: View {
                 if store.visible.isEmpty {
                     empty
                 } else {
-                    // Slide in the direction of the switch: to music the new list
-                    // enters from the right and the old leaves to the left.
-                    list.id(store.kind).transition(.asymmetric(
-                        insertion: .move(edge: toMusic ? .trailing : .leading),
-                        removal: .move(edge: toMusic ? .leading : .trailing)
-                    ))
+                    // Android does not slide the list sideways on a shelf switch —
+                    // it swaps the rows and slides the segmented pill instead. A
+                    // short crossfade matches that far better than the horizontal
+                    // slide this used to do.
+                    list.id(store.kind).transition(.opacity)
                 }
             }
             if player.currentURL != nil && fullscreen {
@@ -91,15 +91,21 @@ struct LibraryScreen: View {
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
+        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         .onChange(of: visible) { shown in
+            if !shown && fullscreen { fullscreen = false }
             // Each time the library opens, put the stage back on whatever is
             // playing. Runs on open (not once at mount) because the screen stays
             // mounted and only slides in and out.
             guard shown else { return }
             if let url = player.currentURL,
                let item = store.items.first(where: { $0.url == url }) {
-                store.kind = item.kind
-                store.current = item.folder
+                // Only reassign when different: setting store.kind changes the
+                // list's .id and re-inserts it (an un-animated pop) while the whole
+                // screen is already sliding in — which looked like the list "just
+                // appearing" instead of travelling with the slide.
+                if store.kind != item.kind { store.kind = item.kind }
+                if store.current != item.folder { store.current = item.folder }
                 currentIndex = store.visible.firstIndex(where: { $0.url == url })
             }
         }
@@ -130,41 +136,63 @@ struct LibraryScreen: View {
 
     /// The file's own menu, with a folder panel that slides out to the right for
     /// "move to folder" — half-screen at most, not a full system sheet.
+    /// Where a file can be moved: the storage root (only if it is not already
+    /// there) plus every folder except the one it is in. Empty means nowhere to
+    /// move, so the "move" row is hidden.
+    private func moveTargets(_ item: Item) -> [String?] {
+        var targets: [String?] = []
+        if item.folder != nil { targets.append(nil) }          // 저장소
+        targets += store.folders.filter { $0 != item.folder }
+        return targets
+    }
+
     private func fileMenuCard(_ item: Item) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(spacing: 0) {
-                menuRow("이름 바꾸기", "pencil") {
-                    renaming = item; renameText = item.name; fileMenu = nil
-                }
+        let targets = moveTargets(item)
+        // The card is anchored (centred) and the folder panel is an OVERLAY, so
+        // opening it never resizes or re-centres the card — that shift was the
+        // "ghost / jumps right" the panel used to do. The panel is offset to sit
+        // just right of the card, its top aligned to the move row.
+        return VStack(spacing: 0) {
+            menuRow("이름 바꾸기", "pencil") {
+                renaming = item; renameText = item.name; fileMenu = nil
+            }
+            if !targets.isEmpty {
                 Divider().background(Color.toolbar)
                 menuRow("폴더로 이동", showFolderPick ? "chevron.right" : "folder") {
-                    withAnimation { showFolderPick.toggle() }
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { showFolderPick.toggle() }
                 }
-                Divider().background(Color.toolbar)
-                menuRow("삭제", "trash", tint: .red) { store.delete(item); fileMenu = nil; verifyPlaying() }
             }
-            .frame(width: 190)
-            .background(Color.chrome)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            if showFolderPick {
-                // Height follows the number of folders — no fixed box.
+            Divider().background(Color.toolbar)
+            menuRow("삭제", "trash", tint: .red) { store.delete(item); fileMenu = nil; verifyPlaying() }
+        }
+        .frame(width: 200)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(alignment: .topLeading) {
+            if showFolderPick && !targets.isEmpty {
                 VStack(spacing: 0) {
-                    menuRow("저장소", "house.fill") { store.move(item, to: nil); fileMenu = nil }
-                    ForEach(store.folders.filter { $0 != item.folder }, id: \.self) { folder in
-                        Divider().background(Color.toolbar)
-                        menuRow(folder, "folder") { store.move(item, to: folder); fileMenu = nil }
+                    ForEach(Array(targets.enumerated()), id: \.offset) { i, folder in
+                        if i > 0 { Divider().background(Color.toolbar) }
+                        menuRow(folder ?? "저장소", folder == nil ? "house.fill" : "folder") {
+                            store.move(item, to: folder); fileMenu = nil; showFolderPick = false
+                        }
                     }
                 }
-                .frame(width: 160)
+                .frame(width: 170)
                 .background(Color.chrome)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                // No opacity in the transition: the cross-fade left a faint ghost
-                // in the middle as the panel slid out. A plain slide is clean.
+                .shadow(radius: 12)
+                // Opens rightward from the move row: offset right of the card, top
+                // aligned to that row (row height ≈ 45 with its divider).
+                .offset(x: 208, y: 45)
                 .transition(.move(edge: .leading))
             }
         }
         .shadow(radius: 16)
+        // Slide the card left as the panel opens, so the pair stays centred and
+        // the panel does not run off the right edge — this is also the "move row
+        // slides left while the folders slide out right" the design calls for.
+        .offset(x: showFolderPick ? -90 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -281,6 +309,30 @@ struct LibraryScreen: View {
         fullscreen = false
     }
 
+    /// Force landscape for a wide video in full screen, portrait for a short.
+    /// Owned here (not in PlayerStage) because the stage view is replaced when it
+    /// goes full screen, so an onChange there never fires. videoSize is often 0 the
+    /// instant full screen opens, so lock landscape at once and re-decide after a
+    /// frame has arrived.
+    private func applyOrientation(_ fs: Bool) {
+        guard fs else {
+            Orientation.shared.lock(.portrait, to: .portrait)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
+            return
+        }
+        let decide = {
+            let s = player.player.videoSize
+            if s.height > s.width, s.width > 0 {
+                Orientation.shared.lock(.portrait, to: .portrait)
+            } else {
+                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+            }
+        }
+        Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: decide)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: decide)
+    }
+
     /// After a delete, if the file playing is no longer on disk, stop — a folder
     /// deleted out from under a playing file otherwise kept sounding.
     private func verifyPlaying() {
@@ -335,9 +387,20 @@ struct LibraryScreen: View {
             .font(.subheadline)
             .padding(.vertical, 7)
             .frame(maxWidth: .infinity)
-            .background(on ? Color.chrome : Color.clear)
+            // The lit pill is a single shared shape that slides under the chosen
+            // tab (matchedGeometryEffect), the way the Android segmented control
+            // moves its thumb — instead of one tab's fill blinking off and the
+            // other's on.
+            .background(
+                ZStack {
+                    if on {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.chrome)
+                            .matchedGeometryEffect(id: "shelfPill", in: shelfNS)
+                    }
+                }
+            )
             .foregroundColor(on ? .onSurface : .muted)
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
     }
 
@@ -447,6 +510,10 @@ struct LibraryScreen: View {
                         .onLongPressGesture(minimumDuration: 0.4) {
                             fileMenu = item; showFolderPick = false
                         }
+                        // Also draggable straight onto a folder chip — a hold that
+                        // then moves becomes a drag, a hold that stays opens the
+                        // menu above.
+                        .onDrag { NSItemProvider(object: item.url as NSURL) }
                     Divider().background(Color.toolbar)
                 }
             }
