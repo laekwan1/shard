@@ -116,6 +116,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
+        rampTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -174,15 +175,30 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // last frame cannot flash before the new one — a clean black→(spinner)→play.
         // The audio comes on with the first real frame (timeChanged). Reliable, and
         // the black+spinner reads as loading, not a glitch.
-        pendingUnmute = true
-        player.audio?.isMuted = true
+        player.audio?.volume = 0       // silence the outgoing audio before the swap
         player.stop()
         reachedEnd = false
+        pendingUnmute = true
         player.media = makeMedia(url)
-        player.audio?.isMuted = true   // audio object is new after the media swap
+        player.audio?.volume = 0       // new audio object is silent until the first frame
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
+    }
+
+    /// A ~0.12s ramp from silence to full when playback actually starts — short
+    /// enough to feel immediate, but it removes the hard "텁" the audio unit makes
+    /// when it starts at full gain.
+    private var rampTimer: Timer?
+    private func rampUp() {
+        rampTimer?.invalidate()
+        var v: Int32 = 0
+        rampTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            v += 20
+            if v >= 100 { v = 100; t.invalidate() }
+            self.player.audio?.volume = v
+        }
     }
 
     private func makeMedia(_ url: URL) -> VLCMedia {
@@ -202,7 +218,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 self.player.stop()
                 self.player.media = self.makeMedia(url)
                 self.pendingUnmute = true
-                self.player.audio?.isMuted = true
+                self.player.audio?.volume = 0
                 self.player.play()
                 self.player.rate = self.rate
             }
@@ -281,12 +297,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // hold also keeps the spinner visible instead of a one-frame flash.
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
-            player.audio?.isMuted = muted
-            let gen = openGen
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
-                guard let self = self, gen == self.openGen else { return }
-                self.buffering = false
-            }
+            buffering = false          // reveal the picture the instant it is running
+            if !muted { rampUp() } else { player.audio?.volume = 0 }
         }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
@@ -462,6 +474,11 @@ struct PlayerStage: View {
     var hasPrev: Bool
     var hasNext: Bool
     var isMusic: Bool = false
+    // Full-screen enter/exit go through the library, which rotates behind a black
+    // cover so the squish/animation is never seen and the exit rotates BEFORE it
+    // shrinks (so the list is not glimpsed mid-turn).
+    var onEnterFullscreen: () -> Void = {}
+    var onExitFullscreen: () -> Void = {}
 
     @State private var showControls = true
     @State private var rewindTimer: Timer?
@@ -623,8 +640,8 @@ struct PlayerStage: View {
             }
         case .ended:
             if dragMode == .swipe {
-                if dy < -60 { fullscreen = true }
-                else if dy > 60 { fullscreen = false }
+                if dy < -60 { if !fullscreen { onEnterFullscreen() } }
+                else if dy > 60 { if fullscreen { onExitFullscreen() } }
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
             }
@@ -703,10 +720,9 @@ struct PlayerStage: View {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
     private var seekInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 6) : 0 }
-    // Buttons pulled in further than the seek bar's own inset — the seek bar has a
-    // ~38pt time label at each end, so the buttons must clear that to sit under the
-    // bar itself, not under the labels.
-    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 66 : 24) : 10 }
+    // Buttons line up with the seek row's outer edge (the time labels), which is
+    // where the user wanted them — not pushed under the bar itself.
+    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 24) : 10 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -717,10 +733,7 @@ struct PlayerStage: View {
             }
             .padding(.leading, fullscreen ? safeInsets.left + 16 : 12)
             .padding(.trailing, fullscreen ? safeInsets.right + 16 : 12)
-            // Full screen: clear the status bar. A short (portrait) needs the whole
-            // safe-area inset so the title does not overlap the very top edge; a
-            // landscape one can sit a little higher.
-            .padding(.top, fullscreen ? (screenLandscape ? max(topInset - 6, 2) : topInset + 6) : 10)
+            .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
             .padding(.bottom, 8)
             Spacer()
             transport
@@ -731,7 +744,7 @@ struct PlayerStage: View {
     private var closeButton: some View {
         // Always an ✕ — in full screen it drops back to the window, windowed it
         // stops. The collapse-arrows glyph was not wanted.
-        Button { fullscreen ? (fullscreen = false) : onStop() } label: {
+        Button { fullscreen ? onExitFullscreen() : onStop() } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundColor(.white)
@@ -820,7 +833,7 @@ struct PlayerStage: View {
                     .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
                         showRatePicker.toggle(); showVolumeBar = false; showBar()
                     })
-                    Button { fullscreen.toggle() } label: {
+                    Button { fullscreen ? onExitFullscreen() : onEnterFullscreen() } label: {
                         Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
                                                       : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
                     }
@@ -832,8 +845,10 @@ struct PlayerStage: View {
         // Windowed uses a small side inset so the seek bar runs nearly the whole
         // width; full screen keeps a modest edge margin.
         .padding(.horizontal, fullscreen ? 12 : 8)
-        .padding(.top, fullscreen ? 12 : 8)
-        .padding(.bottom, fullscreen ? 20 : 16)
+        // Tighter band in full screen (less top/bottom fill) so the control area
+        // overlaps the video as little as possible, without moving the controls far.
+        .padding(.top, fullscreen ? 4 : 8)
+        .padding(.bottom, fullscreen ? 14 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over

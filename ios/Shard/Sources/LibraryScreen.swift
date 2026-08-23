@@ -124,14 +124,13 @@ struct LibraryScreen: View {
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
-        .onChange(of: fullscreen) { fs in applyOrientation(fs) }
         // A new track while full screen (the next one after a short ends) may have
         // a different shape — re-decide orientation once it starts.
         .onChange(of: player.currentURL) { _ in
-            if fullscreen { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { applyOrientation(true) } }
+            if fullscreen { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { lockForVideo() } }
         }
         .onChange(of: visible) { shown in
-            if !shown && fullscreen { fullscreen = false }
+            if !shown && fullscreen { fullscreen = false; Orientation.shared.free(); player.settling = false }
             // Each time the library opens, put the stage back on whatever is
             // playing. Runs on open (not once at mount) because the screen stays
             // mounted and only slides in and out.
@@ -373,7 +372,9 @@ struct LibraryScreen: View {
             // The stage reflects the PLAYING file's kind, not the shelf on view —
             // switching to the video shelf while a song plays must not blank the
             // stage to a video surface (it showed black).
-            isMusic: store.items.first(where: { $0.url == player.currentURL })?.kind == .music
+            isMusic: store.items.first(where: { $0.url == player.currentURL })?.kind == .music,
+            onEnterFullscreen: { enterFullscreen() },
+            onExitFullscreen: { exitFullscreen() }
         )
     }
 
@@ -465,49 +466,47 @@ struct LibraryScreen: View {
     private func stopPlayer() {
         player.stop()
         currentIndex = nil
-        fullscreen = false
+        if fullscreen { fullscreen = false; Orientation.shared.free() }
+        player.settling = false
     }
 
-    /// Force landscape for a wide video in full screen, portrait for a short.
-    /// Owned here (not in PlayerStage) because the stage view is replaced when it
-    /// goes full screen, so an onChange there never fires. videoSize is often 0 the
-    /// instant full screen opens, so lock landscape at once and re-decide after a
-    /// frame has arrived.
-    private func applyOrientation(_ fs: Bool) {
-        // A generation token so a stale delayed decision (from a rapid full-screen
-        // toggle) never rotates the screen out from under the current one — that
-        // was the "screen randomly ends up 90° off" after switching a few times.
+    /// Lock the interface to the playing video's orientation (landscape for a wide
+    /// video, portrait for a short), behind the black cover.
+    private func lockForVideo() {
+        let s = player.player.videoSize
+        let portrait = s.height > s.width && s.width > 0
+        Orientation.shared.lock(portrait ? .portrait : .landscapeRight,
+                                to: portrait ? .portrait : .landscapeRight)
+    }
+
+    /// Enter full screen: raise the stage, rotate behind a black cover so the
+    /// rotation itself is never seen (it just appears already turned), then reveal.
+    private func enterFullscreen() {
         orientGen += 1
         let gen = orientGen
-        // Hide the video behind black while the interface turns, so the ugly
-        // mid-rotation squish is not seen — reveal once it has settled.
-        // Paint the black cover FIRST (this render), then request the rotation on
-        // the next runloop — otherwise the rotation began before the black was up
-        // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
-            if gen == orientGen { player.settling = false }
-        }
-        // Delay the actual rotation ~1 frame so the black cover is painted first —
-        // rotating in the same runloop let the squish show before the black landed.
-        guard fs else {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                Orientation.shared.lock(.portrait, to: .portrait)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if gen == orientGen { Orientation.shared.free() }
-                }
-            }
-            return
-        }
-        let apply = {
+        fullscreen = true
+        lockForVideo()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { if gen == orientGen { lockForVideo() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { if gen == orientGen { player.settling = false } }
+    }
+
+    /// Exit full screen: rotate back to portrait FIRST (still full screen, black
+    /// covering), THEN shrink to the window — so the list is never glimpsed while
+    /// the screen is still turning.
+    private func exitFullscreen() {
+        orientGen += 1
+        let gen = orientGen
+        player.settling = true
+        Orientation.shared.lock(.portrait, to: .portrait)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             guard gen == orientGen else { return }
-            let s = player.player.videoSize
-            let portrait = s.height > s.width && s.width > 0
-            Orientation.shared.lock(portrait ? .portrait : .landscapeRight,
-                                    to: portrait ? .portrait : .landscapeRight)
+            fullscreen = false
+            Orientation.shared.free()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                if gen == orientGen { player.settling = false }
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: apply)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { apply() }
     }
 
     /// After a delete, if the file playing is no longer on disk, stop — a folder
