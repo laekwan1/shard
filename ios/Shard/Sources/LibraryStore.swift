@@ -25,6 +25,10 @@ struct Item: Identifiable, Hashable {
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published var items: [Item] = []
+    /// URLs already played in the current shuffle cycle. Kept here (a reference
+    /// type) rather than in the view's @State, whose mutation from the end-of-track
+    /// callback did not stick — which is why shuffle behaved like sequential play.
+    var shufflePlayed: Set<URL> = []
     /// The folder being viewed, or nil for the top level.
     @Published var current: String?
     /// Which shelf is shown — video or music. Switching shelves drops a folder

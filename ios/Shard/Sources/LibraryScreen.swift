@@ -32,7 +32,6 @@ struct LibraryScreen: View {
     /// Direction of the last shelf switch, so the list slides in the way the
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
-    @State private var shuffleBag: [Int] = []
     @State private var orientGen = 0
     @Namespace private var shelfNS
 
@@ -42,7 +41,14 @@ struct LibraryScreen: View {
                 header
                 shelfSwitch
                     .padding(.bottom, 12)   // wider gap above the folders…
-                folderBar
+                // A separate view (not this body) so the four-times-a-second player
+                // updates do not re-render the folder chips — their context menus
+                // flickered, and the rename/delete dialogs with them.
+                FolderBar(store: store,
+                          onRename: { renamingFolder = $0; folderRenameText = $0 },
+                          onDelete: { deletingFolder = $0 },
+                          onNewFolder: { showNewFolder = true },
+                          onDrop: { drop($0, to: $1) })
                 if player.currentURL != nil && !fullscreen {
                     stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .background(Color.black)
@@ -78,6 +84,27 @@ struct LibraryScreen: View {
                     .zIndex(4)
                 newFolderCard.zIndex(5)
             }
+            // Rename dialogs as custom cards (not system alerts) so a tap outside
+            // cancels them, the way new-folder does.
+            if renaming != nil {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { renaming = nil }.zIndex(8)
+                renameCard(title: "이름 바꾸기", text: $renameText,
+                           confirm: { if let it = renaming { store.rename(it, to: renameText) }; renaming = nil },
+                           cancel: { renaming = nil }).zIndex(9)
+            }
+            if renamingFolder != nil {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { renamingFolder = nil }.zIndex(8)
+                renameCard(title: "폴더 이름 바꾸기", text: $folderRenameText,
+                           confirm: { if let f = renamingFolder { store.renameFolder(f, to: folderRenameText) }; renamingFolder = nil },
+                           cancel: { renamingFolder = nil }).zIndex(9)
+            }
+            if let f = deletingFolder {
+                Color.black.opacity(0.35).ignoresSafeArea()
+                    .onTapGesture { deletingFolder = nil }.zIndex(8)
+                deleteFolderCard(f).zIndex(9)
+            }
             if showSettings {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { showSettings = false }
@@ -93,7 +120,7 @@ struct LibraryScreen: View {
         // A finished download adds a file; reloading when the downloads list
         // changes makes it appear without leaving and coming back.
         .onChange(of: downloads.items.count) { _ in store.reload() }
-        .onChange(of: store.visible.count) { _ in shuffleBag = [] }
+        .onChange(of: store.visible.count) { _ in store.shufflePlayed = [] }
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
@@ -120,31 +147,6 @@ struct LibraryScreen: View {
                 currentIndex = store.visible.firstIndex(where: { $0.url == url })
             }
         }
-        .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
-            TextField("새 이름", text: $renameText)
-            Button("바꾸기") { if let item = renaming { store.rename(item, to: renameText) }; renaming = nil }
-            Button("취소", role: .cancel) { renaming = nil }
-        }
-        .alert("폴더 이름 바꾸기", isPresented: Binding(get: { renamingFolder != nil }, set: { if !$0 { renamingFolder = nil } })) {
-            TextField("새 이름", text: $folderRenameText)
-            Button("바꾸기") { if let f = renamingFolder { store.renameFolder(f, to: folderRenameText) }; renamingFolder = nil }
-            Button("취소", role: .cancel) { renamingFolder = nil }
-        }
-        .confirmationDialog("폴더 삭제", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }), titleVisibility: .visible) {
-            if let f = deletingFolder, store.folderHasContents(f) {
-                Button("전체삭제", role: .destructive) {
-                    store.deleteFolder(f, withContents: true); deletingFolder = nil
-                    verifyPlaying()
-                }
-            }
-            Button("폴더삭제") {
-                if let f = deletingFolder { store.deleteFolder(f, withContents: false) }; deletingFolder = nil
-                verifyPlaying()
-            }
-            Button("취소", role: .cancel) { deletingFolder = nil }
-        } message: {
-            Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
-        }
     }
 
     /// The file's own menu, with a folder panel that slides out to the right for
@@ -162,16 +164,19 @@ struct LibraryScreen: View {
     /// Two-step so the card slides left first, then the folder list slides out
     /// from where the row was — instead of both moving at once.
     private func toggleFolderMove() {
-        let spring = Animation.spring(response: 0.32, dampingFraction: 0.85)
+        // easeOut, not spring — the spring's overshoot read as the card stuttering
+        // ("툭툭"). The panel then reveals in place (scale+fade from its top-left),
+        // not sliding across.
+        let move = Animation.easeOut(duration: 0.22)
         if !showFolderPick {
-            withAnimation(spring) { showFolderPick = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
-                withAnimation(spring) { showFolderPanel = true }
+            withAnimation(move) { showFolderPick = true }               // card slides left first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                withAnimation(.easeOut(duration: 0.2)) { showFolderPanel = true }
             }
         } else {
-            withAnimation(spring) { showFolderPanel = false }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                withAnimation(spring) { showFolderPick = false }
+            withAnimation(.easeOut(duration: 0.18)) { showFolderPanel = false }  // panel goes first
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(move) { showFolderPick = false }          // then card returns
             }
         }
     }
@@ -215,7 +220,9 @@ struct LibraryScreen: View {
                 // Opens rightward from the move row: offset right of the card, top
                 // aligned to that row (row height ≈ 45 with its divider).
                 .offset(x: 208, y: 45)
-                .transition(.move(edge: .leading))
+                // Appears in place (grows from its top-left corner + fades) rather
+                // than sliding across, so it reads as opening where it sits.
+                .transition(.scale(scale: 0.85, anchor: .topLeading).combined(with: .opacity))
             }
         }
         .shadow(radius: 16)
@@ -237,6 +244,50 @@ struct LibraryScreen: View {
             .padding(.horizontal, 14).padding(.vertical, 12)
             .contentShape(Rectangle())
         }
+    }
+
+    private func deleteFolderCard(_ folder: String) -> some View {
+        VStack(spacing: 14) {
+            Text("폴더 삭제").font(.headline)
+            Text("'전체삭제'는 폴더와 안의 파일을 모두 지웁니다. '폴더삭제'는 폴더만 지우고 파일은 저장소로 옮깁니다.")
+                .font(.caption).foregroundColor(.muted).multilineTextAlignment(.center)
+            VStack(spacing: 8) {
+                if store.folderHasContents(folder) {
+                    Button(role: .destructive) {
+                        store.deleteFolder(folder, withContents: true); deletingFolder = nil; verifyPlaying()
+                    } label: { Text("전체삭제").frame(maxWidth: .infinity) }
+                }
+                Button {
+                    store.deleteFolder(folder, withContents: false); deletingFolder = nil; verifyPlaying()
+                } label: { Text("폴더삭제").frame(maxWidth: .infinity) }
+                Button("취소") { deletingFolder = nil }.frame(maxWidth: .infinity)
+            }
+        }
+        .padding(18)
+        .frame(width: 300)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(radius: 20)
+    }
+
+    private func renameCard(title: String, text: Binding<String>,
+                            confirm: @escaping () -> Void, cancel: @escaping () -> Void) -> some View {
+        VStack(spacing: 14) {
+            Text(title).font(.headline)
+            TextField("새 이름", text: text)
+                .textFieldStyle(.roundedBorder)
+                .autocapitalization(.none)
+            HStack(spacing: 10) {
+                Button("취소", action: cancel).frame(maxWidth: .infinity)
+                Button(action: confirm) { Text("바꾸기").bold().frame(maxWidth: .infinity) }
+                    .foregroundColor(.accent)
+            }
+        }
+        .padding(18)
+        .frame(width: 280)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .shadow(radius: 20)
     }
 
     private var newFolderCard: some View {
@@ -431,14 +482,19 @@ struct LibraryScreen: View {
             // the playing file's own, not the viewed one.
             start(list[(i + 1) % count])
         case .shuffle:
-            // Play every OTHER track once before the current one can repeat: the
-            // bag is all indices except the one just played; refilled (excluding
-            // the new current) only when it runs dry. Including the current index
-            // let it come back around too soon.
-            guard count > 1 else { start(list[i]); return }
-            shuffleBag.removeAll { $0 >= count || $0 == i }
-            if shuffleBag.isEmpty { shuffleBag = Array(0..<count).filter { $0 != i }.shuffled() }
-            start(list[shuffleBag.removeFirst()])
+            // Every track once before any repeat: mark the one that just finished
+            // played, then pick a random one still unplayed. When all are played,
+            // start a fresh cycle (keeping the current out so it does not repeat
+            // back-to-back).
+            guard count > 1, let url = player.currentURL else { start(list[i]); return }
+            store.shufflePlayed.insert(url)
+            let remaining = list.filter { !store.shufflePlayed.contains($0.url) }
+            if let next = remaining.randomElement() {
+                start(next)
+            } else {
+                store.shufflePlayed = [url]
+                if let next = list.filter({ $0.url != url }).randomElement() { start(next) }
+            }
         case .stop:
             break
         }
@@ -497,55 +553,8 @@ struct LibraryScreen: View {
     private func setKind(_ kind: MediaKind) {
         guard store.kind != kind else { return }
         toMusic = (kind == .music)
-        shuffleBag = []
+        store.shufflePlayed = []
         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { store.kind = kind }
-    }
-
-    private var folderBar: some View {
-        HStack(spacing: 8) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    // The top level is home — a house, like the desktop's storage tab.
-                    chip(active: store.current == nil, tap: { store.current = nil }) {
-                        Image(systemName: "house.fill").font(.subheadline)
-                    }
-                    .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: nil) }
-                    ForEach(store.folders, id: \.self) { folder in
-                        chip(active: store.current == folder, tap: { store.current = folder }) {
-                            Text(folder).font(.subheadline)
-                        }
-                        .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, to: folder) }
-                        .contextMenu {
-                            Button { renamingFolder = folder; folderRenameText = folder } label: {
-                                Label("이름 바꾸기", systemImage: "pencil")
-                            }
-                            Button(role: .destructive) { deletingFolder = folder } label: {
-                                Label("폴더 삭제", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-                .padding(.leading, 16)
-            }
-            // The make-folder button stays pinned at the right, not among the tabs.
-            Button { showNewFolder = true } label: {
-                Image(systemName: "folder.badge.plus").foregroundColor(.muted).padding(8)
-            }
-            .padding(.trailing, 12)
-        }
-        .padding(.bottom, 4)
-    }
-
-    private func chip<Content: View>(
-        active: Bool, tap: @escaping () -> Void, @ViewBuilder label: () -> Content
-    ) -> some View {
-        Button(action: tap) {
-            label()
-                .padding(.horizontal, 14).padding(.vertical, 6)
-                .background(active ? Color.accent : Color.toolbar)
-                .foregroundColor(active ? .onAccent : .onSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        }
     }
 
     private var downloadsStrip: some View {
@@ -704,5 +713,59 @@ struct LibraryScreen: View {
             }
         } label: { Label("폴더로 이동", systemImage: "folder") }
         Button(role: .destructive) { store.delete(item) } label: { Label("삭제", systemImage: "trash") }
+    }
+}
+
+/// The folder chips row, split out of LibraryScreen so it observes only the store
+/// — the player's frequent updates no longer re-render it, which is what made the
+/// chip context menus (and the rename/delete dialogs off them) flicker mid-play.
+private struct FolderBar: View {
+    @ObservedObject var store: LibraryStore
+    var onRename: (String) -> Void
+    var onDelete: (String) -> Void
+    var onNewFolder: () -> Void
+    var onDrop: ([NSItemProvider], String?) -> Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    chip(active: store.current == nil, tap: { store.current = nil }) {
+                        Image(systemName: "house.fill").font(.subheadline)
+                    }
+                    .onDrop(of: [.fileURL], isTargeted: nil) { onDrop($0, nil) }
+                    ForEach(store.folders, id: \.self) { folder in
+                        chip(active: store.current == folder, tap: { store.current = folder }) {
+                            Text(folder).font(.subheadline)
+                        }
+                        .onDrop(of: [.fileURL], isTargeted: nil) { onDrop($0, folder) }
+                        .contextMenu {
+                            Button { onRename(folder) } label: { Label("이름 바꾸기", systemImage: "pencil") }
+                            Button(role: .destructive) { onDelete(folder) } label: {
+                                Label("폴더 삭제", systemImage: "trash")
+                            }
+                        }
+                    }
+                }
+                .padding(.leading, 16)
+            }
+            Button(action: onNewFolder) {
+                Image(systemName: "folder.badge.plus").foregroundColor(.muted).padding(8)
+            }
+            .padding(.trailing, 12)
+        }
+        .padding(.bottom, 4)
+    }
+
+    private func chip<Content: View>(
+        active: Bool, tap: @escaping () -> Void, @ViewBuilder label: () -> Content
+    ) -> some View {
+        Button(action: tap) {
+            label()
+                .padding(.horizontal, 14).padding(.vertical, 6)
+                .background(active ? Color.accent : Color.toolbar)
+                .foregroundColor(active ? .onAccent : .onSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
     }
 }

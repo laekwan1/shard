@@ -57,5 +57,6 @@ struct RootView: View {
             }
         }
         .tint(.accent)
+        .onAppear { SystemVolume.shared.attach() }
     }
 }

@@ -53,6 +53,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var pendingSeek: Float?
     private var interruptedAt: Float?
     private var tick = 0
+    /// Set when a fresh stream is opened: hold the audio silent through the opening
+    /// glitch, then bring it up the instant real playback begins — so the sound
+    /// arrives with the picture, not seconds late, and without the start "pop".
+    private var pendingFade = false
 
     override init() {
         super.init()
@@ -156,24 +160,25 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.stop()
         player.media = VLCMedia(url: url)
         player.play()
+        player.audio?.volume = 0     // silent through the opening glitch (audio exists after play)
         player.rate = rate
-        fadeIn()
+        pendingFade = true           // brought up on the first real frame
     }
 
     /// Ramp the volume up from silence over ~0.4s. libVLC starts a stream at full
     /// gain, so the first audio arrived as a hard "pop" — on open, on the jump to
     /// the next track, and after a seek. Fading in smooths all three.
     private var fadeTimer: Timer?
+    /// A short (~0.15s) swell to the target so the first sample does not click —
+    /// short enough that the audio still feels immediate with the picture.
     private func fadeIn() {
         fadeTimer?.invalidate()
         let target = max(1, targetVolume)
         player.audio?.volume = 0
         var v: Int32 = 0
-        // Many small steps (≈0.5s) so the ramp is a smooth swell, not a couple of
-        // audible jumps — the coarse ramp still clicked ("헙").
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { [weak self] t in
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            v += max(1, target / 20)
+            v += max(1, target / 8)
             if v >= target { v = target; t.invalidate() }
             if !self.muted { self.player.audio?.volume = v }
         }
@@ -241,6 +246,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the reliable "actually playing" signal (a state change to .playing does
         // not always arrive).
         if buffering { buffering = false }
+        // Picture is up and running — now bring the (held-silent) audio up quickly.
+        if pendingFade, player.isPlaying {
+            pendingFade = false
+            if !muted { fadeIn() }
+        }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
             player.position = p; pendingSeek = nil
@@ -362,15 +372,15 @@ private struct Gauge: View {
     let icon: String
     let value: Double
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 13))
-            Capsule().fill(Color.white.opacity(0.3)).frame(width: 70, height: 3)
+        HStack(spacing: 7) {
+            Image(systemName: icon).font(.system(size: 11))
+            Capsule().fill(Color.white.opacity(0.3)).frame(width: 52, height: 3)
                 .overlay(alignment: .leading) {
-                    Capsule().fill(Color.white).frame(width: 70 * max(0, min(1, value)), height: 3)
+                    Capsule().fill(Color.white).frame(width: 52 * max(0, min(1, value)), height: 3)
                 }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(Color.black.opacity(0.4)).clipShape(Capsule()).foregroundColor(.white)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .background(.regularMaterial, in: Capsule()).foregroundColor(.white)
     }
 }
 
@@ -423,7 +433,6 @@ struct PlayerStage: View {
         ZStack {
             Color.black
             VLCSurface(controller: controller).scaleEffect(zoom)
-                .opacity(controller.settling ? 0 : 1)   // hide the squish while rotating
             if isMusic {
                 // A song has no picture of its own — show the saved cover, large,
                 // and fall back to a note only when there is none.
@@ -436,6 +445,10 @@ struct PlayerStage: View {
             if controller.buffering && !controller.isPlaying {
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
             }
+            // An opaque black cover over the video WHILE the interface rotates, so
+            // the mid-rotation squish is never seen. A plain conditional (not an
+            // opacity animation) means it snaps in instantly with no fade.
+            if controller.settling { Color.black }
             PlayerGestures(
                 onTap: { toggleBar() },
                 onDoubleTap: { x, w in doubleTap(x, w) },
@@ -501,7 +514,7 @@ struct PlayerStage: View {
         // and down (see the drag handler). Full screen keeps the 2×/rewind hold.
         if !fullscreen {
             holdVolume = active
-            if active { startVolume = controller.volume }
+            if active { startVolume = SystemVolume.shared.level }
             else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
             return
         }
@@ -518,7 +531,7 @@ struct PlayerStage: View {
             if startX < w * 0.2 && fullscreen {
                 dragMode = .brightness; startBrightness = UIScreen.main.brightness
             } else if startX > w * 0.8 {
-                dragMode = .volume; startVolume = controller.volume
+                dragMode = .volume; startVolume = SystemVolume.shared.level
             } else {
                 dragMode = .swipe
             }
@@ -528,14 +541,14 @@ struct PlayerStage: View {
             // a shorter reach than brightness so it responds quickly.
             if holdVolume {
                 let v = max(0, min(1, startVolume + Float(-dy / 100)))
-                controller.volume = v
+                SystemVolume.shared.set(v)
                 gauge = ("speaker.wave.2", Double(v)); return
             }
             if dragMode == .brightness {
                 let b = max(0, min(1, startBrightness + CGFloat(step)))
                 UIScreen.main.brightness = b; gauge = ("sun.max", Double(b))
             } else if dragMode == .volume {
-                let v = max(0, min(1, startVolume + step)); controller.volume = v
+                let v = max(0, min(1, startVolume + step)); SystemVolume.shared.set(v)
                 gauge = ("speaker.wave.2", Double(v))
             }
         case .ended:
@@ -565,6 +578,9 @@ struct PlayerStage: View {
         let work = DispatchWorkItem {
             // Do not hide while a control is still under the finger.
             if interacting { return }
+            // Take any open picker down with the bar, so it does not reappear when
+            // the bar comes back on the next tap.
+            showRatePicker = false; showVolumeBar = false
             withAnimation { showControls = false }
         }
         hideWork = work
@@ -600,11 +616,16 @@ struct PlayerStage: View {
     /// The top safe-area inset, so the title clears the status bar / notch when a
     /// short is played full screen (portrait) — otherwise it ran into the clock
     /// and battery.
-    private var topInset: CGFloat {
+    private var safeInsets: UIEdgeInsets {
         UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .first(where: { $0.activationState == .foregroundActive })?
-            .keyWindow?.safeAreaInsets.top ?? 0
+            .keyWindow?.safeAreaInsets ?? .zero
     }
+    private var topInset: CGFloat { safeInsets.top }
+    /// How far to pull the controls in from the edges in full screen: clear of the
+    /// notch/home-indicator on the sides, plus enough to sit around the seek bar's
+    /// span rather than jammed against the very edge.
+    private var sideInset: CGFloat { max(safeInsets.left, safeInsets.right) + 28 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -613,7 +634,7 @@ struct PlayerStage: View {
                 Spacer()
                 closeButton
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, fullscreen ? sideInset : 12)
             .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
             .padding(.bottom, 8)
             Spacer()
@@ -646,7 +667,7 @@ struct PlayerStage: View {
                 }
             }
         }
-        .padding(6).background(Color.black.opacity(0.88)).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(6).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
@@ -654,20 +675,21 @@ struct PlayerStage: View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill").font(.system(size: 12)).foregroundColor(.white)
             SeekSlider(
-                // Local display for an instant thumb; shows 0 while muted, and any
-                // drag lifts the mute so the two never disagree.
+                // Drives the PHONE's volume (synced with the hardware buttons), not
+                // libVLC's own gain. Local display for an instant thumb; shows 0
+                // while muted, and any drag lifts the mute.
                 value: Binding(get: { controller.muted ? 0 : volDisplay }, set: { _ in }),
                 onBegin: { interacting = true; keepBar() },
                 onScrub: { v in
                     if controller.muted { controller.toggleMute() }
-                    volDisplay = v; controller.volume = Float(v); keepBar()
+                    volDisplay = v; SystemVolume.shared.set(Float(v)); keepBar()
                 },
                 onEnd: { _ in interacting = false; showBar() })
             Image(systemName: "speaker.wave.3.fill").font(.system(size: 12)).foregroundColor(.white)
         }
         .frame(width: 220)
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.black.opacity(0.88)).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
@@ -709,8 +731,8 @@ struct PlayerStage: View {
                     // not also mute / step the rate. A short tap still fails the
                     // long press and runs the button normally.
                     .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
-                        volDisplay = Double(controller.volume)
-                        showVolumeBar.toggle(); showRatePicker = false; keepBar()
+                        volDisplay = Double(SystemVolume.shared.level)
+                        showVolumeBar.toggle(); showRatePicker = false; showBar()
                     })
                     Button { controller.cycleRate(); showBar() } label: {
                         // Fixed width so 1× ↔ 1.25× does not shove the buttons
@@ -719,7 +741,7 @@ struct PlayerStage: View {
                             .frame(width: 42)
                     }
                     .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
-                        showRatePicker.toggle(); showVolumeBar = false; keepBar()
+                        showRatePicker.toggle(); showVolumeBar = false; showBar()
                     })
                     Button { fullscreen.toggle() } label: {
                         Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
@@ -730,7 +752,7 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 12).padding(.top, fullscreen ? 18 : 8)
+        .padding(.horizontal, fullscreen ? sideInset : 12).padding(.top, fullscreen ? 18 : 8)
         .padding(.bottom, fullscreen ? 34 : 16)   // room under the buttons; more in full screen for a short's edge
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
@@ -741,8 +763,8 @@ struct PlayerStage: View {
                 if showRatePicker { ratePicker }
                 if showVolumeBar { volumeBar }
             }
-            .padding(.trailing, 12)
-            .offset(y: fullscreen ? -84 : -52)
+            .padding(.trailing, fullscreen ? sideInset : 12)
+            .offset(y: fullscreen ? -70 : -44)
         }
     }
 }
