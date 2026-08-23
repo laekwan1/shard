@@ -106,6 +106,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.delegate = self
         let session = AVAudioSession.sharedInstance()
         try? session.setCategory(.playback, mode: .moviePlayback)
+        // Pin the hardware sample rate so it does NOT reconfigure between tracks of
+        // different rates (44.1k ↔ 48k) — that route reconfiguration is the "텁"
+        // pop heard on every transition, for AVPlayer and libVLC alike. A fixed
+        // rate + a slightly larger buffer keeps the route stable across swaps.
+        try? session.setPreferredSampleRate(48000)
+        try? session.setPreferredIOBufferDuration(0.02)
         try? session.setActive(true)
         setupRemoteCommands()
         // A phone call (or any interruption) pauses us and, on iOS, tears the
@@ -377,12 +383,15 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func toggle() {
         if backend == .av {
-            if reachedEnd || (av.currentItem.map { $0.currentTime().seconds >= $0.duration.seconds - 0.3 } ?? false) {
+            if reachedEnd || (av.currentItem.map { $0.duration.seconds.isFinite && $0.currentTime().seconds >= $0.duration.seconds - 0.3 } ?? false) {
                 reachedEnd = false; av.seek(to: .zero); av.play(); av.rate = rate; userPaused = false; isPlaying = true
-            } else if av.timeControlStatus == .paused {
-                av.play(); av.rate = rate; userPaused = false; isPlaying = true
-            } else {
+            } else if av.timeControlStatus == .playing {
+                // Only pause when it is actually playing. While it is buffering
+                // (.waitingToPlayAtSpecifiedRate) the old code treated a tap as
+                // "pause", so it took two taps to get playback going.
                 av.pause(); userPaused = true; isPlaying = false
+            } else {
+                av.play(); av.rate = rate; userPaused = false; isPlaying = true
             }
             return
         }
@@ -1047,7 +1056,16 @@ struct PlayerStage: View {
         // edge — the band above the seek is what was overlapping the video.
         .padding(.top, fullscreen ? 0 : 8)
         .padding(.bottom, fullscreen ? 26 : 16)
-        .background(Color.black.opacity(0.3))
+        .background(
+            Color.black.opacity(0.3)
+                // A tap on the bar's own background (not a button) closes an open
+                // picker — the video-area catcher could not reach here because this
+                // band is hit-testable.
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if showRatePicker || showVolumeBar { showRatePicker = false; showVolumeBar = false; showBar() }
+                }
+        )
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over
         // the sound / speed buttons it belongs to.
