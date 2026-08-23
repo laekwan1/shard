@@ -743,13 +743,6 @@ struct PlayerStage: View {
                     .onChanged { zoom = min(3, max(1, $0)) }
                     .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
             )
-            // A tap anywhere while a picker is open closes it — not only a tap on
-            // the video surface. This catcher sits above the gesture layer so a tap
-            // on the controls area dismisses the picker too.
-            if showRatePicker || showVolumeBar {
-                Color.clear.contentShape(Rectangle())
-                    .onTapGesture { showRatePicker = false; showVolumeBar = false; showBar() }
-            }
             if let f = seekFlash { seekFlashView(f) }
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             // Hide the controls while the interface is rotating — otherwise they
@@ -770,13 +763,13 @@ struct PlayerStage: View {
 
     /// Tap toggles the bar — up if hidden, away if shown.
     private func toggleBar() {
-        // A tap while a picker is open just dismisses the picker (and keeps the
-        // bar) — it should not take a second tap, nor hide the whole bar.
-        if showRatePicker || showVolumeBar {
-            showRatePicker = false; showVolumeBar = false; showBar(); return
-        }
+        // Any tap outside the functional controls toggles the WHOLE bar — showing
+        // it, or hiding it (and taking any open picker down with it). The picker
+        // popup and the buttons handle their own taps, so this only fires on the
+        // video and the bar's empty background.
         if showControls {
             hideWork?.cancel()
+            showRatePicker = false; showVolumeBar = false
             withAnimation(.easeOut(duration: 0.12)) { showControls = false }
         } else {
             showBar()
@@ -1057,14 +1050,12 @@ struct PlayerStage: View {
         .padding(.top, fullscreen ? 0 : 8)
         .padding(.bottom, fullscreen ? 26 : 16)
         .background(
+            // A tap on the bar's own empty background (not a button) lowers the whole
+            // bar — the same as tapping the video. The band is hit-testable, so the
+            // video-area gesture could not reach here; this handles it directly.
             Color.black.opacity(0.3)
-                // A tap on the bar's own background (not a button) closes an open
-                // picker — the video-area catcher could not reach here because this
-                // band is hit-testable.
                 .contentShape(Rectangle())
-                .onTapGesture {
-                    if showRatePicker || showVolumeBar { showRatePicker = false; showVolumeBar = false; showBar() }
-                }
+                .onTapGesture { toggleBar() }
         )
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over
