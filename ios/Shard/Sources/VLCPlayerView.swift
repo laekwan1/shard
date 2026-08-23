@@ -66,6 +66,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var interruptedAt: Float?
     private var tick = 0
     private var openGen = 0
+    /// True from open() until the first frame of the new stream plays, so the audio
+    /// stays muted across the swap glitch and comes on exactly with the picture.
+    private var pendingUnmute = false
     /// Video-only brightness (1 = full), kept on the controller so it survives the
     /// stage view being replaced when it goes full screen and back.
     @Published var brightness: Double = 1
@@ -175,7 +178,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if reachedEnd || s == .ended || s == .error || s == .stopped { player.stop() }
         reachedEnd = false
         player.media = makeMedia(url)
-        if !muted { briefMute() }
+        // Keep the audio silent until real playback begins (unmuted on the first
+        // frame in timeChanged): this is "sound only when ready", which removes the
+        // swap "툭" without a drawn-out fade.
+        pendingUnmute = true
+        player.audio?.isMuted = true
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -183,18 +190,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     private func makeMedia(_ url: URL) -> VLCMedia {
         let media = VLCMedia(url: url)
-        media.addOption(":file-caching=150")   // shorter startup buffer → faster start
+        media.addOption(":file-caching=100")   // shorter startup buffer → faster start
         return media
-    }
-
-    /// A very short mute across the media swap, hiding the "툭" click the audio
-    /// unit makes as it re-primes — far shorter than a fade the user found sluggish.
-    private func briefMute() {
-        player.audio?.isMuted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
-            guard let self = self, !self.muted else { return }
-            self.player.audio?.isMuted = false
-        }
     }
 
     /// If the fast (no-stop) swap failed to start within ~1.6s, hard-reset once —
@@ -207,7 +204,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if !self.player.isPlaying && self.player.time.intValue == 0 {
                 self.player.stop()
                 self.player.media = self.makeMedia(url)
-                if !self.muted { self.briefMute() }
+                self.pendingUnmute = true
+                self.player.audio?.isMuted = true
                 self.player.play()
                 self.player.rate = self.rate
             }
@@ -215,6 +213,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 
     func pause() { player.pause() }
+    /// Resume after we paused for a web video — reactivate the session first, since
+    /// the web video may have taken the audio route.
+    func resume() { try? AVAudioSession.sharedInstance().setActive(true); player.play() }
 
     /// Scrubbing the desktop's way: while dragging, only the knob and the clock
     /// move — the player is not touched. It seeks once, on release. That is the
@@ -240,9 +241,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if let url = currentURL { open(url) }
         } else if player.isPlaying {
             player.pause()
+            isPlaying = false     // flip the button at once; VLC can lag the state event
         } else {
             try? AVAudioSession.sharedInstance().setActive(true)
             player.play()
+            isPlaying = true
         }
     }
     func seek(to p: Float) { player.position = max(0, min(1, p)) }
@@ -275,6 +278,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the reliable "actually playing" signal (a state change to .playing does
         // not always arrive).
         if buffering { buffering = false }
+        // First real frame — bring the audio on now (unless the user muted).
+        if pendingUnmute, player.isPlaying {
+            pendingUnmute = false
+            player.audio?.isMuted = muted
+        }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
             player.position = p; pendingSeek = nil
@@ -403,11 +411,11 @@ private struct SeekRow: View {
             // Fixed width so the bar does not grow/shrink as the elapsed time
             // gains or loses a digit (0:09 → 0:10 → 1:00:00).
             Text(ui.elapsed).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().frame(width: 46, alignment: .trailing)
+                .monospacedDigit().frame(width: 38, alignment: .trailing)
             SeekSlider(value: Binding(get: { Double(ui.position) }, set: { onScrub($0) }),
                        onBegin: onBegin, onScrub: onScrub, onEnd: onEnd)
             Text(ui.duration).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().frame(width: 46, alignment: .leading)
+                .monospacedDigit().frame(width: 38, alignment: .leading)
         }
     }
 }
@@ -494,7 +502,10 @@ struct PlayerStage: View {
             if controller.brightness < 1 {
                 Color.black.opacity(1 - controller.brightness).allowsHitTesting(false)
             }
-            if controller.buffering && !controller.isPlaying {
+            // Cover the surface with black while a new stream is opening, so the
+            // previous video's last frame does not flash before the new one renders.
+            if controller.buffering && !controller.isPlaying && !isMusic {
+                Color.black
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
             }
             // An opaque black cover over the video WHILE the interface rotates, so
@@ -755,6 +766,7 @@ struct PlayerStage: View {
                     onBegin: { controller.beginScrub(); interacting = true; keepBar() },
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },
                     onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() })
+                .padding(.horizontal, fullscreen ? 16 : 0)   // full screen: a touch in from the edges
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
                 HStack(spacing: fullscreen ? 44 : 28) {
@@ -796,11 +808,11 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        // A small fixed inset in full screen so the seek bar runs nearly edge to
-        // edge (long); the buttons are the only thing pulled well inward.
-        .padding(.horizontal, fullscreen ? 12 : 12)
+        // Windowed uses a small side inset so the seek bar runs nearly the whole
+        // width; full screen keeps a modest edge margin.
+        .padding(.horizontal, fullscreen ? 12 : 8)
         .padding(.top, fullscreen ? 12 : 8)
-        .padding(.bottom, fullscreen ? 16 : 16)
+        .padding(.bottom, fullscreen ? 20 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over

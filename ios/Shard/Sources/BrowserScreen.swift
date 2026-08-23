@@ -5,6 +5,7 @@ import SwiftUI
 /// swipe on the right edge.
 struct BrowserScreen: View {
     @ObservedObject var downloads: DownloadsStore
+    var onWebPlaying: (Bool) -> Void = { _ in }
     var openLibrary: () -> Void
 
     @StateObject private var model = WebModel()
@@ -61,8 +62,15 @@ struct BrowserScreen: View {
         // A web video going full screen should turn the phone to landscape (a
         // normal wide video was stuck upright); leaving it frees rotation again.
         .onChange(of: model.videoFullscreen) { on in
-            if on { Orientation.shared.lock(.landscapeRight, to: .landscapeRight) }
-            else { Orientation.shared.free() }
+            if on {
+                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+            } else {
+                // Turn back to portrait explicitly, THEN free — just calling free()
+                // left the interface stuck at the landscape geometry (the page and
+                // then the library showed cropped/zoomed).
+                Orientation.shared.lock(.portrait, to: .portrait)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
+            }
         }
         .onAppear {
             // No per-call withAnimation: the panel's slide is driven by the
@@ -78,6 +86,7 @@ struct BrowserScreen: View {
                 else { model.pauseWebVideos(); openLibrary() }
             }
             model.onWebTap = { showAddress = false }
+            model.onWebPlaying = { onWebPlaying($0) }
             model.onDownloadRequest = { right, bottom in
                 listAnchor = CGPoint(x: right, y: bottom)
                 requestDownload()

@@ -40,6 +40,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     var onWebTap: (() -> Void)?
     /// True while a web video is playing full screen, so the download button hides.
     @Published var videoFullscreen = false
+    /// A web video started (true) or stopped (false) playing — so the library's
+    /// player can pause and resume around it.
+    var onWebPlaying: ((Bool) -> Void)?
     /// Whether the bypass engine is on (the local proxy is running and the
     /// WebView is pointed at it).
     @Published var engineOn = false
@@ -145,6 +148,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             onDownloadRequest?(CGFloat(right), CGFloat(bottom))
         case "pick": if let itag = (body["itag"] as? NSNumber)?.uint32Value { onPick?(itag) }
         case "fullscreen": videoFullscreen = (body["on"] as? Bool) ?? false
+        case "webplaying": onWebPlaying?((body["on"] as? Bool) ?? false)
         default: break
         }
     }
@@ -261,7 +265,7 @@ struct WebViewContainer: UIViewRepresentable {
         func gestureRecognizer(_ g: UIGestureRecognizer,
                                shouldReceive touch: UITouch) -> Bool {
             guard let view = g.view else { return true }
-            return touch.location(in: view).y < view.bounds.height * 0.82
+            return touch.location(in: view).y < view.bounds.height * 0.7
         }
     }
 }

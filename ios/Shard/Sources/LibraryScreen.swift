@@ -399,7 +399,13 @@ struct LibraryScreen: View {
     /// end-of-track work off the PLAYING file's own shelf+folder, not whatever the
     /// library happens to be showing — switching the view while something plays no
     /// longer breaks the "play next" that follows.
-    private func start(_ item: Item) {
+    private func start(_ item: Item, record: Bool = true) {
+        // Remember what we were on, so "previous" returns the real prior track
+        // (important for shuffle, where the sequential neighbour is meaningless).
+        if record, let cur = player.currentURL, cur != item.url {
+            store.history.append(cur)
+            if store.history.count > 200 { store.history.removeFirst() }
+        }
         currentIndex = store.visible.firstIndex(where: { $0.url == item.url })
         player.onEnded = { advanceOnEnd() }
         player.nowPlayingTitle = item.name
@@ -429,11 +435,16 @@ struct LibraryScreen: View {
         if prefs.end == .shuffle { shuffleNext(list, current: url) }
         else { start(list[(i + 1) % list.count]) }
     }
-    /// Manual "previous": the one before in order (wrapping).
+    /// Manual "previous": the track actually played before this one (from history);
+    /// falls back to the sequential previous when there is no history.
     private func playPrev() {
         let list = playingList()
-        guard let i = playingIndex(), !list.isEmpty else { return }
-        start(list[(i - 1 + list.count) % list.count])
+        guard !list.isEmpty else { return }
+        while let prev = store.history.popLast() {
+            if let item = store.items.first(where: { $0.url == prev }) { start(item, record: false); return }
+        }
+        guard let i = playingIndex() else { return }
+        start(list[(i - 1 + list.count) % list.count], record: false)
     }
 
     /// Pick the next shuffle track from a queue that holds every other track once;
@@ -474,7 +485,7 @@ struct LibraryScreen: View {
         // the next runloop — otherwise the rotation began before the black was up
         // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             if gen == orientGen { player.settling = false }
         }
         guard fs else {

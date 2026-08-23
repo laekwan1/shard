@@ -29,6 +29,10 @@ final class LibraryStore: ObservableObject {
     /// plays once before any repeats. Kept here (a reference type) because the
     /// view's @State did not survive the end-of-track callback.
     var shuffleQueue: [URL] = []
+    /// The order tracks were actually played, so "previous" returns the one you
+    /// really heard before — not a sequential neighbour, and not another random
+    /// pick when shuffle is on.
+    var history: [URL] = []
     /// The folder being viewed, or nil for the top level.
     @Published var current: String?
     /// Which shelf is shown — video or music. Switching shelves drops a folder

@@ -109,6 +109,30 @@
   document.addEventListener("webkitbeginfullscreen", function () { reportFullscreen(true); }, true);
   document.addEventListener("webkitendfullscreen", function () { reportFullscreen(false); }, true);
 
+  // Tell the native side whether any web video is actually playing, so the
+  // library's own player can step aside (pause) while a page video plays and
+  // resume when it stops — otherwise the two fought over the audio route and the
+  // background song went silent.
+  var lastPlaying = null;
+  function reportPlaying() {
+    try {
+      var vids = document.getElementsByTagName("video");
+      var playing = false;
+      for (var i = 0; i < vids.length; i++) {
+        var v = vids[i];
+        if (!v.paused && !v.ended && v.currentTime > 0 && v.readyState > 2) playing = true;
+      }
+      if (playing !== lastPlaying) {
+        lastPlaying = playing;
+        window.webkit.messageHandlers.shard.postMessage({ type: "webplaying", on: playing });
+      }
+    } catch (e) {}
+  }
+  document.addEventListener("play", reportPlaying, true);
+  document.addEventListener("pause", reportPlaying, true);
+  document.addEventListener("ended", reportPlaying, true);
+  setInterval(reportPlaying, 800);
+
   // A download button over each video's top-right, and the quality list right
   // under it — rendered in the page so it sits on the actual video and a tap
   // anywhere else dismisses it, which a native overlay could not do.

@@ -20,13 +20,24 @@ struct RootView: View {
     // the library view comes and goes, which was stacking playback.
     @StateObject private var player = VLCController()
     @State private var showLibrary = false
+    /// Set when we paused the library player because a web video started, so we
+    /// know to resume it when the web video stops.
+    @State private var pausedForWeb = false
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 Color.surface.ignoresSafeArea()
 
-                BrowserScreen(downloads: downloads) {
+                BrowserScreen(downloads: downloads, onWebPlaying: { on in
+                    // A web video takes over the audio route; step the library's
+                    // player aside while it plays, and resume when it stops.
+                    if on {
+                        if player.isPlaying { player.pause(); pausedForWeb = true }
+                    } else if pausedForWeb {
+                        player.resume(); pausedForWeb = false
+                    }
+                }) {
                     library.reload()
                     // Point the library at the playing file's shelf/folder BEFORE it
                     // slides in, so the list is not re-inserted mid-slide (which read
