@@ -65,6 +65,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private var pendingSeek: Float?
     private var interruptedAt: Float?
     private var tick = 0
+    private var openGen = 0
+    /// Video-only brightness (1 = full), kept on the controller so it survives the
+    /// stage view being replaced when it goes full screen and back.
+    @Published var brightness: Double = 1
 
     override init() {
         super.init()
@@ -159,17 +163,55 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         currentURL = url
         buffering = true
         position = 0          // jump the bar to the start at once, not a beat later
-        // Stop ONLY when the player is actually finished/errored/idle. That full
-        // stop tears down the audio unit, and rebuilding it on the next play took
-        // ~1s — which is why the sound lagged the picture. Swapping media on a
-        // still-playing player keeps the audio unit alive, so sound and picture
-        // start together. The stop is still there for the .ended wedge case.
+        // The session can go inactive after the library closes the player; without
+        // this, coming back and playing was silent with dead controls.
+        try? AVAudioSession.sharedInstance().setActive(true)
+        // Stop ONLY when the player is finished/errored/idle. A full stop tears down
+        // the audio unit and rebuilding it lagged the sound ~1s; swapping media on a
+        // still-playing player keeps sound and picture together. A watchdog below
+        // recovers the rare case where the swap wedges ("title changes, nothing
+        // plays").
         let s = player.state
         if reachedEnd || s == .ended || s == .error || s == .stopped { player.stop() }
         reachedEnd = false
-        player.media = VLCMedia(url: url)
+        player.media = makeMedia(url)
+        if !muted { briefMute() }
         player.play()
         player.rate = rate
+        scheduleWatchdog(url)
+    }
+
+    private func makeMedia(_ url: URL) -> VLCMedia {
+        let media = VLCMedia(url: url)
+        media.addOption(":file-caching=150")   // shorter startup buffer → faster start
+        return media
+    }
+
+    /// A very short mute across the media swap, hiding the "툭" click the audio
+    /// unit makes as it re-primes — far shorter than a fade the user found sluggish.
+    private func briefMute() {
+        player.audio?.isMuted = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            guard let self = self, !self.muted else { return }
+            self.player.audio?.isMuted = false
+        }
+    }
+
+    /// If the fast (no-stop) swap failed to start within ~1.6s, hard-reset once —
+    /// this is what recovers the intermittent "next plays nothing but the title".
+    private func scheduleWatchdog(_ url: URL) {
+        openGen += 1
+        let gen = openGen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            guard let self = self, gen == self.openGen, self.currentURL == url else { return }
+            if !self.player.isPlaying && self.player.time.intValue == 0 {
+                self.player.stop()
+                self.player.media = self.makeMedia(url)
+                if !self.muted { self.briefMute() }
+                self.player.play()
+                self.player.rate = self.rate
+            }
+        }
     }
 
     func pause() { player.pause() }
@@ -199,6 +241,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         } else if player.isPlaying {
             player.pause()
         } else {
+            try? AVAudioSession.sharedInstance().setActive(true)
             player.play()
         }
     }
@@ -422,9 +465,6 @@ struct PlayerStage: View {
 
     private enum DragMode { case brightness, volume, swipe, none }
     @State private var dragMode: DragMode = .none
-    /// Video-only brightness: a dimming overlay on the picture (1 = full, 0 =
-    /// black), so it does not touch the phone's own screen brightness.
-    @State private var videoBrightness: Double = 1
     @State private var startBrightness: Double = 1
     @State private var startVolume: Float = 0
     @State private var holdVolume = false
@@ -451,8 +491,8 @@ struct PlayerStage: View {
                 }
             }
             // Video-only brightness — dim the picture, never the phone screen.
-            if videoBrightness < 1 {
-                Color.black.opacity(1 - videoBrightness).allowsHitTesting(false)
+            if controller.brightness < 1 {
+                Color.black.opacity(1 - controller.brightness).allowsHitTesting(false)
             }
             if controller.buffering && !controller.isPlaying {
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
@@ -540,8 +580,8 @@ struct PlayerStage: View {
     private func vdrag(_ phase: PlayerGestures.Phase, _ startX: CGFloat, _ w: CGFloat, _ dy: CGFloat) {
         switch phase {
         case .began:
-            if startX < w * 0.2 && fullscreen {
-                dragMode = .brightness; startBrightness = videoBrightness
+            if startX < w * 0.2 {
+                dragMode = .brightness; startBrightness = controller.brightness
             } else if startX > w * 0.8 {
                 dragMode = .volume; startVolume = SystemVolume.shared.level
             } else {
@@ -558,7 +598,7 @@ struct PlayerStage: View {
             }
             if dragMode == .brightness {
                 let b = max(0.1, min(1, startBrightness + Double(step)))
-                videoBrightness = b; gauge = ("sun.max", b)
+                controller.brightness = b; gauge = ("sun.max", b)
             } else if dragMode == .volume {
                 let v = max(0, min(1, startVolume + step)); SystemVolume.shared.set(v)
                 gauge = ("speaker.wave.2", Double(v))
@@ -707,14 +747,14 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: fullscreen ? 22 : 10) {
+        VStack(spacing: fullscreen ? 14 : 10) {
             // Top row: the seek bar only — its own subview so it (and only it)
-            // re-renders as the position ticks, leaving the library still.
+            // re-renders as the position ticks, leaving the library still. It spans
+            // the full width (long); only the buttons below are pulled inward.
             SeekRow(ui: controller.ui,
                     onBegin: { controller.beginScrub(); interacting = true; keepBar() },
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },
                     onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() })
-                .padding(.horizontal, fullscreen ? 24 : 0)   // bar spans to the buttons
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
                 HStack(spacing: fullscreen ? 44 : 28) {
@@ -756,12 +796,11 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        // Only the safe-area inset on the background, so the playbar itself stays
-        // wide (not shrunken); the seek bar and buttons carry their own inner inset.
-        .padding(.leading, fullscreen ? safeInsets.left + 8 : 12)
-        .padding(.trailing, fullscreen ? safeInsets.right + 8 : 12)
-        .padding(.top, fullscreen ? 18 : 8)
-        .padding(.bottom, fullscreen ? 34 : 16)
+        // A small fixed inset in full screen so the seek bar runs nearly edge to
+        // edge (long); the buttons are the only thing pulled well inward.
+        .padding(.horizontal, fullscreen ? 12 : 12)
+        .padding(.top, fullscreen ? 12 : 8)
+        .padding(.bottom, fullscreen ? 16 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over

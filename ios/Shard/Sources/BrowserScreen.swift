@@ -58,6 +58,12 @@ struct BrowserScreen: View {
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
         }
+        // A web video going full screen should turn the phone to landscape (a
+        // normal wide video was stuck upright); leaving it frees rotation again.
+        .onChange(of: model.videoFullscreen) { on in
+            if on { Orientation.shared.lock(.landscapeRight, to: .landscapeRight) }
+            else { Orientation.shared.free() }
+        }
         .onAppear {
             // No per-call withAnimation: the panel's slide is driven by the
             // .animation(value: showAddress) on the ZStack, so open and close use

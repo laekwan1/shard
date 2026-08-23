@@ -254,5 +254,14 @@ struct WebViewContainer: UIViewRepresentable {
         // Ride alongside the web view's own gestures rather than blocking them.
         func gestureRecognizer(_ g: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        // Do not even receive touches in the bottom strip — that is where YouTube
+        // Shorts puts its draggable progress bar, and any recognizer of ours there
+        // interfered with dragging it. The page gets those touches untouched.
+        func gestureRecognizer(_ g: UIGestureRecognizer,
+                               shouldReceive touch: UITouch) -> Bool {
+            guard let view = g.view else { return true }
+            return touch.location(in: view).y < view.bounds.height * 0.82
+        }
     }
 }

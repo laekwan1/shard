@@ -120,7 +120,7 @@ struct LibraryScreen: View {
         // A finished download adds a file; reloading when the downloads list
         // changes makes it appear without leaving and coming back.
         .onChange(of: downloads.items.count) { _ in store.reload() }
-        .onChange(of: store.visible.count) { _ in store.shufflePlayed = [] }
+        .onChange(of: store.visible.count) { _ in store.shuffleQueue = [] }
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
@@ -198,9 +198,9 @@ struct LibraryScreen: View {
                         Image(systemName: "folder").frame(width: 18)   // stays a folder, does not become the arrow
                         Text("폴더로 이동").font(.subheadline)
                         Spacer()
-                        // A chevron appears on the right when the panel is open, and
-                        // goes away when it closes.
-                        if showFolderPick {
+                        // The chevron appears in step with the folder panel (not the
+                        // card's earlier slide), and goes away when it closes.
+                        if showFolderPanel {
                             Image(systemName: "chevron.right").font(.caption).foregroundColor(.muted)
                                 .transition(.opacity)
                         }
@@ -232,7 +232,7 @@ struct LibraryScreen: View {
                 .shadow(radius: 12)
                 // Opens rightward from the move row: offset right of the card, top
                 // aligned to that row (row height ≈ 45 with its divider).
-                .offset(x: 208, y: 45)
+                .offset(x: 208, y: 42)
                 // Appears in place (grows from its top-left corner + fades) rather
                 // than sliding across, so it reads as opening where it sits.
                 .transition(.scale(scale: 0.85, anchor: .topLeading).combined(with: .opacity))
@@ -366,8 +366,8 @@ struct LibraryScreen: View {
             fullscreen: $fullscreen,
             onStop: { stopPlayer() },
             onPullToWeb: { stopPlayer(); close() },
-            onPrev: { advance(-1) },
-            onNext: { advance(1) },
+            onPrev: { playPrev() },
+            onNext: { playNext() },
             hasPrev: playingList().count > 1,
             hasNext: playingList().count > 1,
             // The stage reflects the PLAYING file's kind, not the shelf on view —
@@ -403,8 +403,8 @@ struct LibraryScreen: View {
         currentIndex = store.visible.firstIndex(where: { $0.url == item.url })
         player.onEnded = { advanceOnEnd() }
         player.nowPlayingTitle = item.name
-        player.onRemoteNext = { advance(1) }
-        player.onRemotePrev = { advance(-1) }
+        player.onRemoteNext = { playNext() }
+        player.onRemotePrev = { playPrev() }
         player.open(item.url)
     }
 
@@ -421,12 +421,34 @@ struct LibraryScreen: View {
         return playingList().firstIndex(where: { $0.url == url })
     }
 
-    /// Step to the next/previous track, wrapping around the ends.
-    private func advance(_ dir: Int) {
+    /// Manual "next": follows the end-mode — random when shuffle is on, otherwise
+    /// the next in order (wrapping).
+    private func playNext() {
+        let list = playingList()
+        guard let url = player.currentURL, let i = list.firstIndex(where: { $0.url == url }) else { return }
+        if prefs.end == .shuffle { shuffleNext(list, current: url) }
+        else { start(list[(i + 1) % list.count]) }
+    }
+    /// Manual "previous": the one before in order (wrapping).
+    private func playPrev() {
         let list = playingList()
         guard let i = playingIndex(), !list.isEmpty else { return }
-        let n = ((i + dir) % list.count + list.count) % list.count
-        start(list[n])
+        start(list[(i - 1 + list.count) % list.count])
+    }
+
+    /// Pick the next shuffle track from a queue that holds every other track once;
+    /// refilled (reshuffled, current excluded) only when it empties — so nothing
+    /// repeats until the whole list has played.
+    private func shuffleNext(_ list: [Item], current: URL) {
+        let urls = Set(list.map { $0.url })
+        store.shuffleQueue.removeAll { !urls.contains($0) || $0 == current }
+        if store.shuffleQueue.isEmpty {
+            store.shuffleQueue = list.map { $0.url }.filter { $0 != current }.shuffled()
+        }
+        guard let nextURL = store.shuffleQueue.first,
+              let item = list.first(where: { $0.url == nextURL }) else { return }
+        store.shuffleQueue.removeFirst()
+        start(item)
     }
 
     private func stopPlayer() {
@@ -452,7 +474,7 @@ struct LibraryScreen: View {
         // the next runloop — otherwise the rotation began before the black was up
         // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
             if gen == orientGen { player.settling = false }
         }
         guard fs else {
@@ -484,30 +506,12 @@ struct LibraryScreen: View {
 
     private func advanceOnEnd() {
         let list = playingList()
-        guard let i = playingIndex(), !list.isEmpty else { return }
-        let count = list.count
+        guard let url = player.currentURL, let i = list.firstIndex(where: { $0.url == url }),
+              !list.isEmpty else { return }
         switch prefs.end {
-        case .next:
-            // Loop back to the top of the list when the last one finishes, rather
-            // than stopping — works for video and music alike now that the list is
-            // the playing file's own, not the viewed one.
-            start(list[(i + 1) % count])
-        case .shuffle:
-            // Every track once before any repeat: mark the one that just finished
-            // played, then pick a random one still unplayed. When all are played,
-            // start a fresh cycle (keeping the current out so it does not repeat
-            // back-to-back).
-            guard count > 1, let url = player.currentURL else { start(list[i]); return }
-            store.shufflePlayed.insert(url)
-            let remaining = list.filter { !store.shufflePlayed.contains($0.url) }
-            if let next = remaining.randomElement() {
-                start(next)
-            } else {
-                store.shufflePlayed = [url]
-                if let next = list.filter({ $0.url != url }).randomElement() { start(next) }
-            }
-        case .stop:
-            break
+        case .next:  start(list[(i + 1) % list.count])   // loop to the top after the last
+        case .shuffle: shuffleNext(list, current: url)
+        case .stop:  break
         }
     }
 
@@ -564,7 +568,7 @@ struct LibraryScreen: View {
     private func setKind(_ kind: MediaKind) {
         guard store.kind != kind else { return }
         toMusic = (kind == .music)
-        store.shufflePlayed = []
+        store.shuffleQueue = []
         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { store.kind = kind }
     }
 
