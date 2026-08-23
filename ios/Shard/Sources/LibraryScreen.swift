@@ -486,9 +486,11 @@ struct LibraryScreen: View {
         let gen = orientGen
         player.settling = true
         fullscreen = true
-        lockForVideo()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { if gen == orientGen { lockForVideo() } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { if gen == orientGen { player.settling = false } }
+        // Rotate only AFTER the full-screen black cover has been painted — rotating
+        // in the same runloop turned the still-visible windowed view (squish/glitch)
+        // before black was up. Same idea as the exit path.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { if gen == orientGen { lockForVideo() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if gen == orientGen { player.settling = false } }
     }
 
     /// Exit full screen: rotate back to portrait FIRST (still full screen, black

@@ -27,9 +27,10 @@ struct RootView: View {
                 Color.surface.ignoresSafeArea()
 
                 BrowserScreen(downloads: downloads, onWebPlaying: { on in
-                    // A web video takes over the audio route; just pause the
-                    // library's player while it plays (the user asked not to
-                    // auto-resume — they will press play themselves).
+                    // Only when the browser is the visible screen: a background page
+                    // video reporting itself was pausing the library's own playback
+                    // (a track paused ~1s in; full screen dropped to pause on exit).
+                    guard !showLibrary else { return }
                     if on && player.isPlaying { player.pause() }
                 }) {
                     library.reload()

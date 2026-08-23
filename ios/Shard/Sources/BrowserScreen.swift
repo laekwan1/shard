@@ -59,18 +59,10 @@ struct BrowserScreen: View {
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
         }
-        // A web video full screen turns landscape; leaving it restores portrait
-        // and frees rotation. The earlier cropped/zoomed-on-exit corruption is
-        // handled by free() explicitly nudging back to portrait, plus the explicit
-        // portrait lock here before the release.
-        .onChange(of: model.videoFullscreen) { on in
-            if on {
-                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-            } else {
-                Orientation.shared.lock(.portrait, to: .portrait)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) { Orientation.shared.free() }
-            }
-        }
+        // Web video full-screen rotation is left to iOS. Forcing landscape here
+        // kept corrupting the window geometry on exit (page and library came back
+        // cropped/zoomed and stuck), and no restore sequence reliably undid it — so
+        // it is off. The user can use the address-bar rotate button for a web video.
         .onAppear {
             // No per-call withAnimation: the panel's slide is driven by the
             // .animation(value: showAddress) on the ZStack, so open and close use

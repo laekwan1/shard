@@ -170,17 +170,19 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // The session can go inactive after the library closes the player; without
         // this, coming back and playing was silent with dead controls.
         try? AVAudioSession.sharedInstance().setActive(true)
-        // Mute BEFORE anything touches the media, then always stop: the mute kills
-        // the swap "툭", and the stop blanks the surface so the previous video's
-        // last frame cannot flash before the new one — a clean black→(spinner)→play.
-        // The audio comes on with the first real frame (timeChanged). Reliable, and
-        // the black+spinner reads as loading, not a glitch.
-        player.audio?.volume = 0       // silence the outgoing audio before the swap
-        player.stop()
+        // Keep the audio unit ALIVE across the swap — a full stop tears it down and
+        // rebuilding it made the hard "텁" click. So stop only when the player is
+        // finished/errored/idle (the wedge cases); otherwise swap media on the live,
+        // silenced unit. The black cover (buffering) hides the old frame meanwhile,
+        // and the audio ramps up on the first frame. A watchdog recovers a wedge.
+        let s = player.state
+        let needStop = reachedEnd || s == .ended || s == .error || s == .stopped
+        player.audio?.volume = 0       // silence before touching media (no click)
+        if needStop { player.stop() }
         reachedEnd = false
         pendingUnmute = true
         player.media = makeMedia(url)
-        player.audio?.volume = 0       // new audio object is silent until the first frame
+        player.audio?.volume = 0
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -299,6 +301,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
             if !muted { rampUp() } else { player.audio?.volume = 0 }
+        } else if buffering, player.isPlaying {
+            // Buffering that was NOT an open (e.g. after a seek) — clear it once
+            // frames flow again, or the spinner spun forever over black.
+            buffering = false
         }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
@@ -720,9 +726,9 @@ struct PlayerStage: View {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
     private var seekInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 6) : 0 }
-    // Buttons line up with the seek row's outer edge (the time labels), which is
-    // where the user wanted them — not pushed under the bar itself.
-    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 24) : 10 }
+    // A touch inside the time labels so the outer buttons do not stick out past
+    // them.
+    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 46 : 24) : 10 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -733,7 +739,7 @@ struct PlayerStage: View {
             }
             .padding(.leading, fullscreen ? safeInsets.left + 16 : 12)
             .padding(.trailing, fullscreen ? safeInsets.right + 16 : 12)
-            .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
+            .padding(.top, fullscreen ? max(topInset - 12, 2) : 10)
             .padding(.bottom, 8)
             Spacer()
             transport
@@ -845,10 +851,11 @@ struct PlayerStage: View {
         // Windowed uses a small side inset so the seek bar runs nearly the whole
         // width; full screen keeps a modest edge margin.
         .padding(.horizontal, fullscreen ? 12 : 8)
-        // Tighter band in full screen (less top/bottom fill) so the control area
-        // overlaps the video as little as possible, without moving the controls far.
+        // Full screen: a small top inset (thin band above the seek bar) but a
+        // larger bottom inset so the seek bar and buttons sit higher, off the very
+        // edge — the band above the seek is what was overlapping the video.
         .padding(.top, fullscreen ? 4 : 8)
-        .padding(.bottom, fullscreen ? 14 : 16)
+        .padding(.bottom, fullscreen ? 26 : 16)
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over
