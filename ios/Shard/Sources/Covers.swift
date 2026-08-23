@@ -14,8 +14,15 @@ enum Covers {
         return d
     }
 
-    /// The key a song's cover is filed under: its name without the extension.
-    static func keyFor(_ name: String) -> String { (name as NSString).deletingPathExtension }
+    /// The key a song's cover is filed under: its name without the extension,
+    /// Unicode-normalized. The name at save time comes from the engine's returned
+    /// path (often NFC) while at display it comes from directory enumeration (iOS
+    /// hands back NFD) — for a Korean title those are different bytes and hashed to
+    /// different files, so the cover was saved under one key and looked up under
+    /// another and never found. Normalizing both to NFC makes them agree.
+    static func keyFor(_ name: String) -> String {
+        (name as NSString).deletingPathExtension.precomposedStringWithCanonicalMapping
+    }
 
     /// A stable hash so any title — Korean, emoji, punctuation — makes a safe
     /// filename. Swift's `hashValue` is randomized per run and would not survive a

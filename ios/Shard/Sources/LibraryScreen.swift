@@ -31,6 +31,8 @@ struct LibraryScreen: View {
     /// Direction of the last shelf switch, so the list slides in the way the
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
+    @State private var shuffleBag: [Int] = []
+    @State private var orientGen = 0
     @Namespace private var shelfNS
 
     var body: some View {
@@ -51,11 +53,13 @@ struct LibraryScreen: View {
                 if store.visible.isEmpty {
                     empty
                 } else {
-                    // Android does not slide the list sideways on a shelf switch —
-                    // it swaps the rows and slides the segmented pill instead. A
-                    // short crossfade matches that far better than the horizontal
-                    // slide this used to do.
-                    list.id(store.kind).transition(.opacity)
+                    // Slide the list the way the switch went: to music (a left
+                    // fling) it enters from the right, the old leaves left — the
+                    // segmented pill slides under the chosen tab at the same time.
+                    list.id(store.kind).transition(.asymmetric(
+                        insertion: .move(edge: toMusic ? .trailing : .leading),
+                        removal: .move(edge: toMusic ? .leading : .trailing)
+                    ))
                 }
             }
             if player.currentURL != nil && fullscreen {
@@ -88,10 +92,16 @@ struct LibraryScreen: View {
         // A finished download adds a file; reloading when the downloads list
         // changes makes it appear without leaving and coming back.
         .onChange(of: downloads.items.count) { _ in store.reload() }
+        .onChange(of: store.visible.count) { _ in shuffleBag = [] }
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
         .onChange(of: fullscreen) { fs in applyOrientation(fs) }
+        // A new track while full screen (the next one after a short ends) may have
+        // a different shape — re-decide orientation once it starts.
+        .onChange(of: player.currentURL) { _ in
+            if fullscreen { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { applyOrientation(true) } }
+        }
         .onChange(of: visible) { shown in
             if !shown && fullscreen { fullscreen = false }
             // Each time the library opens, put the stage back on whatever is
@@ -120,9 +130,11 @@ struct LibraryScreen: View {
             Button("취소", role: .cancel) { renamingFolder = nil }
         }
         .confirmationDialog("폴더 삭제", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }), titleVisibility: .visible) {
-            Button("전체삭제", role: .destructive) {
-                if let f = deletingFolder { store.deleteFolder(f, withContents: true) }; deletingFolder = nil
-                verifyPlaying()
+            if let f = deletingFolder, store.folderHasContents(f) {
+                Button("전체삭제", role: .destructive) {
+                    store.deleteFolder(f, withContents: true); deletingFolder = nil
+                    verifyPlaying()
+                }
             }
             Button("폴더삭제") {
                 if let f = deletingFolder { store.deleteFolder(f, withContents: false) }; deletingFolder = nil
@@ -315,22 +327,34 @@ struct LibraryScreen: View {
     /// instant full screen opens, so lock landscape at once and re-decide after a
     /// frame has arrived.
     private func applyOrientation(_ fs: Bool) {
+        // A generation token so a stale delayed decision (from a rapid full-screen
+        // toggle) never rotates the screen out from under the current one — that
+        // was the "screen randomly ends up 90° off" after switching a few times.
+        orientGen += 1
+        let gen = orientGen
         guard fs else {
             Orientation.shared.lock(.portrait, to: .portrait)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                if gen == orientGen { Orientation.shared.free() }
+            }
             return
         }
-        let decide = {
+        let apply = {
+            guard gen == orientGen else { return }
             let s = player.player.videoSize
-            if s.height > s.width, s.width > 0 {
-                Orientation.shared.lock(.portrait, to: .portrait)
+            if s.width > 0 {
+                // Size is known (the video was already playing windowed), so decide
+                // once — no landscape-then-portrait flip for a short.
+                Orientation.shared.lock(s.height > s.width ? .portrait : .landscapeRight,
+                                        to: s.height > s.width ? .portrait : .landscapeRight)
             } else {
+                // Not known yet (a fresh track): assume wide, re-check when a frame
+                // has landed.
                 Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
             }
         }
-        Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: decide)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: decide)
+        apply()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { apply() }
     }
 
     /// After a delete, if the file playing is no longer on disk, stop — a folder
@@ -342,14 +366,25 @@ struct LibraryScreen: View {
 
     private func advanceOnEnd() {
         guard let i = currentIndex else { return }
+        let count = store.visible.count
         switch prefs.end {
         case .next:
-            if i + 1 < store.visible.count { play(at: i + 1) } else { stopPlayer() }
+            // Loop back to the top of the list when the last one finishes, rather
+            // than stopping.
+            play(at: i + 1 < count ? i + 1 : 0)
         case .shuffle:
-            guard store.visible.count > 1 else { return }
-            var n = i
-            while n == i { n = Int.random(in: 0..<store.visible.count) }
-            play(at: n)
+            // Play every track once before any repeats: draw from a bag of all
+            // indices, refilled (reshuffled) only when it runs dry. Plain random
+            // kept landing on the just-played or recent ones.
+            guard count > 0 else { return }
+            if shuffleBag.isEmpty { shuffleBag = Array(0..<count).shuffled() }
+            var next = shuffleBag.removeFirst()
+            if next == i, !shuffleBag.isEmpty {
+                let other = shuffleBag.removeFirst()
+                shuffleBag.append(next)   // keep it for later in this cycle
+                next = other
+            }
+            play(at: next)
         case .stop:
             break
         }
@@ -408,8 +443,7 @@ struct LibraryScreen: View {
     private func setKind(_ kind: MediaKind) {
         guard store.kind != kind else { return }
         toMusic = (kind == .music)
-        // A spring cross-slide, closer to the Android shelf switch than a flat
-        // ease — the outgoing list leaves one way, the incoming enters the other.
+        shuffleBag = []
         withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { store.kind = kind }
     }
 
@@ -506,13 +540,11 @@ struct LibraryScreen: View {
                         // custom one, so "move to folder" can show the folders in
                         // a panel beside it rather than a giant system sheet).
                         .contentShape(Rectangle())
+                        // Double-tap opens the file's menu; a single tap plays. The
+                        // menu moved off long-press because a hold is now the drag
+                        // (onDrag) that carries the row onto a folder chip.
+                        .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false }
                         .onTapGesture { play(at: index) }
-                        .onLongPressGesture(minimumDuration: 0.4) {
-                            fileMenu = item; showFolderPick = false
-                        }
-                        // Also draggable straight onto a folder chip — a hold that
-                        // then moves becomes a drag, a hold that stays opens the
-                        // menu above.
                         .onDrag { NSItemProvider(object: item.url as NSURL) }
                     Divider().background(Color.toolbar)
                 }

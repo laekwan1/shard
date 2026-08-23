@@ -132,17 +132,43 @@ final class LibraryStore: ObservableObject {
     /// Delete a folder. `withContents` false moves its files up to the top level
     /// first (folder gone, files kept); true removes the folder and everything
     /// in it.
+    /// Whether the folder holds any file of the shelf being shown — used to hide
+    /// "전체삭제" when there is nothing of this kind to delete.
+    func folderHasContents(_ name: String) -> Bool {
+        items.contains { $0.folder == name && $0.kind == kind }
+    }
+
+    private static func kindOf(_ url: URL) -> MediaKind {
+        Item.musicExts.contains(url.pathExtension.lowercased()) ? .music : .video
+    }
+
+    /// Delete a folder — but only for the shelf you are on. A folder is one real
+    /// directory shared by both shelves (video and music can each hold files of
+    /// the same folder name), so deleting must touch only THIS kind's files:
+    /// wiping the whole directory took the other shelf's files with it and left a
+    /// ghost folder behind on that shelf. The directory itself is removed only
+    /// once no media of either kind remains in it.
     func deleteFolder(_ name: String, withContents: Bool) {
+        let fm = FileManager.default
         let dir = root.appendingPathComponent(name)
-        if !withContents {
-            let inside = (try? FileManager.default.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-            for f in inside {
-                try? FileManager.default.moveItem(at: f, to: root.appendingPathComponent(f.lastPathComponent))
+        let inside = (try? fm.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let mine = inside.filter { Self.mediaExts.contains($0.pathExtension.lowercased())
+                                    && Self.kindOf($0) == kind }
+        if withContents {
+            for f in mine { try? fm.removeItem(at: f) }
+        } else {
+            for f in mine {
+                try? fm.moveItem(at: f, to: root.appendingPathComponent(f.lastPathComponent))
             }
         }
-        try? FileManager.default.removeItem(at: dir)
         remember(name, kind, add: false)
+        // Drop the directory only when nothing of either kind is left in it.
+        let remaining = (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil,
+                                                     options: [.skipsHiddenFiles])) ?? []
+        if remaining.filter({ Self.mediaExts.contains($0.pathExtension.lowercased()) }).isEmpty {
+            try? fm.removeItem(at: dir)
+        }
         if current == name { current = nil }
         reload()
     }

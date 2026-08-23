@@ -28,6 +28,14 @@ struct RootView: View {
 
                 BrowserScreen(downloads: downloads) {
                     library.reload()
+                    // Point the library at the playing file's shelf/folder BEFORE it
+                    // slides in, so the list is not re-inserted mid-slide (which read
+                    // as the list popping in while the rest slid).
+                    if let url = player.currentURL,
+                       let item = library.items.first(where: { $0.url == url }) {
+                        library.kind = item.kind
+                        library.current = item.folder
+                    }
                     withAnimation(.easeOut(duration: 0.24)) { showLibrary = true }
                 }
 

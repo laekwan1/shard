@@ -54,7 +54,7 @@ struct BrowserScreen: View {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
-        .animation(.easeInOut(duration: 0.22), value: showAddress)
+        .animation(.easeInOut(duration: 0.34), value: showAddress)
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
         }

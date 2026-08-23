@@ -14,6 +14,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var duration = "0:00"
     @Published var rate: Float = 1
     @Published var muted = false
+    /// True while the stream is opening/buffering, so the stage can show a spinner
+    /// in the middle instead of a blank picture.
+    @Published var buffering = false
     var scrubbing = false
     /// Set when the stream reaches its end. A finished libVLC player will not
     /// resume on play() — its state may read .ended or .stopped — so the replay
@@ -161,9 +164,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         let target = max(1, targetVolume)
         player.audio?.volume = 0
         var v: Int32 = 0
-        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.04, repeats: true) { [weak self] t in
+        // Many small steps (≈0.5s) so the ramp is a smooth swell, not a couple of
+        // audible jumps — the coarse ramp still clicked ("헙").
+        fadeTimer = Timer.scheduledTimer(withTimeInterval: 0.025, repeats: true) { [weak self] t in
             guard let self = self else { t.invalidate(); return }
-            v += max(1, target / 10)
+            v += max(1, target / 20)
             if v >= target { v = target; t.invalidate() }
             if !self.muted { self.player.audio?.volume = v }
         }
@@ -194,8 +199,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // reliable way to replay from the start.
         if reachedEnd || player.state == .ended || (!player.isPlaying && player.position > 0.995) {
             if let url = currentURL { open(url) }
+        } else if player.isPlaying {
+            player.pause()
         } else {
-            player.isPlaying ? player.pause() : player.play()
+            player.play()
+            fadeIn()   // resuming pops too; ramp the audio back up
         }
     }
     func seek(to p: Float) { player.position = max(0, min(1, p)) }
@@ -238,6 +246,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func mediaPlayerStateChanged(_ notification: Notification) {
         isPlaying = player.isPlaying
         updateNowPlaying()
+        switch player.state {
+        case .opening, .buffering: buffering = true
+        default: buffering = false
+        }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
@@ -365,6 +377,12 @@ struct PlayerStage: View {
     /// A brief double-tap flash: (rightward, seconds).
     @State private var seekFlash: (right: Bool, secs: Int)?
 
+    /// The saved cover for the song now playing, so a music stage shows art.
+    private var musicCover: UIImage? {
+        guard isMusic, let url = controller.currentURL else { return nil }
+        return Covers.load(Covers.keyFor(url.lastPathComponent))
+    }
+
     private enum DragMode { case brightness, volume, swipe, none }
     @State private var dragMode: DragMode = .none
     @State private var startBrightness: CGFloat = 0
@@ -384,7 +402,16 @@ struct PlayerStage: View {
             Color.black
             VLCSurface(controller: controller).scaleEffect(zoom)
             if isMusic {
-                Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
+                // A song has no picture of its own — show the saved cover, large,
+                // and fall back to a note only when there is none.
+                if let cover = musicCover {
+                    Image(uiImage: cover).resizable().aspectRatio(contentMode: .fit)
+                } else {
+                    Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
+                }
+            }
+            if controller.buffering {
+                ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
             }
             PlayerGestures(
                 onTap: { toggleBar() },
@@ -639,24 +666,19 @@ struct PlayerStage: View {
                 Text(controller.duration).font(.system(size: 10)).foregroundColor(.white)
                     .monospacedDigit().frame(width: 46, alignment: .leading)
             }
-            // A picker opens right here — between the seek bar and the buttons,
-            // pushed to the right so it sits directly over the sound / speed
-            // buttons it belongs to.
-            if showRatePicker { ratePicker.frame(maxWidth: .infinity, alignment: .trailing) }
-            if showVolumeBar { volumeBar.frame(maxWidth: .infinity, alignment: .trailing) }
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
                 HStack(spacing: 28) {
-                    Button { onPrev() } label: { Image(systemName: "backward.end.fill").font(.system(size: 15)) }.disabled(!hasPrev)
-                    Button { controller.toggle() } label: {
+                    Button { onPrev(); showBar() } label: { Image(systemName: "backward.end.fill").font(.system(size: 15)) }.disabled(!hasPrev)
+                    Button { controller.toggle(); showBar() } label: {
                         Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19))
                     }
-                    Button { onNext() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
+                    Button { onNext(); showBar() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
                 .padding(.leading, 10)      // off the very left edge — the back button was hard to hit
                 Spacer()
                 HStack(spacing: 20) {
-                    Button { controller.toggleMute() } label: {
+                    Button { controller.toggleMute(); showBar() } label: {
                         Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15))
                     }
                     // highPriority, not simultaneous: when the hold is recognized
@@ -667,7 +689,7 @@ struct PlayerStage: View {
                         volDisplay = Double(controller.volume)
                         showVolumeBar.toggle(); showRatePicker = false; keepBar()
                     })
-                    Button { controller.cycleRate() } label: {
+                    Button { controller.cycleRate(); showBar() } label: {
                         // Fixed width so 1× ↔ 1.25× does not shove the buttons
                         // beside it as the rate changes.
                         Text(String(format: "%g×", controller.rate)).font(.system(size: 14, weight: .bold))
@@ -688,5 +710,16 @@ struct PlayerStage: View {
         .padding(.horizontal, 12).padding(.top, 8)
         .padding(.bottom, fullscreen ? 30 : 16)   // room under the buttons; more in full screen for a short's edge
         .background(Color.black.opacity(0.3))
+        // The picker floats as a separate popup ABOVE the buttons — an overlay, so
+        // it never pushes the seek bar or buttons out of place. Right-aligned over
+        // the sound / speed buttons it belongs to.
+        .overlay(alignment: .bottomTrailing) {
+            VStack(alignment: .trailing, spacing: 6) {
+                if showRatePicker { ratePicker }
+                if showVolumeBar { volumeBar }
+            }
+            .padding(.trailing, 12)
+            .offset(y: -48)
+        }
     }
 }
