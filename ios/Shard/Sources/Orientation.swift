@@ -27,13 +27,17 @@ final class Orientation {
         UIViewController.attemptRotationToDeviceOrientation()
     }
 
-    /// Back to free rotation.
+    /// Back to free rotation — but nudge the interface to portrait as it releases,
+    /// so a previously-forced landscape does not leave the window stuck at the
+    /// landscape geometry (which showed up as a cropped/zoomed library).
     func free() {
         mask = .all
         if #available(iOS 16.0, *) {
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
                 .forEach { $0.keyWindow?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations() }
         }
+        UIDevice.current.setValue(UIInterfaceOrientation.portrait.rawValue, forKey: "orientation")
+        UIViewController.attemptRotationToDeviceOrientation()
     }
 }
 

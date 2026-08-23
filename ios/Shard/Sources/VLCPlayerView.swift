@@ -169,20 +169,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // The session can go inactive after the library closes the player; without
         // this, coming back and playing was silent with dead controls.
         try? AVAudioSession.sharedInstance().setActive(true)
-        // Stop ONLY when the player is finished/errored/idle. A full stop tears down
-        // the audio unit and rebuilding it lagged the sound ~1s; swapping media on a
-        // still-playing player keeps sound and picture together. A watchdog below
-        // recovers the rare case where the swap wedges ("title changes, nothing
-        // plays").
-        let s = player.state
-        if reachedEnd || s == .ended || s == .error || s == .stopped { player.stop() }
-        reachedEnd = false
-        player.media = makeMedia(url)
-        // Keep the audio silent until real playback begins (unmuted on the first
-        // frame in timeChanged): this is "sound only when ready", which removes the
-        // swap "툭" without a drawn-out fade.
+        // Mute BEFORE anything touches the media, then always stop: the mute kills
+        // the swap "툭", and the stop blanks the surface so the previous video's
+        // last frame cannot flash before the new one — a clean black→(spinner)→play.
+        // The audio comes on with the first real frame (timeChanged). Reliable, and
+        // the black+spinner reads as loading, not a glitch.
         pendingUnmute = true
         player.audio?.isMuted = true
+        player.stop()
+        reachedEnd = false
+        player.media = makeMedia(url)
+        player.audio?.isMuted = true   // audio object is new after the media swap
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -689,6 +686,14 @@ struct PlayerStage: View {
     /// notch/home-indicator on the sides, plus enough to sit around the seek bar's
     /// span rather than jammed against the very edge.
     private var sideInset: CGFloat { max(safeInsets.left, safeInsets.right) + 12 }
+    /// Whether the screen is currently wider than tall — a landscape full screen
+    /// wants the controls pulled in more; a portrait one (a short) wants the seek
+    /// bar to run nearly full width.
+    private var screenLandscape: Bool {
+        UIScreen.main.bounds.width > UIScreen.main.bounds.height
+    }
+    private var seekInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 6) : 0 }
+    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 24) : 10 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -766,7 +771,7 @@ struct PlayerStage: View {
                     onBegin: { controller.beginScrub(); interacting = true; keepBar() },
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },
                     onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() })
-                .padding(.horizontal, fullscreen ? 16 : 0)   // full screen: a touch in from the edges
+                .padding(.horizontal, seekInset)
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
                 HStack(spacing: fullscreen ? 44 : 28) {
@@ -776,7 +781,7 @@ struct PlayerStage: View {
                     }
                     Button { onNext(); showBar() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
-                .padding(.leading, fullscreen ? 24 : 10)   // in to meet the seek bar
+                .padding(.leading, buttonInset)   // in to meet the seek bar
                 Spacer()
                 HStack(spacing: fullscreen ? 28 : 20) {
                     Button { controller.toggleMute(); showBar() } label: {
@@ -804,7 +809,7 @@ struct PlayerStage: View {
                                                       : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
                     }
                 }
-                .padding(.trailing, fullscreen ? 24 : 10)  // in to meet the seek bar
+                .padding(.trailing, buttonInset)  // in to meet the seek bar
             }
             .foregroundColor(.white)
         }

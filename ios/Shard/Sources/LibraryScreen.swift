@@ -485,13 +485,15 @@ struct LibraryScreen: View {
         // the next runloop — otherwise the rotation began before the black was up
         // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             if gen == orientGen { player.settling = false }
         }
+        // Delay the actual rotation ~1 frame so the black cover is painted first —
+        // rotating in the same runloop let the squish show before the black landed.
         guard fs else {
-            DispatchQueue.main.async {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 Orientation.shared.lock(.portrait, to: .portrait)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     if gen == orientGen { Orientation.shared.free() }
                 }
             }
@@ -504,8 +506,8 @@ struct LibraryScreen: View {
             Orientation.shared.lock(portrait ? .portrait : .landscapeRight,
                                     to: portrait ? .portrait : .landscapeRight)
         }
-        DispatchQueue.main.async(execute: apply)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { apply() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: apply)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { apply() }
     }
 
     /// After a delete, if the file playing is no longer on disk, stop — a folder
