@@ -762,6 +762,8 @@ struct PlayerStage: View {
             // were seen jumping from the windowed/portrait insets to the landscape
             // ones as the black cover cleared. They reappear already in place.
             if showControls && !controller.settling { controlsOverlay.transition(.opacity) }
+            // Above the controls: the popup + its full-screen dismiss catcher.
+            pickerLayer
         }
         .clipped()
         // When playback stops or reaches the end, surface the bar so the play
@@ -1062,16 +1064,23 @@ struct PlayerStage: View {
         .padding(.top, fullscreen ? 0 : 8)
         .padding(.bottom, fullscreen ? 26 : 16)
         .background(Color.black.opacity(0.3))
-        // The picker floats as a separate popup ABOVE the buttons — an overlay, so
-        // it never pushes the seek bar or buttons out of place. Right-aligned over
-        // the sound / speed buttons it belongs to.
-        .overlay(alignment: .bottomTrailing) {
+    }
+
+    /// The rate/volume popup as a TOP-LEVEL layer with a full-screen catcher below
+    /// it, so a tap anywhere but the popup dismisses it (the popup sits above the
+    /// catcher and stays usable). The buttons underneath are untouched when it is
+    /// closed.
+    @ViewBuilder private var pickerLayer: some View {
+        if showRatePicker || showVolumeBar {
+            Color.clear.contentShape(Rectangle())
+                .onTapGesture { showRatePicker = false; showVolumeBar = false; showBar() }
             VStack(alignment: .trailing, spacing: 6) {
                 if showRatePicker { ratePicker }
                 if showVolumeBar { volumeBar }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .padding(.trailing, fullscreen ? sideInset : 12)
-            .offset(y: fullscreen ? -70 : -44)
+            .padding(.bottom, fullscreen ? 96 : 74)   // clear of the transport bar
         }
     }
 }
