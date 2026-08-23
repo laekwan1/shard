@@ -203,26 +203,31 @@ struct BrowserScreen: View {
     private let listWidth: CGFloat = 264
 
     private var qualityList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(qualities.enumerated()), id: \.element.id) { i, row in
-                Button { startYouTube(row) } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: row.isAudioOnly ? "music.note" : "film")
-                            .font(.system(size: 13)).foregroundColor(.accent).frame(width: 18)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(row.label).font(.subheadline.weight(.semibold))
-                            Text(row.detail).font(.caption2).foregroundColor(.muted)
+        // Scrollable + height-capped: with a codec per resolution the list can be
+        // taller than the screen, and the bottom rows were unreachable.
+        ScrollView {
+            VStack(spacing: 0) {
+                ForEach(Array(qualities.enumerated()), id: \.element.id) { i, row in
+                    Button { startYouTube(row) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: row.isAudioOnly ? "music.note" : "film")
+                                .font(.system(size: 13)).foregroundColor(.accent).frame(width: 18)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.label).font(.subheadline.weight(.semibold))
+                                Text(row.detail).font(.caption2).foregroundColor(.muted)
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        .padding(.horizontal, 14).padding(.vertical, 13)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 14).padding(.vertical, 13)
-                    .contentShape(Rectangle())
+                    .foregroundColor(.onSurface)
+                    if i < qualities.count - 1 { Divider().background(Color.toolbar).padding(.leading, 42) }
                 }
-                .foregroundColor(.onSurface)
-                if i < qualities.count - 1 { Divider().background(Color.toolbar).padding(.leading, 42) }
             }
         }
         .frame(width: listWidth)
+        .frame(maxHeight: UIScreen.main.bounds.height * 0.6)
         .background(Color.chrome)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.toolbar, lineWidth: 0.5))

@@ -593,23 +593,33 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let video_wish =
         AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
     let audio = offer.best_audio(&video_wish);
-    // Dedupe by resolution AND codec (not resolution alone) so the smaller-file
-    // codecs — VP9, AV1 — show up alongside H.264 at the same quality, and the user
-    // can pick the lighter download. The label carries the codec so two "720p" rows
-    // are told apart; the detail shows the size.
-    let mut seen: Vec<String> = Vec::new();
+    // Show AV1 only — it is the smallest at a given quality, and the user asked to
+    // drop H.264 (which also had an AVPlayer playback glitch) and VP9. If a video
+    // has no AV1 at all, fall back to every codec so a download is still possible;
+    // there the codec is shown in the label to tell them apart.
+    let mut av1: Vec<(u32, String, String)> = Vec::new();
+    let mut fallback: Vec<(u32, String, String)> = Vec::new();
+    let mut seen_fallback: Vec<String> = Vec::new();
+    let mut seen_av1: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
         let codec = video.codec();
-        let key = format!("{}|{}", video.quality, codec);
-        if seen.contains(&key) {
-            continue;
-        }
-        seen.push(key);
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
         let size = if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) };
-        let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
-        rows.push((video.itag, label, size));
+        if codec == "AV1" {
+            if !seen_av1.contains(&video.quality) {
+                seen_av1.push(video.quality.clone());
+                av1.push((video.itag, video.quality.clone(), size));
+            }
+        } else {
+            let key = format!("{}|{}", video.quality, codec);
+            if !seen_fallback.contains(&key) {
+                seen_fallback.push(key);
+                let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
+                fallback.push((video.itag, label, size));
+            }
+        }
     }
+    rows.extend(if av1.is_empty() { fallback } else { av1 });
     Ok(rows)
 }
 
@@ -669,12 +679,22 @@ pub fn run_youtube(
         .map(|f| f.track())
         .unwrap_or_else(|| audio.track());
 
+    // Put the resolution in a video's filename so two qualities of the same video
+    // do not overwrite each other (downloading AV1 replaced the H.264 before).
+    // Music keeps the plain title (its cover is filed under that name).
+    let title = if audio_only {
+        offer.title.clone()
+    } else if video.quality.is_empty() {
+        offer.title.clone()
+    } else {
+        format!("{} ({})", offer.title, video.quality)
+    };
     let job = Job {
         template,
         video: video.track(),
         audio: audio.track(),
         decoy,
-        title: offer.title.clone(),
+        title,
         into: into.to_path_buf(),
         cover: offer.thumb.clone(),
         audio_only,
