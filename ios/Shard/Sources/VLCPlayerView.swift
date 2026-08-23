@@ -180,9 +180,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         userPaused = false
         buffering = true
         position = 0          // jump the bar to the start at once, not a beat later
-        // The session can go inactive after the library closes the player; without
-        // this, coming back and playing was silent with dead controls.
-        try? AVAudioSession.sharedInstance().setActive(true)
+        // NOTE: do NOT reactivate the audio session here. Re-activating it on every
+        // track change caused an audible route-change "텁" on the newly playing
+        // video. The session is activated once at init (and again only after a real
+        // interruption/resume), which is enough.
         // Keep the audio unit ALIVE across the swap — a full stop tears it down and
         // rebuilding it made the hard "텁" click. So stop only when the player is
         // finished/errored/idle (the wedge cases); otherwise swap media on the live,
@@ -272,7 +273,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             userPaused = true
             isPlaying = false     // flip the button at once; VLC can lag the state event
         } else {
-            try? AVAudioSession.sharedInstance().setActive(true)
             player.play()
             userPaused = false
             isPlaying = true

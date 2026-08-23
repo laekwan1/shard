@@ -34,9 +34,10 @@ struct RootView: View {
                     if on && player.isPlaying { player.pause() }
                 }) {
                     // If the browser was turned to landscape (address rotate button),
-                    // return to portrait before the library slides in — otherwise the
-                    // library came up sideways.
-                    Orientation.shared.free()
+                    // force portrait before the library slides in — free() alone left
+                    // it sideways, so lock portrait, then free once it has turned.
+                    Orientation.shared.lock(.portrait, to: .portrait)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { Orientation.shared.free() }
                     library.reload()
                     // Point the library at the playing file's shelf/folder BEFORE it
                     // slides in, so the list is not re-inserted mid-slide (which read

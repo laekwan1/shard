@@ -488,9 +488,13 @@ struct LibraryScreen: View {
         fullscreen = true
         // Rotate only AFTER the full-screen black cover has been painted — rotating
         // in the same runloop turned the still-visible windowed view (squish/glitch)
-        // before black was up. Same idea as the exit path.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { if gen == orientGen { lockForVideo() } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { if gen == orientGen { player.settling = false } }
+        // before black was up. Same idea as the exit path. Re-issue the lock a couple
+        // of times: a single request during the full-screen transition was sometimes
+        // rejected, leaving a wide video upright.
+        for delay in [0.08, 0.3, 0.55] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if gen == orientGen { lockForVideo() } }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { if gen == orientGen { player.settling = false } }
     }
 
     /// Exit full screen: rotate back to portrait FIRST (still full screen, black
