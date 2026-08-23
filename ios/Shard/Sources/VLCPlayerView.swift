@@ -237,13 +237,21 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // MARK: AVPlayer backend
 
     private func openAV(_ url: URL) {
-        teardownAV()
+        // Swap item → item WITHOUT niling first: replaceCurrentItem(nil) deactivated
+        // the audio output and the next item re-activated it, which is the route
+        // "텁" pop (it happened on m4a music too, proving it was not libVLC). A
+        // direct item→item swap is seamless.
+        removeAVObservers()
         let item = AVPlayerItem(url: url)
         av.replaceCurrentItem(with: item)
         av.isMuted = muted
         av.play()
         av.rate = rate
         hostView.showAV(av)               // route the picture through the AVPlayerLayer
+        addAVObservers(item)
+    }
+
+    private func addAVObservers(_ item: AVPlayerItem) {
         avTimeObs = av.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 4), queue: .main) { [weak self] _ in self?.avTick() }
         avEndObs = NotificationCenter.default.addObserver(
@@ -255,6 +263,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             guard let self = self, self.backend == .av else { return }
             if p.timeControlStatus == .playing { self.buffering = false }
         }
+    }
+
+    private func removeAVObservers() {
+        if let o = avTimeObs { av.removeTimeObserver(o); avTimeObs = nil }
+        if let o = avEndObs { NotificationCenter.default.removeObserver(o); avEndObs = nil }
+        avStatusObs = nil
+        avControlObs = nil
     }
 
     private func avTick() {
@@ -288,10 +303,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 
     private func teardownAV() {
-        if let o = avTimeObs { av.removeTimeObserver(o); avTimeObs = nil }
-        if let o = avEndObs { NotificationCenter.default.removeObserver(o); avEndObs = nil }
-        avStatusObs = nil
-        avControlObs = nil
+        removeAVObservers()
         av.pause()
         av.replaceCurrentItem(with: nil)
         hostView.showAV(nil)
