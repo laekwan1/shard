@@ -473,7 +473,7 @@ struct LibraryScreen: View {
     /// Lock the interface to the playing video's orientation (landscape for a wide
     /// video, portrait for a short), behind the black cover.
     private func lockForVideo() {
-        let s = player.player.videoSize
+        let s = player.videoSize
         let portrait = s.height > s.width && s.width > 0
         Orientation.shared.lock(portrait ? .portrait : .landscapeRight,
                                 to: portrait ? .portrait : .landscapeRight)

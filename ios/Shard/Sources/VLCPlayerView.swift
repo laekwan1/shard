@@ -18,6 +18,27 @@ final class PlayerUI: ObservableObject {
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     let player = VLCMediaPlayer()
     let ui = PlayerUI()
+
+    // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
+    // which — unlike libVLC — starts without the hardware "텁" pop; libVLC for
+    // everything AVPlayer cannot (mkv/webm, VP9/Opus). The controls call the same
+    // methods; each one branches on `backend`.
+    enum Backend { case vlc, av }
+    private(set) var backend: Backend = .vlc
+    let av = AVPlayer()
+    private var avTimeObs: Any?
+    private var avEndObs: NSObjectProtocol?
+    private var avStatusObs: NSKeyValueObservation?
+    private var avControlObs: NSKeyValueObservation?
+    private static let avExts: Set<String> =
+        ["mp4", "m4v", "mov", "m4a", "mp3", "aac", "wav", "caf", "aif", "aiff"]
+    private func prefersAV(_ url: URL) -> Bool { Self.avExts.contains(url.pathExtension.lowercased()) }
+
+    /// The playing video's pixel size, for the library's fullscreen orientation
+    /// decision — from whichever backend is in use.
+    var videoSize: CGSize {
+        backend == .av ? (av.currentItem?.presentationSize ?? .zero) : player.videoSize
+    }
     /// Forwarders so the rest of the code reads/writes these as before, but the
     /// publishing happens on `ui`, not on the controller the library observes.
     var position: Float { get { ui.position } set { ui.position = newValue } }
@@ -46,6 +67,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func toggleMute() {
         muted.toggle()
         player.audio?.isMuted = muted
+        av.isMuted = muted
     }
 
     /// The one surface VLC draws into, reparented between windowed and full
@@ -102,7 +124,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         switch type {
         case .began:
             interruptedAt = player.position
-            wasPlayingAtInterruption = player.isPlaying && !userPaused
+            wasPlayingAtInterruption = isPlaying && !userPaused
         case .ended:
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
@@ -110,11 +132,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // stopping it (or locking the screen) resumed playback on its own.
             guard wasPlayingAtInterruption, !userPaused else { interruptedAt = nil; return }
             try? AVAudioSession.sharedInstance().setActive(true)
-            // Reload from the remembered spot: a plain play() left the player
-            // wedged after the call ended.
-            if let url = currentURL {
-                let at = interruptedAt ?? player.position
-                pendingSeek = at
+            if backend == .av {
+                av.play(); av.rate = rate
+            } else if let url = currentURL {
+                // Reload from the remembered spot: a plain play() left libVLC
+                // wedged after the call ended.
+                pendingSeek = interruptedAt ?? player.position
                 open(url)
             }
             interruptedAt = nil
@@ -129,6 +152,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the lock screen does not talk to a dead player.
         player.stop()
         rampTimer?.invalidate()
+        teardownAV()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -139,22 +163,24 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     /// Whether a file is loaded, so the library can show the stage again after
     /// coming back from the background instead of losing it.
-    var hasMedia: Bool { player.media != nil }
+    var hasMedia: Bool { backend == .av ? av.currentItem != nil : player.media != nil }
 
     /// Lock screen and headset controls, so a video listened to like music is
     /// controlled like music.
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in self?.player.play(); self?.userPaused = false; return .success }
-        center.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); self?.userPaused = true; return .success }
+        center.playCommand.addTarget { [weak self] _ in self?.resume(); return .success }
+        center.pauseCommand.addTarget { [weak self] _ in self?.pause(); return .success }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.toggle(); return .success }
         center.nextTrackCommand.addTarget { [weak self] _ in self?.onRemoteNext?(); return .success }
         center.previousTrackCommand.addTarget { [weak self] _ in self?.onRemotePrev?(); return .success }
         center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self = self,
-                  let e = event as? MPChangePlaybackPositionCommandEvent,
-                  let length = self.player.media?.length.intValue, length > 0 else { return .commandFailed }
-            self.seek(to: Float(e.positionTime * 1000 / Double(length)))
+            guard let self = self, let e = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            if self.backend == .av {
+                self.av.seek(to: CMTime(seconds: e.positionTime, preferredTimescale: 600))
+            } else if let length = self.player.media?.length.intValue, length > 0 {
+                self.seek(to: Float(e.positionTime * 1000 / Double(length)))
+            } else { return .commandFailed }
             return .success
         }
     }
@@ -179,27 +205,97 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         currentURL = url
         userPaused = false
         buffering = true
+        reachedEnd = false
         position = 0          // jump the bar to the start at once, not a beat later
-        // NOTE: do NOT reactivate the audio session here. Re-activating it on every
-        // track change caused an audible route-change "텁" on the newly playing
-        // video. The session is activated once at init (and again only after a real
-        // interruption/resume), which is enough.
+        openGen += 1
+
+        if prefersAV(url) {
+            backend = .av
+            player.stop()                 // make sure libVLC is not also sounding
+            openAV(url)
+            return
+        }
+
+        backend = .vlc
+        teardownAV()                      // stop/detach AVPlayer
         // Keep the audio unit ALIVE across the swap — a full stop tears it down and
         // rebuilding it made the hard "텁" click. So stop only when the player is
         // finished/errored/idle (the wedge cases); otherwise swap media on the live,
         // silenced unit. The black cover (buffering) hides the old frame meanwhile,
         // and the audio ramps up on the first frame. A watchdog recovers a wedge.
         let s = player.state
-        let needStop = reachedEnd || s == .ended || s == .error || s == .stopped
+        let needStop = s == .ended || s == .error || s == .stopped
         player.audio?.volume = 0       // silence before touching media (no click)
         if needStop { player.stop() }
-        reachedEnd = false
         pendingUnmute = true
         player.media = makeMedia(url)
         player.audio?.volume = 0
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
+    }
+
+    // MARK: AVPlayer backend
+
+    private func openAV(_ url: URL) {
+        teardownAV()
+        let item = AVPlayerItem(url: url)
+        av.replaceCurrentItem(with: item)
+        av.isMuted = muted
+        av.play()
+        av.rate = rate
+        hostView.showAV(av)               // route the picture through the AVPlayerLayer
+        avTimeObs = av.addPeriodicTimeObserver(
+            forInterval: CMTime(value: 1, timescale: 4), queue: .main) { [weak self] _ in self?.avTick() }
+        avEndObs = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+                self?.reachedEnd = true; self?.isPlaying = false; self?.onEnded?()
+            }
+        // Buffering: waiting-to-play shows the spinner; playing clears it.
+        avControlObs = av.observe(\.timeControlStatus, options: [.new]) { [weak self] p, _ in
+            guard let self = self, self.backend == .av else { return }
+            if p.timeControlStatus == .playing { self.buffering = false }
+        }
+    }
+
+    private func avTick() {
+        guard backend == .av, let item = av.currentItem else { return }
+        if av.timeControlStatus == .playing { buffering = false }
+        let cur = item.currentTime().seconds
+        let dur = item.duration.seconds
+        if !scrubbing, cur.isFinite {
+            if dur.isFinite, dur > 0 {
+                let p = Float(cur / dur)
+                if abs(p - position) > 0.0008 { position = p }
+            }
+            let e = Self.clock(Int32(cur * 1000))
+            if e != elapsed { elapsed = e }
+        }
+        if dur.isFinite, dur > 0 {
+            let d = Self.clock(Int32(dur * 1000))
+            if d != duration { duration = d }
+        }
+        let playing = av.timeControlStatus == .playing || av.rate != 0
+        if isPlaying != playing { isPlaying = playing }
+        updateNowPlayingAV(cur: cur, dur: dur)
+    }
+
+    private func updateNowPlayingAV(cur: Double, dur: Double) {
+        var info: [String: Any] = [MPMediaItemPropertyTitle: nowPlayingTitle]
+        if dur.isFinite, dur > 0 { info[MPMediaItemPropertyPlaybackDuration] = dur }
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = cur
+        info[MPNowPlayingInfoPropertyPlaybackRate] = av.rate == 0 ? 0 : Double(rate)
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    private func teardownAV() {
+        if let o = avTimeObs { av.removeTimeObserver(o); avTimeObs = nil }
+        if let o = avEndObs { NotificationCenter.default.removeObserver(o); avEndObs = nil }
+        avStatusObs = nil
+        avControlObs = nil
+        av.pause()
+        av.replaceCurrentItem(with: nil)
+        hostView.showAV(nil)
     }
 
     /// A ~0.12s ramp from silence to full when playback actually starts — short
@@ -242,10 +338,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
 
-    func pause() { player.pause(); userPaused = true }
+    func pause() {
+        backend == .av ? av.pause() : player.pause()
+        userPaused = true
+    }
     /// Resume after we paused for a web video — reactivate the session first, since
     /// the web video may have taken the audio route.
-    func resume() { try? AVAudioSession.sharedInstance().setActive(true); player.play(); userPaused = false }
+    func resume() {
+        try? AVAudioSession.sharedInstance().setActive(true)
+        backend == .av ? av.play() : player.play()
+        userPaused = false
+    }
 
     /// Scrubbing the desktop's way: while dragging, only the knob and the clock
     /// move — the player is not touched. It seeks once, on release. That is the
@@ -259,12 +362,35 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// Let go: seek once to the final spot.
     func endScrub(_ p: Float) {
         scrubbing = false
-        // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
-        // "finished" and snaps back — cap just short so the far end is reachable.
-        player.position = max(0, min(0.999, p))
+        let clamped = max(0, min(0.999, p))
+        if backend == .av {
+            avSeekFraction(clamped)
+        } else {
+            // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
+            // "finished" and snaps back — cap just short so the far end is reachable.
+            player.position = clamped
+        }
+    }
+
+    private func avSeekFraction(_ p: Float) {
+        guard let item = av.currentItem else { return }
+        let dur = item.duration.seconds
+        guard dur.isFinite, dur > 0 else { return }
+        av.seek(to: CMTime(seconds: dur * Double(p), preferredTimescale: 600),
+                toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
     func toggle() {
+        if backend == .av {
+            if reachedEnd || (av.currentItem.map { $0.currentTime().seconds >= $0.duration.seconds - 0.3 } ?? false) {
+                reachedEnd = false; av.seek(to: .zero); av.play(); av.rate = rate; userPaused = false; isPlaying = true
+            } else if av.timeControlStatus == .paused {
+                av.play(); av.rate = rate; userPaused = false; isPlaying = true
+            } else {
+                av.pause(); userPaused = true; isPlaying = false
+            }
+            return
+        }
         // A finished player will not resume on play(); reloading the file is the
         // reliable way to replay from the start.
         if reachedEnd || player.state == .ended || (!player.isPlaying && player.position > 0.995) {
@@ -279,9 +405,18 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             isPlaying = true
         }
     }
-    func seek(to p: Float) { player.position = max(0, min(1, p)) }
-    func jump(_ seconds: Int32) { seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds) }
-    func rewindStep() { player.jumpBackward(1) }
+    func seek(to p: Float) {
+        if backend == .av { avSeekFraction(max(0, min(1, p))) } else { player.position = max(0, min(1, p)) }
+    }
+    func jump(_ seconds: Int32) {
+        if backend == .av {
+            let t = (av.currentItem?.currentTime().seconds ?? 0) + Double(seconds)
+            av.seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
+        } else {
+            seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds)
+        }
+    }
+    func rewindStep() { backend == .av ? jump(-1) : player.jumpBackward(1) }
 
     /// libVLC volume runs 0–200; we drive 0–1 from the drag. The last set value is
     /// remembered as the fade-in target so a ramp lands on what the user chose.
@@ -295,14 +430,26 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
 
+    private func applyRate(_ r: Float) {
+        if backend == .av {
+            // Setting AVPlayer.rate also starts playback; only change it while playing.
+            if av.timeControlStatus != .paused { av.rate = r }
+        } else {
+            player.rate = r
+        }
+    }
     func cycleRate() {
         rate = Self.rates[(Self.rates.firstIndex(of: rate).map { $0 + 1 } ?? 0) % Self.rates.count]
-        player.rate = rate
+        applyRate(rate)
     }
-    func setRate(_ r: Float) { rate = r; player.rate = r }
-    func holdRate(_ value: Float?) { player.rate = value ?? rate }
+    func setRate(_ r: Float) { rate = r; applyRate(r) }
+    func holdRate(_ value: Float?) { applyRate(value ?? rate) }
 
-    func stop() { player.stop(); currentURL = nil }
+    func stop() {
+        player.stop()
+        teardownAV()
+        currentURL = nil
+    }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
         // Time is advancing → real playback, so any spinner comes down. This is
@@ -374,8 +521,27 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 final class PlayerHostView: UIView {
     weak var controller: VLCController?
     private var attached = false
+    /// AVPlayer draws into this sublayer; when nil/hidden, libVLC draws into the
+    /// view itself. The two never play at once.
+    private let avLayer = AVPlayerLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        avLayer.videoGravity = .resizeAspect
+        avLayer.isHidden = true
+        layer.addSublayer(avLayer)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Show (or hide) the AVPlayer picture on top of the libVLC surface.
+    func showAV(_ player: AVPlayer?) {
+        avLayer.player = player
+        avLayer.isHidden = (player == nil)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
+        avLayer.frame = bounds
         if !attached, bounds.width > 1, bounds.height > 1 {
             controller?.attach(to: self)
             attached = true
