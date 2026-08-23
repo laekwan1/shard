@@ -446,14 +446,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
-            // Release the mute a short beat AFTER playback is up, so the start pop
-            // (right at the first buffer) is safely past. Keep it muted if the user
-            // muted.
-            let gen = openGen
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self = self, gen == self.openGen else { return }
-                self.player.audio?.isMuted = self.muted
-            }
+            player.audio?.isMuted = muted
         } else if buffering, player.isPlaying {
             // Buffering that was NOT an open (e.g. after a seek) — clear it once
             // frames flow again, or the spinner spun forever over black.
@@ -729,6 +722,13 @@ struct PlayerStage: View {
                     .onChanged { zoom = min(3, max(1, $0)) }
                     .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
             )
+            // A tap anywhere while a picker is open closes it — not only a tap on
+            // the video surface. This catcher sits above the gesture layer so a tap
+            // on the controls area dismisses the picker too.
+            if showRatePicker || showVolumeBar {
+                Color.clear.contentShape(Rectangle())
+                    .onTapGesture { showRatePicker = false; showVolumeBar = false; showBar() }
+            }
             if let f = seekFlash { seekFlashView(f) }
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             // Hide the controls while the interface is rotating — otherwise they
