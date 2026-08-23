@@ -266,4 +266,60 @@
     } catch (e) {}
   }
   setInterval(skipAds, 350);
+
+  // A red, underlined "삭제" on the right of each PREVIOUS-SEARCH row in YouTube's
+  // search suggestions. Logged-out recent searches live on YouTube's server (keyed
+  // by the visitor cookie), not in localStorage — so clearing the row on screen is
+  // not enough; it has to invoke YouTube's own remove so it stays gone. We only add
+  // our button to rows that actually carry a native remove affordance (that is what
+  // marks a history entry vs a fresh autocomplete guess), and clicking ours clicks
+  // that native control. DEFENSIVE: if the markup changes and no remove control is
+  // found, we add nothing and normal search is untouched.
+  function nativeRemove(opt) {
+    var kids = opt.querySelectorAll('button, [role="button"], [aria-label], [class]');
+    for (var i = 0; i < kids.length; i++) {
+      var el = kids[i];
+      var al = (el.getAttribute && el.getAttribute('aria-label')) || '';
+      if (/remove|delete|삭제|제거/i.test(al)) return el;
+      var cn = el.className;
+      cn = (cn && cn.baseVal !== undefined) ? cn.baseVal : cn; // SVG className is an object
+      if (/remove/i.test(String(cn || ''))) return el;
+    }
+    return null;
+  }
+
+  function decorateHistory() {
+    try {
+      var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
+      if (!box) return;
+      var opts = box.querySelectorAll('[role="option"]');
+      for (var i = 0; i < opts.length; i++) {
+        var opt = opts[i];
+        if (opt.querySelector(':scope > .shard-del')) continue;
+        var rm = nativeRemove(opt);
+        if (!rm) continue; // not a history row (or no removable) -> leave it alone
+        try { rm.style.display = 'none'; } catch (e) {}
+        var d = document.createElement('span');
+        d.className = 'shard-del';
+        d.textContent = '삭제';
+        d.style.cssText =
+          'position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:5;' +
+          'color:#ff5252;text-decoration:underline;font:600 13px system-ui;cursor:pointer;padding:4px 6px;';
+        (function (opt, rm) {
+          d.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            try { rm.click(); } catch (err) {}
+            // Fallback: if YouTube did not drop the row, take it off screen.
+            setTimeout(function () { try { if (opt && opt.isConnected) opt.remove(); } catch (e2) {} }, 300);
+          }, true);
+        })(opt, rm);
+        try { opt.style.position = 'relative'; opt.style.paddingRight = '56px'; } catch (e) {}
+        opt.appendChild(d);
+      }
+    } catch (e) {}
+  }
+  try {
+    new MutationObserver(function () { decorateHistory(); }).observe(document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
+  setInterval(decorateHistory, 500);
 })();
