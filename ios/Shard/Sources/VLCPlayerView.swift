@@ -139,7 +139,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             guard wasPlayingAtInterruption, !userPaused else { interruptedAt = nil; return }
             try? AVAudioSession.sharedInstance().setActive(true)
             if backend == .av {
-                av.play(); av.rate = rate
+                avPlay()
             } else if let url = currentURL {
                 // Reload from the remembered spot: a plain play() left libVLC
                 // wedged after the call ended.
@@ -157,6 +157,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
+        avRampTimer?.invalidate()
         teardownAV()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
@@ -264,8 +265,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
         av.replaceCurrentItem(with: item)
         av.isMuted = muted
+        av.volume = 0
         av.play()
         av.rate = rate
+        avRamp(to: 1)                      // de-click the track start too
         hostView.showAV(av)               // route the picture through the AVPlayerLayer
         addAVObservers(item)
     }
@@ -282,6 +285,29 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             guard let self = self, self.backend == .av else { return }
             if p.timeControlStatus == .playing { self.buffering = false }
         }
+    }
+
+    // A short de-click ramp around AVPlayer pause/play: fade the player's own gain
+    // (separate from the system volume) so the click at the pause/resume edge is
+    // masked in the signal.
+    private var avRampTimer: Timer?
+    private func avRamp(to target: Float, then: (() -> Void)? = nil) {
+        avRampTimer?.invalidate()
+        let start = av.volume
+        let steps = 6
+        var i = 0
+        avRampTimer = Timer.scheduledTimer(withTimeInterval: 0.007, repeats: true) { [weak self] t in
+            guard let self = self else { t.invalidate(); return }
+            i += 1
+            self.av.volume = start + (target - start) * Float(i) / Float(steps)
+            if i >= steps { self.av.volume = target; t.invalidate(); then?() }
+        }
+    }
+    private func avPlay() {
+        av.volume = 0; av.play(); av.rate = rate; avRamp(to: 1)
+    }
+    private func avPause() {
+        avRamp(to: 0) { [weak self] in self?.av.pause() }
     }
 
     private func removeAVObservers() {
@@ -355,14 +381,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 
     func pause() {
-        backend == .av ? av.pause() : player.pause()
+        backend == .av ? avPause() : player.pause()
         userPaused = true
     }
     /// Resume after we paused for a web video — reactivate the session first, since
     /// the web video may have taken the audio route.
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
-        backend == .av ? av.play() : player.play()
+        backend == .av ? avPlay() : player.play()
         userPaused = false
     }
 
@@ -399,14 +425,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func toggle() {
         if backend == .av {
             if reachedEnd || (av.currentItem.map { $0.duration.seconds.isFinite && $0.currentTime().seconds >= $0.duration.seconds - 0.3 } ?? false) {
-                reachedEnd = false; av.seek(to: .zero); av.play(); av.rate = rate; userPaused = false; isPlaying = true
+                reachedEnd = false; av.seek(to: .zero); avPlay(); userPaused = false; isPlaying = true
             } else if av.timeControlStatus == .playing {
                 // Only pause when it is actually playing. While it is buffering
                 // (.waitingToPlayAtSpecifiedRate) the old code treated a tap as
                 // "pause", so it took two taps to get playback going.
-                av.pause(); userPaused = true; isPlaying = false
+                avPause(); userPaused = true; isPlaying = false
             } else {
-                av.play(); av.rate = rate; userPaused = false; isPlaying = true
+                avPlay(); userPaused = false; isPlaying = true
             }
             return
         }
