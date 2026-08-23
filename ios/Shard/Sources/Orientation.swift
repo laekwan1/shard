@@ -14,11 +14,11 @@ final class Orientation {
         // Tell EVERY controller in the active scene its allowed orientations have
         // changed, not just the root — the SwiftUI host stack has more than one and
         // the geometry request is judged against the top-most one.
-        active?.windows.forEach { window in
-            var vc = window.rootViewController
-            while let v = vc { v.setNeedsUpdateOfSupportedInterfaceOrientations(); vc = v.presentedViewController }
-        }
         if #available(iOS 16.0, *) {
+            active?.windows.forEach { window in
+                var vc = window.rootViewController
+                while let v = vc { v.setNeedsUpdateOfSupportedInterfaceOrientations(); vc = v.presentedViewController }
+            }
             active?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
         }
         // Also nudge the device orientation — on some builds the geometry request
