@@ -126,6 +126,18 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
 
+    /// Wipe everything the web view kept on disk — cookies, local/session storage,
+    /// caches, IndexedDB — then reload. This is where "search history" and logins
+    /// live; nothing is stored by us beyond this.
+    func clearData(_ completion: @escaping () -> Void) {
+        let store = webView.configuration.websiteDataStore
+        let types = WKWebsiteDataStore.allWebsiteDataTypes()
+        store.removeData(ofTypes: types, modifiedSince: .distantPast) { [weak self] in
+            self?.webView.reload()
+            completion()
+        }
+    }
+
     /// Ask the current page what it has to offer — runs Ask.js and returns the
     /// offer JSON (formats for YouTube, or a media/hls URL otherwise).
     func offer() async -> String? {

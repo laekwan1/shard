@@ -142,6 +142,15 @@ struct BrowserScreen: View {
                     Image(systemName: "power").foregroundColor(model.engineOn ? .accent : .muted)
                 }
                 .frame(width: 24)
+                // Wipe the web view's cookies/cache/storage (where search history
+                // and logins live).
+                Button {
+                    banner = "웹 데이터 삭제 중…"
+                    model.clearData { banner = "웹 데이터를 삭제했습니다" }
+                } label: {
+                    Image(systemName: "trash").foregroundColor(.muted)
+                }
+                .frame(width: 24)
             }
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
