@@ -120,16 +120,19 @@ pub fn run(
         }
         whole("음성", done.audio, job.audio.bytes)?;
 
+        // free_stem keeps a second download of the same video from overwriting the
+        // first (append a trailing '.'), instead of the plain title every time.
+        let stem = free_stem(&job.into, &safe_name(&job.title));
         let saved = if job.audio_only {
             // The stream is already a container a player will open, so it is
             // moved rather than rebuilt — nothing is re-encoded and nothing is
             // repackaged.
             let extension = audio_extension(&std::fs::read(&audio_path)?);
-            let output = job.into.join(format!("{}.{extension}", safe_name(&job.title)));
+            let output = job.into.join(format!("{stem}.{extension}"));
             std::fs::copy(&audio_path, &output)?;
             output
         } else {
-            join_into(&video_path, &audio_path, &job.into, &safe_name(&job.title))?
+            join_into(&video_path, &audio_path, &job.into, &stem)?
         };
 
         // A picture for a song, put inside the song.
@@ -451,6 +454,30 @@ pub fn safe_name(title: &str) -> String {
     }
 }
 
+/// A stem that no file in `dir` already uses, by appending a single '.' per
+/// clash ("Title", "Title.", "Title.."). The user rejected "(720p)" and "(1)"
+/// suffixes as ugly and asked for just a trailing dot, so a second download of
+/// the same video sits beside the first instead of overwriting it. We match any
+/// existing file whose name is "<stem>.<ext>" so it holds across .mp4/.mkv/.m4a.
+fn free_stem(dir: &Path, stem: &str) -> String {
+    let taken = |s: &str| -> bool {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries.flatten().any(|e| {
+                    let name = e.file_name();
+                    let name = name.to_string_lossy();
+                    name.strip_prefix(s).is_some_and(|rest| rest.starts_with('.') && !rest[1..].contains('.'))
+                })
+            })
+            .unwrap_or(false)
+    };
+    let mut candidate = stem.to_string();
+    while taken(&candidate) {
+        candidate.push('.');
+    }
+    candidate
+}
+
 /// Reading a file is unused here but keeps the import honest for callers that
 /// hand this module bytes they already hold.
 #[allow(dead_code)]
@@ -603,6 +630,10 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let mut best: std::collections::HashMap<String, (u8, u32, String, String)> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
+        // Drop 60fps ("1080p60") — it is much heavier for little gain here, and the
+        // user asked to exclude it. A resolution left with only 60fps falls away;
+        // AV1-only-at-60 then yields to the same resolution's 30fps VP9/H.264.
+        if video.quality.ends_with("60") { continue; }
         let codec = video.codec();
         let r = codec_rank(codec);
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
@@ -676,22 +707,12 @@ pub fn run_youtube(
         .map(|f| f.track())
         .unwrap_or_else(|| audio.track());
 
-    // Put the resolution in a video's filename so two qualities of the same video
-    // do not overwrite each other (downloading AV1 replaced the H.264 before).
-    // Music keeps the plain title (its cover is filed under that name).
-    let title = if audio_only {
-        offer.title.clone()
-    } else if video.quality.is_empty() {
-        offer.title.clone()
-    } else {
-        format!("{} ({})", offer.title, video.quality)
-    };
     let job = Job {
         template,
         video: video.track(),
         audio: audio.track(),
         decoy,
-        title,
+        title: offer.title.clone(),
         into: into.to_path_buf(),
         cover: offer.thumb.clone(),
         audio_only,

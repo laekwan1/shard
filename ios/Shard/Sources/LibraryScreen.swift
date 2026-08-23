@@ -747,11 +747,12 @@ struct LibraryScreen: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
-    /// The song cover saved at download time, for music files whose own bytes
-    /// carry no embedded art (a bare .m4a). Video tiles use the frame thumbnail.
+    /// The cover saved at download time. Music: for a bare .m4a with no embedded
+    /// art. Video: the YouTube thumbnail, used as a fallback because VLC often
+    /// times out thumbnailing an AV1 frame (software decode) and returns nothing —
+    /// so a saved cover is what keeps most video tiles from showing a blank film icon.
     private func cover(_ item: Item) -> UIImage? {
-        guard item.kind == .music else { return nil }
-        return Covers.load(Covers.keyFor(item.url.lastPathComponent))
+        Covers.load(Covers.keyFor(item.url.lastPathComponent))
     }
 
     @ViewBuilder

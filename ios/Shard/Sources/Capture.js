@@ -275,6 +275,10 @@
   // marks a history entry vs a fresh autocomplete guess), and clicking ours clicks
   // that native control. DEFENSIVE: if the markup changes and no remove control is
   // found, we add nothing and normal search is untouched.
+  // Terms the user deleted this session, hidden on every pass so a row YouTube
+  // re-sends stays gone even when there is no server-side remove to call.
+  var hiddenSearches = {};
+
   function nativeRemove(opt) {
     var kids = opt.querySelectorAll('button, [role="button"], [aria-label], [class]');
     for (var i = 0; i < kids.length; i++) {
@@ -288,38 +292,68 @@
     return null;
   }
 
+  // The rows of previous searches. YouTube's search box did not render a native
+  // remove control here (the earlier version keyed on that and so showed nothing),
+  // and the rows come through as plain blue links, so we take them broadly: every
+  // option / search-results link inside the suggestions area. Guarded to when the
+  // input is EMPTY — that is when the box shows PREVIOUS searches rather than
+  // autocomplete guesses for what is being typed, so we never offer to "delete"
+  // a live suggestion.
+  function searchRows() {
+    var inp = document.querySelector('input[name="search_query"], input.ytSearchboxComponentInput, input[type="search"]');
+    if (!inp || inp.value.trim() !== '') return [];
+    var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
+    var scope = box || document;
+    var rows = [];
+    scope.querySelectorAll('[role="option"]').forEach(function (o) { rows.push(o); });
+    if (!rows.length) {
+      scope.querySelectorAll('a[href*="search_query="]').forEach(function (a) {
+        // Prefer a list-item wrapper so our button sits at the row's edge.
+        var row = a.closest('li, [role="option"]') || a;
+        if (rows.indexOf(row) < 0) rows.push(row);
+      });
+    }
+    return rows;
+  }
+
+  function rowText(row) {
+    return (row.textContent || '').replace(/삭제\s*$/, '').trim();
+  }
+
   function decorateHistory() {
     try {
-      var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
-      if (!box) return;
-      var opts = box.querySelectorAll('[role="option"]');
-      for (var i = 0; i < opts.length; i++) {
-        var opt = opts[i];
-        if (opt.querySelector(':scope > .shard-del')) continue;
-        var rm = nativeRemove(opt);
-        if (!rm) continue; // not a history row (or no removable) -> leave it alone
-        try { rm.style.display = 'none'; } catch (e) {}
+      var rows = searchRows();
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        // Already hidden this session -> keep it hidden.
+        if (hiddenSearches[rowText(row)]) { row.style.display = 'none'; continue; }
+        if (row.querySelector(':scope > .shard-del')) continue;
         var d = document.createElement('span');
         d.className = 'shard-del';
         d.textContent = '삭제';
         d.style.cssText =
-          'position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:5;' +
-          'color:#ff5252;text-decoration:underline;font:600 13px system-ui;cursor:pointer;padding:4px 6px;';
-        (function (opt, rm) {
+          'position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:2147483647;' +
+          'color:#ff5252;text-decoration:underline;font:600 13px system-ui;cursor:pointer;padding:6px 8px;';
+        (function (row) {
           d.addEventListener('click', function (e) {
             e.preventDefault(); e.stopPropagation();
-            try { rm.click(); } catch (err) {}
-            // Fallback: if YouTube did not drop the row, take it off screen.
-            setTimeout(function () { try { if (opt && opt.isConnected) opt.remove(); } catch (e2) {} }, 300);
+            hiddenSearches[rowText(row)] = 1;          // stays gone even if re-sent
+            var rm = nativeRemove(row);                 // real server delete if offered
+            if (rm) { try { rm.click(); } catch (err) {} }
+            try { row.style.display = 'none'; } catch (e2) {}
           }, true);
-        })(opt, rm);
-        try { opt.style.position = 'relative'; opt.style.paddingRight = '56px'; } catch (e) {}
-        opt.appendChild(d);
+        })(row);
+        try {
+          var cs = getComputedStyle(row);
+          if (cs.position === 'static') row.style.position = 'relative';
+          row.style.paddingRight = '56px';
+        } catch (e) {}
+        row.appendChild(d);
       }
     } catch (e) {}
   }
   try {
     new MutationObserver(function () { decorateHistory(); }).observe(document.documentElement, { childList: true, subtree: true });
   } catch (e) {}
-  setInterval(decorateHistory, 500);
+  setInterval(decorateHistory, 400);
 })();

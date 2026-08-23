@@ -238,8 +238,10 @@ struct BrowserScreen: View {
         withAnimation { showList = false }
         let offer = pendingOffer
         let label = row.isAudioOnly ? "\(pendingTitle) (음악)" : "\(pendingTitle) · \(row.label)"
-        // Only music tiles need a stand-in cover; a video makes its own thumbnail.
-        let cover = row.isAudioOnly ? pendingThumb : nil
+        // Save the YouTube thumbnail for a video too, not just music: VLC frequently
+        // times out thumbnailing an AV1 frame, so the tile needs a reliable cover to
+        // fall back to instead of a blank film icon.
+        let cover = pendingThumb
         downloads.start(title: label, cover: cover) { task, report in
             try await Downloader.runYouTube(offer, itag: row.itag, task: task, progress: report)
         }
