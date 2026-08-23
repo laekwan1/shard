@@ -38,9 +38,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }()
 
     /// The file currently loaded, so the library can put its stage back when you
-    /// return to it.
-    private(set) var currentURL: URL?
+    /// return to it. Published so the stage appears the instant playback starts —
+    /// which lets it travel with the library's slide-in instead of popping in.
+    @Published private(set) var currentURL: URL?
     private static let rates: [Float] = [1, 1.25, 1.5, 2, 0.5, 0.75]
+    /// A seek to apply once the media is playing again — used to resume at the
+    /// same spot after a phone-call interruption reloads the file.
+    private var pendingSeek: Float?
+    private var interruptedAt: Float?
 
     override init() {
         super.init()
@@ -49,6 +54,34 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         try? session.setCategory(.playback, mode: .moviePlayback)
         try? session.setActive(true)
         setupRemoteCommands()
+        // A phone call (or any interruption) pauses us and, on iOS, tears the
+        // audio route down. libVLC did not recover on its own — playback stayed
+        // frozen and no later file would start — so on the interruption's end we
+        // reload the file at the same spot and reactivate the session ourselves.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleInterruption(_:)),
+            name: AVAudioSession.interruptionNotification, object: nil)
+    }
+
+    @objc private func handleInterruption(_ note: Notification) {
+        guard let info = note.userInfo,
+              let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+        switch type {
+        case .began:
+            interruptedAt = player.position
+        case .ended:
+            try? AVAudioSession.sharedInstance().setActive(true)
+            // Reload from the remembered spot: a plain play() left the player
+            // wedged after the call ended.
+            if let url = currentURL {
+                let at = interruptedAt ?? player.position
+                pendingSeek = at
+                open(url)
+            }
+            interruptedAt = nil
+        @unknown default: break
+        }
     }
 
     deinit {
@@ -57,6 +90,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
+        NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
                   center.nextTrackCommand, center.previousTrackCommand, center.changePlaybackPositionCommand] {
@@ -163,6 +197,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func stop() { player.stop(); currentURL = nil }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
+        // Apply a resume-seek once the reloaded file is actually running.
+        if let p = pendingSeek, player.isPlaying, player.position > 0 {
+            player.position = p; pendingSeek = nil
+        }
         if !scrubbing { position = player.position }
         isPlaying = player.isPlaying
         elapsed = Self.clock(player.time.intValue)
@@ -307,6 +345,9 @@ struct PlayerStage: View {
     @State private var holdVolume = false
     @State private var showRatePicker = false
     @State private var showVolumeBar = false
+    /// The volume bar's shown value, kept locally so the thumb follows the finger
+    /// instantly instead of waiting on libVLC's slower read-back.
+    @State private var volDisplay: Double = 0
     /// True while a bar control is being dragged, so the 3-second auto-hide does
     /// not pull the bar away mid-adjustment.
     @State private var interacting = false
@@ -346,15 +387,20 @@ struct PlayerStage: View {
     /// Leaving full screen turns back to portrait, then frees rotation again.
     private func applyOrientation(_ fs: Bool) {
         if fs {
-            // Default to landscape (most videos are wide); only a clearly tall
-            // one (a short) stays portrait. videoSize can be 0 before the first
-            // frame, which we treat as wide.
-            let s = controller.player.videoSize
-            if s.height > s.width, s.width > 0 {
-                Orientation.shared.lock(.portrait, to: .portrait)
-            } else {
-                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+            // Default to landscape at once (most videos are wide). videoSize is
+            // often 0 the instant full screen opens, so decide again a beat later
+            // once a frame has arrived — only a clearly tall video (a short) is
+            // flipped back to portrait.
+            let decide = {
+                let s = controller.player.videoSize
+                if s.height > s.width, s.width > 0 {
+                    Orientation.shared.lock(.portrait, to: .portrait)
+                } else {
+                    Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+                }
             }
+            Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: decide)
         } else {
             Orientation.shared.lock(.portrait, to: .portrait)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { Orientation.shared.free() }
@@ -496,16 +542,29 @@ struct PlayerStage: View {
         }
     }
 
+    /// The top safe-area inset, so the title clears the status bar / notch when a
+    /// short is played full screen (portrait) — otherwise it ran into the clock
+    /// and battery.
+    private var topInset: CGFloat {
+        UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .keyWindow?.safeAreaInsets.top ?? 0
+    }
+
     private var controlsOverlay: some View {
-        VStack {
+        VStack(spacing: 0) {
             HStack {
                 Text(title).font(.subheadline).foregroundColor(.white).lineLimit(1).shadow(radius: 2)
                 Spacer()
                 closeButton
             }
-            .padding(10)
+            .padding(.horizontal, 12)
+            .padding(.top, fullscreen ? topInset + 6 : 10)
+            .padding(.bottom, 8)
             Spacer()
-            VStack(spacing: 6) {
+            // Right-aligned and flush to the transport (spacing 0) so a picker
+            // reads as attached right above the sound / speed buttons it belongs to.
+            VStack(alignment: .trailing, spacing: 0) {
                 if showRatePicker { ratePicker }
                 if showVolumeBar { volumeBar }
                 transport
@@ -525,9 +584,9 @@ struct PlayerStage: View {
     }
 
     private var ratePicker: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { r in
-                Button { controller.setRate(r); showRatePicker = false; showBar() } label: {
+                Button { controller.setRate(r); showRatePicker = false; keepBar() } label: {
                     Text(String(format: "%g×", r)).font(.system(size: 13, weight: .semibold))
                         .padding(.horizontal, 10).padding(.vertical, 6)
                         .background(controller.rate == r ? Color.accent : Color.clear)
@@ -536,30 +595,39 @@ struct PlayerStage: View {
                 }
             }
         }
-        .padding(6).background(Color.black.opacity(0.3)).clipShape(Capsule())
-        .padding(.horizontal, 12)
+        .padding(6).background(Color.chrome).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.trailing, 12).padding(.bottom, 6)
     }
 
     private var volumeBar: some View {
         HStack(spacing: 10) {
             Image(systemName: "speaker.fill").font(.system(size: 12)).foregroundColor(.white)
-            SeekSlider(value: Binding(get: { Double(controller.volume) },
-                                      set: { controller.volume = Float($0) }),
-                       onBegin: { interacting = true; keepBar() },
-                       onScrub: { controller.volume = Float($0); keepBar() },
-                       onEnd: { _ in interacting = false; showBar() })
+            SeekSlider(
+                // Local display for an instant thumb; shows 0 while muted, and any
+                // drag lifts the mute so the two never disagree.
+                value: Binding(get: { controller.muted ? 0 : volDisplay }, set: { _ in }),
+                onBegin: { interacting = true; keepBar() },
+                onScrub: { v in
+                    if controller.muted { controller.toggleMute() }
+                    volDisplay = v; controller.volume = Float(v); keepBar()
+                },
+                onEnd: { _ in interacting = false; showBar() })
             Image(systemName: "speaker.wave.3.fill").font(.system(size: 12)).foregroundColor(.white)
         }
-        .padding(.horizontal, 16).padding(.vertical, 8)
-        .background(Color.black.opacity(0.3)).clipShape(Capsule())
-        .padding(.horizontal, 12)
+        .frame(width: 220)
+        .padding(.horizontal, 14).padding(.vertical, 8)
+        .background(Color.chrome).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.trailing, 12).padding(.bottom, 6)
     }
 
     private var transport: some View {
         VStack(spacing: 10) {
             // Top row: the seek bar only.
             HStack(spacing: 6) {
-                Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
+                // Fixed width so the seek bar does not grow/shrink as the elapsed
+                // time gains or loses a digit (0:09 → 0:10 → 1:00:00).
+                Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white)
+                    .monospacedDigit().frame(width: 46, alignment: .trailing)
                 SeekSlider(
                     value: Binding(get: { Double(controller.position) },
                                    set: { controller.previewSeek(Float($0)) }),
@@ -567,7 +635,8 @@ struct PlayerStage: View {
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },
                     onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() }
                 )
-                Text(controller.duration).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
+                Text(controller.duration).font(.system(size: 10)).foregroundColor(.white)
+                    .monospacedDigit().frame(width: 46, alignment: .leading)
             }
             // Bottom row: transport on the left (wide), sound/speed/full-screen right.
             HStack {
@@ -578,6 +647,7 @@ struct PlayerStage: View {
                     }
                     Button { onNext() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
+                .padding(.leading, 10)      // off the very left edge — the back button was hard to hit
                 Spacer()
                 HStack(spacing: 20) {
                     Button { controller.toggleMute() } label: {
@@ -588,6 +658,7 @@ struct PlayerStage: View {
                     // not also mute / step the rate. A short tap still fails the
                     // long press and runs the button normally.
                     .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
+                        volDisplay = Double(controller.volume)
                         showVolumeBar.toggle(); showRatePicker = false; keepBar()
                     })
                     Button { controller.cycleRate() } label: {
@@ -604,6 +675,7 @@ struct PlayerStage: View {
                                                       : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
                     }
                 }
+                .padding(.trailing, 10)     // off the very right edge, to match the left cluster
             }
             .foregroundColor(.white)
         }

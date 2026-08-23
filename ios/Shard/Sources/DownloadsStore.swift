@@ -74,7 +74,9 @@ final class DownloadsStore: ObservableObject {
                 // Save the song's cover under the file's own name, so the library
                 // tile can show it even though a music-only file carries no art.
                 if let cover = cover, !cover.isEmpty {
-                    await Covers.fetch(cover, key: Covers.keyFor(saved.lastPathComponent))
+                    await Covers.fetch(cover, key: Covers.keyFor(saved.lastPathComponent)) {
+                        await Downloader.fetchViaEngine($0)
+                    }
                 }
             } catch {
                 if task.cancelled {

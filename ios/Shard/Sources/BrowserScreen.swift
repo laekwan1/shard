@@ -57,15 +57,19 @@ struct BrowserScreen: View {
             if !shown { engineRevealed = false }
         }
         .onAppear {
-            model.onNavigated = { withAnimation { showAddress = false } }
-            model.onSwipeAddress = { withAnimation(.easeOut(duration: 0.18)) { showAddress = true } }
+            // No per-call withAnimation: the panel's slide is driven by the
+            // .animation(value: showAddress) on the ZStack, so open and close use
+            // the exact same curve — close was popping when a caller changed the
+            // flag without wrapping it.
+            model.onNavigated = { showAddress = false }
+            model.onSwipeAddress = { showAddress = true }
             model.onSwipeLibrary = {
                 // If the address panel is open, the first left-swipe just puts it
                 // away; the next one opens the library.
-                if showAddress { withAnimation(.easeOut(duration: 0.18)) { showAddress = false } }
+                if showAddress { showAddress = false }
                 else { model.pauseWebVideos(); openLibrary() }
             }
-            model.onWebTap = { withAnimation(.easeOut(duration: 0.15)) { showAddress = false } }
+            model.onWebTap = { showAddress = false }
             model.onDownloadRequest = { right, bottom in
                 listAnchor = CGPoint(x: right, y: bottom)
                 requestDownload()
@@ -126,7 +130,7 @@ struct BrowserScreen: View {
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
             iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
 
-            URLField(text: $editing) { model.load(editing); withAnimation { showAddress = false } }
+            URLField(text: $editing) { model.load(editing); showAddress = false }
                 .frame(height: 22)   // a UITextField wrapper has no height of its
                                      // own, so without this it stretched the panel
                                      // to the whole screen.
@@ -144,7 +148,7 @@ struct BrowserScreen: View {
             DragGesture(minimumDistance: 24).onEnded { v in
                 guard abs(v.translation.width) > 40, abs(v.translation.height) < 60 else { return }
                 if v.translation.width > 0 { withAnimation { engineRevealed = true } }
-                else { withAnimation(.easeOut(duration: 0.18)) { showAddress = false } }
+                else { showAddress = false }
             }
         )
     }

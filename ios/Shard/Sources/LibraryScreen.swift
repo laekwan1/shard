@@ -39,7 +39,7 @@ struct LibraryScreen: View {
                 shelfSwitch
                     .padding(.bottom, 12)   // wider gap above the folders…
                 folderBar
-                if currentIndex != nil && !fullscreen {
+                if player.currentURL != nil && !fullscreen {
                     stage.aspectRatio(16.0 / 9.0, contentMode: .fit)
                         .background(Color.black)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -58,7 +58,7 @@ struct LibraryScreen: View {
                     ))
                 }
             }
-            if currentIndex != nil && fullscreen {
+            if player.currentURL != nil && fullscreen {
                 stage.ignoresSafeArea().zIndex(2)
             }
             if let item = fileMenu {
@@ -159,7 +159,9 @@ struct LibraryScreen: View {
                 .frame(width: 160)
                 .background(Color.chrome)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .transition(.move(edge: .leading).combined(with: .opacity))
+                // No opacity in the transition: the cross-fade left a faint ghost
+                // in the middle as the panel slid out. A plain slide is clean.
+                .transition(.move(edge: .leading))
             }
         }
         .shadow(radius: 16)
@@ -343,7 +345,9 @@ struct LibraryScreen: View {
     private func setKind(_ kind: MediaKind) {
         guard store.kind != kind else { return }
         toMusic = (kind == .music)
-        withAnimation(.easeInOut(duration: 0.2)) { store.kind = kind }
+        // A spring cross-slide, closer to the Android shelf switch than a flat
+        // ease — the outgoing list leaves one way, the incoming enters the other.
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) { store.kind = kind }
     }
 
     private var folderBar: some View {

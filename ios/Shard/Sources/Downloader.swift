@@ -71,6 +71,21 @@ enum Downloader {
         }
     }
 
+    /// Fetch a URL's bytes through the same engine the downloads use — which
+    /// applies the DPI desync — then delete the temp file. A song cover has to
+    /// come this way, not over a plain URLSession: on a network that filters the
+    /// thumbnail host, the direct request fails while the engine's does not, which
+    /// is why the cover never appeared.
+    static func fetchViaEngine(_ url: String) async -> Data? {
+        let task = DownloadTask()
+        let title = "_cover_\(UUID().uuidString)"
+        guard let saved = try? await runURL(url, isHLS: false, referer: "", title: title,
+                                            task: task, progress: { _, _ in }) else { return nil }
+        let data = try? Data(contentsOf: saved)
+        try? FileManager.default.removeItem(at: saved)
+        return data
+    }
+
     /// Download a plain URL — an HLS playlist or a progressive file.
     static func runURL(
         _ url: String, isHLS: Bool, referer: String, title: String,

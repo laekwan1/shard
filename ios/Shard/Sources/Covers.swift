@@ -59,10 +59,17 @@ enum Covers {
     /// download proxy: the thumbnail lives on a public host. YouTube's own thumb
     /// URLs are upgraded to maxresdefault (1280×720) so the tile is sharp rather
     /// than the small default the page hands out.
-    static func fetch(_ urlString: String, key: String) async {
+    static func fetch(_ urlString: String, key: String,
+                      engineFetch: (String) async -> Data?) async {
         for candidate in candidates(urlString) {
-            guard let url = URL(string: candidate) else { continue }
-            if let data = try? await plainGet(url), data.count > 512 {
+            // Engine first (it bypasses a network that filters the thumbnail
+            // host); a plain request only as a fallback.
+            if let data = await engineFetch(candidate), data.count > 512, UIImage(data: data) != nil {
+                save(key, data: data)
+                return
+            }
+            if let url = URL(string: candidate), let data = try? await plainGet(url),
+               data.count > 512, UIImage(data: data) != nil {
                 save(key, data: data)
                 return
             }
