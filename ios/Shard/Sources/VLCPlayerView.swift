@@ -348,11 +348,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func mediaPlayerStateChanged(_ notification: Notification) {
         isPlaying = player.isPlaying
         updateNowPlaying()
-        switch player.state {
-        case .opening, .buffering: buffering = true
-        case .ended, .error, .stopped: buffering = false
-        default: break   // .playing keeps the cover until the delayed reveal frees it
-        }
+        // Do NOT raise the cover on .opening/.buffering here — that also fired for
+        // a mid-playback seek/jump, blacking out the picture with a spinner while
+        // the sound kept going. The cover is driven only by open() (a real track
+        // change) and cleared on the first frame; a seek just re-buffers silently.
+        if player.state == .ended || player.state == .error { buffering = false }
         // Hold the volume at 0 through every state update until the first frame —
         // the audio object is created late, so a single volume=0 in open() could be
         // set on a nil/old object and the first buffer slipped through at full gain

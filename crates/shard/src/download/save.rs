@@ -764,10 +764,83 @@ pub fn run_hls(
     }
 
     // fMP4 (or a progressive MP4 served in pieces): the concatenation already
-    // is a playable file.
+    // is a playable file — but a live/DVR HLS numbers its fragments from the
+    // stream's own clock (test-streams.mux.dev starts near 14s), so the movie
+    // opened at 14s and the player buffered forever waiting for the 0–14s that
+    // never comes. Rebase each track's fragment decode times to start at 0.
+    let whole = rebase_fmp4(whole);
     let output = into.join(format!("{}.mp4", safe_name(title)));
     std::fs::write(&output, &whole)?;
     Ok(output)
+}
+
+/// Subtract each track's first fragment `tfdt` (base_media_decode_time) from all
+/// of its fragments, so a fragmented MP4 whose timeline starts well after zero
+/// begins at zero instead. Per-track (each `traf` names its `tfhd` track id) so
+/// audio and video keep their relative offset. Unknown/odd boxes are skipped; on
+/// anything unexpected it leaves the bytes as they were.
+fn rebase_fmp4(mut data: Vec<u8>) -> Vec<u8> {
+    // (value_offset, is_64bit, track_id, value)
+    let mut occ: Vec<(usize, bool, u32, u64)> = Vec::new();
+    let be32 = |d: &[u8], p: usize| u32::from_be_bytes([d[p], d[p + 1], d[p + 2], d[p + 3]]);
+    let be64 = |d: &[u8], p: usize| u64::from_be_bytes([
+        d[p], d[p + 1], d[p + 2], d[p + 3], d[p + 4], d[p + 5], d[p + 6], d[p + 7],
+    ]);
+
+    // The child boxes of a container [start, end): (type, payload_start, box_end).
+    fn boxes(d: &[u8], start: usize, end: usize) -> Vec<([u8; 4], usize, usize)> {
+        let mut v = Vec::new();
+        let mut i = start;
+        while i + 8 <= end {
+            let size = u32::from_be_bytes([d[i], d[i + 1], d[i + 2], d[i + 3]]) as usize;
+            let typ = [d[i + 4], d[i + 5], d[i + 6], d[i + 7]];
+            let box_end = if size == 0 { end } else if size < 8 { break } else { i + size };
+            if box_end > end || box_end <= i { break; }
+            v.push((typ, i + 8, box_end));
+            i = box_end;
+        }
+        v
+    }
+
+    for (typ, ps, be) in boxes(&data, 0, data.len()) {
+        if &typ != b"moof" { continue; }
+        for (t2, ps2, be2) in boxes(&data, ps, be) {
+            if &t2 != b"traf" { continue; }
+            let mut track_id = 0u32;
+            let mut tfdt: Option<(usize, bool, u64)> = None;
+            for (t3, ps3, be3) in boxes(&data, ps2, be2) {
+                if &t3 == b"tfhd" && ps3 + 8 <= be3 {
+                    track_id = be32(&data, ps3 + 4);      // after version+flags
+                } else if &t3 == b"tfdt" {
+                    let ver = data[ps3];
+                    let p = ps3 + 4;                       // after version+flags
+                    if ver == 1 && p + 8 <= be3 {
+                        tfdt = Some((p, true, be64(&data, p)));
+                    } else if ver == 0 && p + 4 <= be3 {
+                        tfdt = Some((p, false, be32(&data, p) as u64));
+                    }
+                }
+            }
+            if let Some((off, is64, val)) = tfdt {
+                occ.push((off, is64, track_id, val));
+            }
+        }
+    }
+
+    // First value seen per track is the base to subtract.
+    let mut base: std::collections::HashMap<u32, u64> = std::collections::HashMap::new();
+    for &(_, _, tid, val) in &occ {
+        base.entry(tid).or_insert(val);
+    }
+    for (off, is64, tid, val) in occ {
+        let nv = val.saturating_sub(base[&tid]);
+        if is64 {
+            data[off..off + 8].copy_from_slice(&nv.to_be_bytes());
+        } else {
+            data[off..off + 4].copy_from_slice(&(nv as u32).to_be_bytes());
+        }
+    }
+    data
 }
 
 /// Demux a transport stream and write it back out as MP4.
