@@ -64,6 +64,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// same spot after a phone-call interruption reloads the file.
     private var pendingSeek: Float?
     private var interruptedAt: Float?
+    /// Whether the player was genuinely playing (not intentionally paused) when an
+    /// audio interruption began — gates the auto-resume on its end.
+    private var wasPlayingAtInterruption = false
+    /// Set when playback was paused on purpose (by the user, or by us for a web
+    /// video), so an interruption's end does not resume it behind their back.
+    private var userPaused = false
     private var tick = 0
     private var openGen = 0
     /// True from open() until the first frame of the new stream plays, so the audio
@@ -96,7 +102,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         switch type {
         case .began:
             interruptedAt = player.position
+            wasPlayingAtInterruption = player.isPlaying && !userPaused
         case .ended:
+            // Only auto-resume if we were actually playing when interrupted AND had
+            // not intentionally paused. A web video playing over us fires this pair
+            // too — without the guard, pausing the library for a web video and then
+            // stopping it (or locking the screen) resumed playback on its own.
+            guard wasPlayingAtInterruption, !userPaused else { interruptedAt = nil; return }
             try? AVAudioSession.sharedInstance().setActive(true)
             // Reload from the remembered spot: a plain play() left the player
             // wedged after the call ended.
@@ -133,8 +145,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// controlled like music.
     private func setupRemoteCommands() {
         let center = MPRemoteCommandCenter.shared()
-        center.playCommand.addTarget { [weak self] _ in self?.player.play(); return .success }
-        center.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); return .success }
+        center.playCommand.addTarget { [weak self] _ in self?.player.play(); self?.userPaused = false; return .success }
+        center.pauseCommand.addTarget { [weak self] _ in self?.player.pause(); self?.userPaused = true; return .success }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.toggle(); return .success }
         center.nextTrackCommand.addTarget { [weak self] _ in self?.onRemoteNext?(); return .success }
         center.previousTrackCommand.addTarget { [weak self] _ in self?.onRemotePrev?(); return .success }
@@ -165,6 +177,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func open(_ url: URL) {
         currentURL = url
+        userPaused = false
         buffering = true
         position = 0          // jump the bar to the start at once, not a beat later
         // The session can go inactive after the library closes the player; without
@@ -227,10 +240,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
 
-    func pause() { player.pause() }
+    func pause() { player.pause(); userPaused = true }
     /// Resume after we paused for a web video — reactivate the session first, since
     /// the web video may have taken the audio route.
-    func resume() { try? AVAudioSession.sharedInstance().setActive(true); player.play() }
+    func resume() { try? AVAudioSession.sharedInstance().setActive(true); player.play(); userPaused = false }
 
     /// Scrubbing the desktop's way: while dragging, only the knob and the clock
     /// move — the player is not touched. It seeks once, on release. That is the
@@ -256,10 +269,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if let url = currentURL { open(url) }
         } else if player.isPlaying {
             player.pause()
+            userPaused = true
             isPlaying = false     // flip the button at once; VLC can lag the state event
         } else {
             try? AVAudioSession.sharedInstance().setActive(true)
             player.play()
+            userPaused = false
             isPlaying = true
         }
     }
