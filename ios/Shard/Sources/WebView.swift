@@ -126,6 +126,31 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func goForward() { webView.goForward() }
     func reload() { webView.reload() }
 
+    /// Block ad/tracker HOSTS only — never the video CDN (googlevideo.com), the
+    /// API, or youtube.com itself. So if these ever stop matching, ads return but
+    /// nothing about YouTube breaks. Compiled once and attached to the content
+    /// controller; it applies to every navigation after.
+    func installAdBlock() {
+        let rules = """
+        [
+          {"trigger":{"url-filter":"doubleclick\\\\.net"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"googlesyndication\\\\.com"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"googleadservices\\\\.com"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"google-analytics\\\\.com"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"googletagservices\\\\.com"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"googletagmanager\\\\.com"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"/pagead/"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"/ptracking"},"action":{"type":"block"}},
+          {"trigger":{"url-filter":"/api/stats/ads"},"action":{"type":"block"}}
+        ]
+        """
+        WKContentRuleListStore.default()?.compileContentRuleList(
+            forIdentifier: "shard-adblock", encodedContentRuleList: rules) { [weak self] list, _ in
+            guard let self = self, let list = list else { return }
+            self.webView.configuration.userContentController.add(list)
+        }
+    }
+
     /// Wipe everything the web view kept on disk — cookies, local/session storage,
     /// caches, IndexedDB — then reload. This is where "search history" and logins
     /// live; nothing is stored by us beyond this.

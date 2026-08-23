@@ -239,4 +239,31 @@
   setInterval(syncButtons, 400);
   window.addEventListener("scroll", syncButtons, true);
   window.addEventListener("resize", syncButtons, true);
+
+  // Best-effort YouTube ad skipping. DEFENSIVE BY DESIGN: it only acts when an ad
+  // is actually detected (the player's `ad-showing` class, or a skip button), and
+  // everything is wrapped in try/catch. If YouTube changes its markup, this simply
+  // does nothing — it never touches normal playback — so the worst case is that
+  // ads come back, not that YouTube breaks.
+  function skipAds() {
+    try {
+      var skip = document.querySelector(
+        ".ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-container button"
+      );
+      if (skip) { skip.click(); return; }
+      var player = document.querySelector(".html5-video-player");
+      if (player && player.classList.contains("ad-showing")) {
+        // The ad plays in the same <video>; jumping it to the end gets past it,
+        // then YouTube loads the real content. Only ever while `ad-showing`.
+        var v = player.querySelector("video");
+        if (v && isFinite(v.duration) && v.duration > 0) {
+          v.currentTime = v.duration;
+        }
+      }
+      // Close static overlay ads if their close button is present.
+      var overlayClose = document.querySelector(".ytp-ad-overlay-close-button");
+      if (overlayClose) { try { overlayClose.click(); } catch (e) {} }
+    } catch (e) {}
+  }
+  setInterval(skipAds, 350);
 })();

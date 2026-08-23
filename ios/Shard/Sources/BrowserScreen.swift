@@ -78,6 +78,7 @@ struct BrowserScreen: View {
             }
             model.onWebTap = { showAddress = false }
             model.onWebPlaying = { onWebPlaying($0) }
+            model.installAdBlock()
             model.onDownloadRequest = { right, bottom in
                 listAnchor = CGPoint(x: right, y: bottom)
                 requestDownload()
