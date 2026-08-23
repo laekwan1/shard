@@ -450,8 +450,11 @@ struct LibraryScreen: View {
     private func playPrev() {
         let list = playingList()
         guard !list.isEmpty else { return }
+        // Only go back to a track in the SAME shelf+folder as what is playing now —
+        // the history stack mixes kinds, so without this, "previous" during a video
+        // could jump back to a song you had played earlier.
         while let prev = store.history.popLast() {
-            if let item = store.items.first(where: { $0.url == prev }) { start(item, record: false); return }
+            if let item = list.first(where: { $0.url == prev }) { start(item, record: false); return }
         }
         guard let i = playingIndex() else { return }
         start(list[(i - 1 + list.count) % list.count], record: false)
