@@ -9,6 +9,10 @@ struct LibraryScreen: View {
     @ObservedObject var downloads: DownloadsStore
     @ObservedObject var prefs: PlaybackPrefs
     @ObservedObject var player: VLCController
+    /// Whether the library is the shown screen. It is kept mounted and slid by an
+    /// offset (see ShardApp), so this drives the per-open restore that used to
+    /// live in onAppear.
+    var visible: Bool
     var close: () -> Void
 
     @StateObject private var probe = MediaProbe()
@@ -87,14 +91,15 @@ struct LibraryScreen: View {
         // Coming back to the library, put the last-played file's stage back where
         // it was — the player kept running (or stayed paused) in the meantime, so
         // it just needs the stage drawn onto it again.
-        .onAppear {
-            if currentIndex == nil, let url = player.currentURL,
+        .onChange(of: visible) { shown in
+            // Each time the library opens, put the stage back on whatever is
+            // playing. Runs on open (not once at mount) because the screen stays
+            // mounted and only slides in and out.
+            guard shown else { return }
+            if let url = player.currentURL,
                let item = store.items.first(where: { $0.url == url }) {
                 store.kind = item.kind
                 store.current = item.folder
-                // No inner animation: the whole library already slides in from the
-                // right (ShardApp), and animating the stage in here pushed the list
-                // down, which read as the list dropping from the top.
                 currentIndex = store.visible.firstIndex(where: { $0.url == url })
             }
         }

@@ -22,23 +22,29 @@ struct RootView: View {
     @State private var showLibrary = false
 
     var body: some View {
-        ZStack {
-            Color.surface.ignoresSafeArea()
+        GeometryReader { geo in
+            ZStack {
+                Color.surface.ignoresSafeArea()
 
-            BrowserScreen(downloads: downloads) {
-                library.reload()
-                withAnimation(.easeOut(duration: 0.22)) { showLibrary = true }
-            }
+                BrowserScreen(downloads: downloads) {
+                    library.reload()
+                    withAnimation(.easeOut(duration: 0.24)) { showLibrary = true }
+                }
 
-            if showLibrary {
-                LibraryScreen(store: library, downloads: downloads, prefs: prefs, player: player) {
-                    withAnimation(.easeIn(duration: 0.18)) { showLibrary = false }
+                // The library is kept mounted and slid with an offset rather than
+                // inserted with a .transition: a SwiftUI transition snapshots the
+                // view, and the live VLC surface cannot be snapshotted — so the
+                // video popped into place while the rest slid in. An offset is a
+                // real layout move, so the video travels with the list.
+                LibraryScreen(store: library, downloads: downloads, prefs: prefs,
+                              player: player, visible: showLibrary) {
+                    withAnimation(.easeIn(duration: 0.2)) { showLibrary = false }
                     // Leaving the library stops the player unless background play
                     // is on — otherwise the sound kept going after the screen was
                     // gone.
                     if !prefs.background { player.stop() }
                 }
-                .transition(.move(edge: .trailing))
+                .offset(x: showLibrary ? 0 : geo.size.width + geo.safeAreaInsets.trailing)
                 .zIndex(1)
             }
         }

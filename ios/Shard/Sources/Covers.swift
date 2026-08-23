@@ -85,12 +85,18 @@ enum Covers {
         return [s]
     }
 
-    /// The 11-char video id out of an `i.ytimg.com/vi/<id>/...` thumbnail URL.
+    /// The video id out of a thumbnail URL, whether it is served as
+    /// `i.ytimg.com/vi/<id>/...` (jpg) or `i.ytimg.com/vi_webp/<id>/...` (webp,
+    /// which mobile YouTube hands out) — so a clean jpg URL can be rebuilt either
+    /// way.
     private static func ytID(_ s: String) -> String? {
-        guard let range = s.range(of: "ytimg.com/vi/") else { return nil }
-        let rest = s[range.upperBound...]
-        let id = rest.prefix { $0 != "/" }
-        return id.count >= 8 ? String(id) : nil
+        for marker in ["ytimg.com/vi/", "ytimg.com/vi_webp/"] {
+            if let range = s.range(of: marker) {
+                let id = s[range.upperBound...].prefix { $0 != "/" }
+                if id.count >= 8 { return String(id) }
+            }
+        }
+        return nil
     }
 
     private static func plainGet(_ url: URL) async throws -> Data {

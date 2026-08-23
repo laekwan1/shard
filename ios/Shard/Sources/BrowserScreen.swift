@@ -35,6 +35,9 @@ struct BrowserScreen: View {
             WebViewContainer(model: model)
 
             if showAddress {
+                // Animate on the value, not only on each caller's withAnimation,
+                // so the panel slides back up on close exactly as it slid down on
+                // open — some close paths were tearing it off with no animation.
                 addressPanel.transition(.move(edge: .top))
             }
             if showList {
@@ -49,6 +52,7 @@ struct BrowserScreen: View {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
         }
+        .animation(.easeInOut(duration: 0.22), value: showAddress)
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
         }

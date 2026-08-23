@@ -105,6 +105,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func open(_ url: URL) {
         currentURL = url
         reachedEnd = false
+        // Stop before loading new media, always. A player left in .ended (or an
+        // error) state wedged when handed new media — the replayed file, and
+        // then every file after it, refused to start until the app was killed.
+        // A clean stop first is what makes reuse reliable.
+        player.stop()
         player.media = VLCMedia(url: url)
         player.play()
         player.rate = rate
@@ -258,11 +263,15 @@ private struct Gauge: View {
     let icon: String
     let value: Double
     var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon).font(.title2)
-            ProgressView(value: value).frame(width: 90).tint(.white)
+        HStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 13))
+            Capsule().fill(Color.white.opacity(0.3)).frame(width: 70, height: 3)
+                .overlay(alignment: .leading) {
+                    Capsule().fill(Color.white).frame(width: 70 * max(0, min(1, value)), height: 3)
+                }
         }
-        .padding(16).background(Color.black.opacity(0.3)).cornerRadius(12).foregroundColor(.white)
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Color.black.opacity(0.4)).clipShape(Capsule()).foregroundColor(.white)
     }
 }
 
@@ -326,6 +335,9 @@ struct PlayerStage: View {
         }
         .clipped()
         .onChange(of: fullscreen) { fs in applyOrientation(fs) }
+        // When playback stops or reaches the end, surface the bar so the play
+        // button is right there — otherwise a finished video sat with no controls.
+        .onChange(of: controller.isPlaying) { playing in if !playing { showBar() } }
         .onAppear { showBar() }
         .onDisappear { Orientation.shared.free() }
     }
@@ -351,6 +363,11 @@ struct PlayerStage: View {
 
     /// Tap toggles the bar — up if hidden, away if shown.
     private func toggleBar() {
+        // A tap while a picker is open just dismisses the picker (and keeps the
+        // bar) — it should not take a second tap, nor hide the whole bar.
+        if showRatePicker || showVolumeBar {
+            showRatePicker = false; showVolumeBar = false; showBar(); return
+        }
         if showControls {
             hideWork?.cancel()
             withAnimation(.easeOut(duration: 0.12)) { showControls = false }
@@ -539,7 +556,7 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 10) {
             // Top row: the seek bar only.
             HStack(spacing: 6) {
                 Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
@@ -566,10 +583,11 @@ struct PlayerStage: View {
                     Button { controller.toggleMute() } label: {
                         Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15))
                     }
-                    // A Button's own tap wins over onLongPressGesture, so the hold
-                    // never fired — a simultaneous LongPressGesture runs alongside
-                    // the tap instead, which is what opens the picker.
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
+                    // highPriority, not simultaneous: when the hold is recognized
+                    // it cancels the button's tap, so releasing after a hold does
+                    // not also mute / step the rate. A short tap still fails the
+                    // long press and runs the button normally.
+                    .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
                         showVolumeBar.toggle(); showRatePicker = false; keepBar()
                     })
                     Button { controller.cycleRate() } label: {
@@ -578,7 +596,7 @@ struct PlayerStage: View {
                         Text(String(format: "%g×", controller.rate)).font(.system(size: 14, weight: .bold))
                             .frame(width: 42)
                     }
-                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
+                    .highPriorityGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
                         showRatePicker.toggle(); showVolumeBar = false; keepBar()
                     })
                     Button { fullscreen.toggle() } label: {
@@ -589,8 +607,8 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 12).padding(.top, 2)
-        .padding(.bottom, fullscreen ? 20 : 4)   // lift buttons off a short's very edge
+        .padding(.horizontal, 12).padding(.top, 8)
+        .padding(.bottom, fullscreen ? 30 : 16)   // room under the buttons; more in full screen for a short's edge
         .background(Color.black.opacity(0.3))
     }
 }
