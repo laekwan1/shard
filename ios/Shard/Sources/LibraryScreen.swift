@@ -41,6 +41,7 @@ struct LibraryScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.toolbar, lineWidth: 1))
                         .padding(.horizontal, 10).padding(.bottom, 6)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
                 if !downloads.items.isEmpty { downloadsStrip }
                 if store.visible.isEmpty {
@@ -92,7 +93,9 @@ struct LibraryScreen: View {
                let item = store.items.first(where: { $0.url == url }) {
                 store.kind = item.kind
                 store.current = item.folder
-                currentIndex = store.visible.firstIndex(where: { $0.url == url })
+                withAnimation(.easeOut(duration: 0.25)) {
+                    currentIndex = store.visible.firstIndex(where: { $0.url == url })
+                }
             }
         }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -108,9 +111,11 @@ struct LibraryScreen: View {
         .confirmationDialog("폴더 삭제", isPresented: Binding(get: { deletingFolder != nil }, set: { if !$0 { deletingFolder = nil } }), titleVisibility: .visible) {
             Button("전체삭제", role: .destructive) {
                 if let f = deletingFolder { store.deleteFolder(f, withContents: true) }; deletingFolder = nil
+                verifyPlaying()
             }
             Button("폴더삭제") {
                 if let f = deletingFolder { store.deleteFolder(f, withContents: false) }; deletingFolder = nil
+                verifyPlaying()
             }
             Button("취소", role: .cancel) { deletingFolder = nil }
         } message: {
@@ -131,23 +136,22 @@ struct LibraryScreen: View {
                     withAnimation { showFolderPick.toggle() }
                 }
                 Divider().background(Color.toolbar)
-                menuRow("삭제", "trash", tint: .red) { store.delete(item); fileMenu = nil }
+                menuRow("삭제", "trash", tint: .red) { store.delete(item); fileMenu = nil; verifyPlaying() }
             }
             .frame(width: 190)
             .background(Color.chrome)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
 
             if showFolderPick {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        menuRow("저장소", "house.fill") { store.move(item, to: nil); fileMenu = nil }
-                        ForEach(store.folders.filter { $0 != item.folder }, id: \.self) { folder in
-                            Divider().background(Color.toolbar)
-                            menuRow(folder, "folder") { store.move(item, to: folder); fileMenu = nil }
-                        }
+                // Height follows the number of folders — no fixed box.
+                VStack(spacing: 0) {
+                    menuRow("저장소", "house.fill") { store.move(item, to: nil); fileMenu = nil }
+                    ForEach(store.folders.filter { $0 != item.folder }, id: \.self) { folder in
+                        Divider().background(Color.toolbar)
+                        menuRow(folder, "folder") { store.move(item, to: folder); fileMenu = nil }
                     }
                 }
-                .frame(width: 160).frame(maxHeight: 260)
+                .frame(width: 160)
                 .background(Color.chrome)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .transition(.move(edge: .leading).combined(with: .opacity))
@@ -226,7 +230,10 @@ struct LibraryScreen: View {
     private var stage: some View {
         PlayerStage(
             controller: player,
-            title: currentIndex.flatMap { store.visible.indices.contains($0) ? store.visible[$0].name : nil } ?? "",
+            // Title comes from the file actually playing, not visible[index]:
+            // currentIndex points into the current shelf, so switching shelves
+            // while music plays otherwise showed the top video's name.
+            title: store.items.first(where: { $0.url == player.currentURL })?.name ?? "",
             fullscreen: $fullscreen,
             onStop: { stopPlayer() },
             onPullToWeb: { stopPlayer(); close() },
@@ -265,6 +272,13 @@ struct LibraryScreen: View {
         player.stop()
         currentIndex = nil
         fullscreen = false
+    }
+
+    /// After a delete, if the file playing is no longer on disk, stop — a folder
+    /// deleted out from under a playing file otherwise kept sounding.
+    private func verifyPlaying() {
+        guard let url = player.currentURL else { return }
+        if !store.items.contains(where: { $0.url == url }) { stopPlayer() }
     }
 
     private func advanceOnEnd() {
@@ -492,7 +506,7 @@ struct LibraryScreen: View {
         // returns just like a video frame — so try the image first for both, and
         // fall back to a kind icon.
         Group {
-            if let image = probe.result(for: item.url)?.image {
+            if let image = probe.result(for: item.url)?.image ?? cover(item) {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
                 ZStack {
@@ -504,6 +518,13 @@ struct LibraryScreen: View {
         }
         .frame(width: 104, height: 58)
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// The song cover saved at download time, for music files whose own bytes
+    /// carry no embedded art (a bare .m4a). Video tiles use the frame thumbnail.
+    private func cover(_ item: Item) -> UIImage? {
+        guard item.kind == .music else { return nil }
+        return Covers.load(Covers.keyFor(item.url.lastPathComponent))
     }
 
     @ViewBuilder

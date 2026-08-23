@@ -45,6 +45,7 @@ final class DownloadsStore: ObservableObject {
     /// Add a download and run it. `run` is the Downloader call for this job.
     func start(
         title: String,
+        cover: String? = nil,
         run: @escaping (DownloadTask, @escaping (UInt64, UInt64) -> Void) async throws -> URL
     ) {
         let task = DownloadTask()
@@ -70,6 +71,11 @@ final class DownloadsStore: ObservableObject {
                     }
                 }
                 update(id) { $0.status = .finished; $0.savedName = saved.lastPathComponent }
+                // Save the song's cover under the file's own name, so the library
+                // tile can show it even though a music-only file carries no art.
+                if let cover = cover, !cover.isEmpty {
+                    await Covers.fetch(cover, key: Covers.keyFor(saved.lastPathComponent))
+                }
             } catch {
                 if task.cancelled {
                     update(id) { $0.status = .cancelled }

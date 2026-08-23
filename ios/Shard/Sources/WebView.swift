@@ -224,7 +224,15 @@ struct WebViewContainer: UIViewRepresentable {
         }
 
         @objc func tapped() { model.onWebTap?() }
-        @objc func panned(_ g: UIPanGestureRecognizer) { if g.state == .began { model.onWebTap?() } }
+        @objc func panned(_ g: UIPanGestureRecognizer) {
+            // Only a vertical drag (a scroll) retreats the address panel. A
+            // horizontal drag is an address/library swipe, which closes the panel
+            // itself in the right order — letting the pan close it here first made
+            // the swipe skip straight to the library.
+            guard g.state == .began else { return }
+            let v = g.velocity(in: g.view)
+            if abs(v.y) > abs(v.x) { model.onWebTap?() }
+        }
 
         @objc func swiped(_ g: UISwipeGestureRecognizer) {
             guard let view = g.view else { return }

@@ -26,10 +26,9 @@ struct PlayerGestures: UIViewRepresentable {
         let single = UITapGestureRecognizer(target: c, action: #selector(Coordinator.tapped))
         let double = UITapGestureRecognizer(target: c, action: #selector(Coordinator.doubleTapped))
         double.numberOfTapsRequired = 2
-        // Deliberately NOT `single.require(toFail: double)` — that made a single
-        // tap wait out the double-tap window (~0.3s), which read as sluggish. The
-        // single toggle firing on the first of a double-tap is a fair trade for
-        // an instant response.
+        // A double-tap must not also fire the single tap (which would flash the
+        // control bar), so the single waits for the double to fail.
+        single.require(toFail: double)
 
         let hold = UILongPressGestureRecognizer(target: c, action: #selector(Coordinator.held(_:)))
         hold.minimumPressDuration = 0.35

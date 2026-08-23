@@ -119,15 +119,16 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// Let go: seek once to the final spot.
     func endScrub(_ p: Float) {
         scrubbing = false
-        player.position = max(0, min(1, p))
+        // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
+        // "finished" and snaps back — cap just short so the far end is reachable.
+        player.position = max(0, min(0.999, p))
     }
 
     func toggle() {
-        if player.state == .ended {
-            // A finished player will not resume on play() — put it back to the
-            // start and go, so the button replays instead of doing nothing.
-            player.position = 0
-            player.play()
+        // A finished player will not resume on play(); reloading the file is the
+        // reliable way to replay from the start.
+        if player.state == .ended || (!player.isPlaying && player.position > 0.995) {
+            if let url = currentURL { open(url) }
         } else {
             player.isPlaying ? player.pause() : player.play()
         }
@@ -146,6 +147,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         rate = Self.rates[(Self.rates.firstIndex(of: rate).map { $0 + 1 } ?? 0) % Self.rates.count]
         player.rate = rate
     }
+    func setRate(_ r: Float) { rate = r; player.rate = r }
     func holdRate(_ value: Float?) { player.rate = value ?? rate }
 
     func stop() { player.stop(); currentURL = nil }
@@ -255,7 +257,7 @@ private struct Gauge: View {
             Image(systemName: icon).font(.title2)
             ProgressView(value: value).frame(width: 90).tint(.white)
         }
-        .padding(16).background(.ultraThinMaterial).cornerRadius(12).foregroundColor(.white)
+        .padding(16).background(Color.black.opacity(0.3)).cornerRadius(12).foregroundColor(.white)
     }
 }
 
@@ -289,6 +291,8 @@ struct PlayerStage: View {
     @State private var startBrightness: CGFloat = 0
     @State private var startVolume: Float = 0
     @State private var holdVolume = false
+    @State private var showRatePicker = false
+    @State private var showVolumeBar = false
 
     var body: some View {
         ZStack {
@@ -322,11 +326,14 @@ struct PlayerStage: View {
     /// Leaving full screen turns back to portrait, then frees rotation again.
     private func applyOrientation(_ fs: Bool) {
         if fs {
+            // Default to landscape (most videos are wide); only a clearly tall
+            // one (a short) stays portrait. videoSize can be 0 before the first
+            // frame, which we treat as wide.
             let s = controller.player.videoSize
-            if s.width > s.height {
-                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
-            } else {
+            if s.height > s.width, s.width > 0 {
                 Orientation.shared.lock(.portrait, to: .portrait)
+            } else {
+                Orientation.shared.lock(.landscapeRight, to: .landscapeRight)
             }
         } else {
             Orientation.shared.lock(.portrait, to: .portrait)
@@ -391,9 +398,11 @@ struct PlayerStage: View {
             }
         case .changed:
             let step = Float(-dy / 260)                     // from the current value
-            // A windowed hold turns the finger's up/down into volume anywhere.
+            // A windowed hold turns the finger's up/down into volume anywhere —
+            // a shorter reach than brightness so it responds quickly.
             if holdVolume {
-                let v = max(0, min(1, startVolume + step)); controller.volume = v
+                let v = max(0, min(1, startVolume + Float(-dy / 150)))
+                controller.volume = v
                 gauge = ("speaker.wave.2", Double(v)); return
             }
             if dragMode == .brightness {
@@ -456,22 +465,61 @@ struct PlayerStage: View {
             HStack {
                 Text(title).font(.subheadline).foregroundColor(.white).lineLimit(1).shadow(radius: 2)
                 Spacer()
-                Button { fullscreen ? (fullscreen = false) : onStop() } label: {
-                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark")
-                        .font(.system(size: 15, weight: .bold)).foregroundColor(.white)
-                        .frame(width: 30, height: 30)
-                        .overlay(Circle().stroke(Color.black.opacity(0.55), lineWidth: 1.5))
-                }
+                closeButton
             }
             .padding(10)
             Spacer()
-            transport
+            VStack(spacing: 6) {
+                if showRatePicker { ratePicker }
+                if showVolumeBar { volumeBar }
+                transport
+            }
         }
     }
 
+    /// A white ✕ with only a hairline dark edge on the glyph itself.
+    private var closeButton: some View {
+        Button { fullscreen ? (fullscreen = false) : onStop() } label: {
+            Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "xmark")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(.white)
+                .shadow(color: .black.opacity(0.5), radius: 0.5)
+                .frame(width: 30, height: 30)
+        }
+    }
+
+    private var ratePicker: some View {
+        HStack(spacing: 8) {
+            ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 2], id: \.self) { r in
+                Button { controller.setRate(r); showRatePicker = false; showBar() } label: {
+                    Text(String(format: "%g×", r)).font(.system(size: 13, weight: .semibold))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(controller.rate == r ? Color.accent : Color.clear)
+                        .foregroundColor(controller.rate == r ? .onAccent : .white)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding(6).background(Color.black.opacity(0.3)).clipShape(Capsule())
+        .padding(.horizontal, 12)
+    }
+
+    private var volumeBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "speaker.fill").font(.system(size: 12)).foregroundColor(.white)
+            SeekSlider(value: Binding(get: { Double(controller.volume) },
+                                      set: { controller.volume = Float($0) }),
+                       onBegin: { showBar() }, onScrub: { controller.volume = Float($0) }, onEnd: { _ in })
+            Image(systemName: "speaker.wave.3.fill").font(.system(size: 12)).foregroundColor(.white)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 8)
+        .background(Color.black.opacity(0.3)).clipShape(Capsule())
+        .padding(.horizontal, 12)
+    }
+
     private var transport: some View {
-        VStack(spacing: 3) {
-            // Seek, with the sound control to its right.
+        VStack(spacing: 5) {
+            // Top row: the seek bar only.
             HStack(spacing: 6) {
                 Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
                 SeekSlider(
@@ -482,32 +530,36 @@ struct PlayerStage: View {
                     onEnd: { controller.endScrub(Float($0)) }
                 )
                 Text(controller.duration).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
-                Button { controller.toggleMute() } label: {
-                    Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                        .font(.system(size: 13))
-                }
             }
-            // Speed at the far left; transport centred; full-screen at the right.
-            HStack(spacing: 20) {
-                Button { controller.cycleRate() } label: {
-                    Text(String(format: "%g×", controller.rate)).font(.system(size: 13, weight: .bold))
-                        .frame(width: 46, alignment: .leading)   // fixed, so 1×→1.25× does not shove the buttons
+            // Bottom row: transport on the left (wide), sound/speed/full-screen right.
+            HStack {
+                HStack(spacing: 28) {
+                    Button { onPrev() } label: { Image(systemName: "backward.end.fill").font(.system(size: 15)) }.disabled(!hasPrev)
+                    Button { controller.toggle() } label: {
+                        Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19))
+                    }
+                    Button { onNext() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
                 Spacer()
-                Button { onPrev() } label: { Image(systemName: "backward.end.fill").font(.system(size: 14)) }.disabled(!hasPrev)
-                Button { controller.toggle() } label: {
-                    Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 18))
-                }
-                Button { onNext() } label: { Image(systemName: "forward.end.fill").font(.system(size: 14)) }.disabled(!hasNext)
-                Spacer()
-                Button { fullscreen.toggle() } label: {
-                    Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
-                                                  : "arrow.up.left.and.arrow.down.right").font(.system(size: 14))
+                HStack(spacing: 20) {
+                    Button { controller.toggleMute() } label: {
+                        Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15))
+                    }
+                    .onLongPressGesture(minimumDuration: 0.35) { showVolumeBar.toggle(); showRatePicker = false; showBar() }
+                    Button { controller.cycleRate() } label: {
+                        Text(String(format: "%g×", controller.rate)).font(.system(size: 14, weight: .bold))
+                    }
+                    .onLongPressGesture(minimumDuration: 0.35) { showRatePicker.toggle(); showVolumeBar = false; showBar() }
+                    Button { fullscreen.toggle() } label: {
+                        Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
+                                                      : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
+                    }
                 }
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 10).padding(.top, 5).padding(.bottom, 4)
-        .background(.ultraThinMaterial)
+        .padding(.horizontal, 12).padding(.top, 6)
+        .padding(.bottom, fullscreen ? 22 : 5)   // lift buttons off a short's very edge
+        .background(Color.black.opacity(0.3))
     }
 }

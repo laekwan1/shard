@@ -13,6 +13,7 @@ struct BrowserScreen: View {
     @State private var qualities: [YtRow] = []
     @State private var pendingOffer = ""
     @State private var pendingTitle = ""
+    @State private var pendingThumb = ""
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
@@ -42,7 +43,7 @@ struct BrowserScreen: View {
                 qualityList
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .padding(.leading, max(8, min(listAnchor.x - listWidth, UIScreen.main.bounds.width - listWidth - 8)))
-                    .padding(.top, listAnchor.y + topInset + 6)
+                    .padding(.top, listAnchor.y + 4)
             }
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
@@ -84,6 +85,7 @@ struct BrowserScreen: View {
             }
             pendingOffer = json
             pendingTitle = offer.title ?? model.pageTitle
+            pendingThumb = offer.thumb ?? ""
             if offer.isYouTube {
                 guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
                     banner = "화질을 찾지 못했습니다"; return
@@ -170,11 +172,6 @@ struct BrowserScreen: View {
 
     private let listWidth: CGFloat = 264
 
-    private var topInset: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }.first?.keyWindow?.safeAreaInsets.top ?? 47
-    }
-
     private var qualityList: some View {
         VStack(spacing: 0) {
             ForEach(Array(qualities.enumerated()), id: \.element.id) { i, row in
@@ -206,7 +203,9 @@ struct BrowserScreen: View {
         withAnimation { showList = false }
         let offer = pendingOffer
         let label = row.isAudioOnly ? "\(pendingTitle) (음악)" : "\(pendingTitle) · \(row.label)"
-        downloads.start(title: label) { task, report in
+        // Only music tiles need a stand-in cover; a video makes its own thumbnail.
+        let cover = row.isAudioOnly ? pendingThumb : nil
+        downloads.start(title: label, cover: cover) { task, report in
             try await Downloader.runYouTube(offer, itag: row.itag, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"
