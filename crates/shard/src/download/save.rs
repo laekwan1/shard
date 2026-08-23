@@ -593,19 +593,22 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let video_wish =
         AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
     let audio = offer.best_audio(&video_wish);
+    // Dedupe by resolution AND codec (not resolution alone) so the smaller-file
+    // codecs — VP9, AV1 — show up alongside H.264 at the same quality, and the user
+    // can pick the lighter download. The label carries the codec so two "720p" rows
+    // are told apart; the detail shows the size.
     let mut seen: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
-        if seen.contains(&video.quality) {
+        let codec = video.codec();
+        let key = format!("{}|{}", video.quality, codec);
+        if seen.contains(&key) {
             continue;
         }
-        seen.push(video.quality.clone());
+        seen.push(key);
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
         let size = if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) };
-        rows.push((
-            video.itag,
-            video.quality.clone(),
-            format!("{} · {}", size, video.codec()),
-        ));
+        let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
+        rows.push((video.itag, label, size));
     }
     Ok(rows)
 }
