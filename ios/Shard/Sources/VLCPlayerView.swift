@@ -151,7 +151,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
-        rampTimer?.invalidate()
         teardownAV()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
@@ -218,18 +217,18 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
-        // Keep the audio unit ALIVE across the swap — a full stop tears it down and
-        // rebuilding it made the hard "텁" click. So stop only when the player is
-        // finished/errored/idle (the wedge cases); otherwise swap media on the live,
-        // silenced unit. The black cover (buffering) hides the old frame meanwhile,
-        // and the audio ramps up on the first frame. A watchdog recovers a wedge.
+        // MUTE (not just volume-0) across the whole transition and hold it a beat
+        // into playback: the volume resets per media, but the mute flag is what
+        // actually silences the new stream's first buffer — the moment the "텁" pop
+        // fires. Unmuting too early (on the first frame) let the pop through, so it
+        // is released a short time after playback is up (see timeChanged).
         let s = player.state
         let needStop = s == .ended || s == .error || s == .stopped
-        player.audio?.volume = 0       // silence before touching media (no click)
+        player.audio?.isMuted = true
         if needStop { player.stop() }
         pendingUnmute = true
         player.media = makeMedia(url)
-        player.audio?.volume = 0
+        player.audio?.isMuted = true
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -298,22 +297,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         hostView.showAV(nil)
     }
 
-    /// A ~0.12s ramp from silence to full when playback actually starts — short
-    /// enough to feel immediate, but it removes the hard "텁" the audio unit makes
-    /// when it starts at full gain.
-    private var rampTimer: Timer?
-    private func rampUp() {
-        rampTimer?.invalidate()
-        player.audio?.volume = 0   // 0 before the first tick, so nothing leaks at full
-        var v: Int32 = 0
-        rampTimer = Timer.scheduledTimer(withTimeInterval: 0.015, repeats: true) { [weak self] t in
-            guard let self = self else { t.invalidate(); return }
-            v += 8
-            if v >= 100 { v = 100; t.invalidate() }
-            self.player.audio?.volume = v
-        }
-    }
-
     private func makeMedia(_ url: URL) -> VLCMedia {
         let media = VLCMedia(url: url)
         media.addOption(":file-caching=100")   // shorter startup buffer → faster start
@@ -331,7 +314,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 self.player.stop()
                 self.player.media = self.makeMedia(url)
                 self.pendingUnmute = true
-                self.player.audio?.volume = 0
+                self.player.audio?.isMuted = true
                 self.player.play()
                 self.player.rate = self.rate
             }
@@ -463,7 +446,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
-            if !muted { rampUp() } else { player.audio?.volume = 0 }
+            // Release the mute a short beat AFTER playback is up, so the start pop
+            // (right at the first buffer) is safely past. Keep it muted if the user
+            // muted.
+            let gen = openGen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self = self, gen == self.openGen else { return }
+                self.player.audio?.isMuted = self.muted
+            }
         } else if buffering, player.isPlaying {
             // Buffering that was NOT an open (e.g. after a seek) — clear it once
             // frames flow again, or the spinner spun forever over black.
@@ -501,11 +491,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the sound kept going. The cover is driven only by open() (a real track
         // change) and cleared on the first frame; a seek just re-buffers silently.
         if player.state == .ended || player.state == .error { buffering = false }
-        // Hold the volume at 0 through every state update until the first frame —
-        // the audio object is created late, so a single volume=0 in open() could be
-        // set on a nil/old object and the first buffer slipped through at full gain
-        // ("텁"). Re-applying here guarantees silence until we ramp up.
-        if pendingUnmute { player.audio?.volume = 0 }
+        // Keep the (late-created) new audio object MUTED at every state update until
+        // we release it after playback is up — this is what actually stops the "텁"
+        // pop on the first buffer.
+        if pendingUnmute { player.audio?.isMuted = true }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
