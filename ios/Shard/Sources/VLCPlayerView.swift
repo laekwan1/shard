@@ -157,7 +157,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // were heard at once. Stop it, and drop the remote-command handlers so
         // the lock screen does not talk to a dead player.
         player.stop()
-        avRampTimer?.invalidate()
         teardownAV()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
@@ -265,10 +264,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
         av.replaceCurrentItem(with: item)
         av.isMuted = muted
-        av.volume = 0
+        av.volume = 1
         av.play()
         av.rate = rate
-        avRamp(to: 1)                      // de-click the track start too
         hostView.showAV(av)               // route the picture through the AVPlayerLayer
         addAVObservers(item)
     }
@@ -287,28 +285,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
 
-    // A short de-click ramp around AVPlayer pause/play: fade the player's own gain
-    // (separate from the system volume) so the click at the pause/resume edge is
-    // masked in the signal.
-    private var avRampTimer: Timer?
-    private func avRamp(to target: Float, then: (() -> Void)? = nil) {
-        avRampTimer?.invalidate()
-        let start = av.volume
-        let steps = 6
-        var i = 0
-        avRampTimer = Timer.scheduledTimer(withTimeInterval: 0.007, repeats: true) { [weak self] t in
-            guard let self = self else { t.invalidate(); return }
-            i += 1
-            self.av.volume = start + (target - start) * Float(i) / Float(steps)
-            if i >= steps { self.av.volume = target; t.invalidate(); then?() }
-        }
-    }
-    private func avPlay() {
-        av.volume = 0; av.play(); av.rate = rate; avRamp(to: 1)
-    }
-    private func avPause() {
-        avRamp(to: 0) { [weak self] in self?.av.pause() }
-    }
+    // Play/pause are instant — a de-click fade did not remove the pop (it is not a
+    // signal-path click) and only added a hair of lag.
+    private func avPlay() { av.volume = 1; av.play(); av.rate = rate }
+    private func avPause() { av.pause() }
 
     private func removeAVObservers() {
         if let o = avTimeObs { av.removeTimeObserver(o); avTimeObs = nil }

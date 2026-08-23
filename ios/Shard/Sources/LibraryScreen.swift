@@ -486,15 +486,16 @@ struct LibraryScreen: View {
         let gen = orientGen
         player.settling = true
         fullscreen = true
-        // Rotate only AFTER the full-screen black cover has been painted — rotating
-        // in the same runloop turned the still-visible windowed view (squish/glitch)
-        // before black was up. Same idea as the exit path. Re-issue the lock a couple
-        // of times: a single request during the full-screen transition was sometimes
-        // rejected, leaving a wide video upright.
-        for delay in [0.08, 0.3, 0.55] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { if gen == orientGen { lockForVideo() } }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { if gen == orientGen { player.settling = false } }
+        // Rotate just after the black cover is painted (rotating in the same runloop
+        // showed the windowed squish first), with one retry for reliability.
+        let s = player.videoSize
+        let willRotate = !(s.height > s.width && s.width > 0)   // wide → landscape turn
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { if gen == orientGen { lockForVideo() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) { if gen == orientGen { lockForVideo() } }
+        // Clear the black as soon as it can: a portrait video does not rotate, so
+        // reveal quickly; a landscape one waits just long enough for the turn.
+        let reveal = willRotate ? 0.4 : 0.16
+        DispatchQueue.main.asyncAfter(deadline: .now() + reveal) { if gen == orientGen { player.settling = false } }
     }
 
     /// Exit full screen: rotate back to portrait FIRST (still full screen, black
@@ -503,13 +504,15 @@ struct LibraryScreen: View {
     private func exitFullscreen() {
         orientGen += 1
         let gen = orientGen
+        let s = player.videoSize
+        let wasLandscape = !(s.height > s.width && s.width > 0)   // needs to turn back
         player.settling = true
         Orientation.shared.lock(.portrait, to: .portrait)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + (wasLandscape ? 0.34 : 0.14)) {
             guard gen == orientGen else { return }
             fullscreen = false
             Orientation.shared.free()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 if gen == orientGen { player.settling = false }
             }
         }
