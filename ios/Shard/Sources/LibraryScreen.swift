@@ -485,7 +485,7 @@ struct LibraryScreen: View {
         // the next runloop — otherwise the rotation began before the black was up
         // and the squish flashed through.
         player.settling = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.38) {
             if gen == orientGen { player.settling = false }
         }
         // Delay the actual rotation ~1 frame so the black cover is painted first —

@@ -274,11 +274,19 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Time is advancing → real playback, so any spinner comes down. This is
         // the reliable "actually playing" signal (a state change to .playing does
         // not always arrive).
-        if buffering { buffering = false }
-        // First real frame — bring the audio on now (unless the user muted).
+        // First real frame of a freshly-opened stream: unmute (audio starts
+        // priming) but KEEP the black cover a bit longer, then reveal picture and
+        // sound together — libVLC's audio trails the first video frame by up to
+        // ~0.5s, so revealing on the frame alone showed a silent picture. The extra
+        // hold also keeps the spinner visible instead of a one-frame flash.
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             player.audio?.isMuted = muted
+            let gen = openGen
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                guard let self = self, gen == self.openGen else { return }
+                self.buffering = false
+            }
         }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
@@ -309,7 +317,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         updateNowPlaying()
         switch player.state {
         case .opening, .buffering: buffering = true
-        default: buffering = false
+        case .ended, .error, .stopped: buffering = false
+        default: break   // .playing keeps the cover until the delayed reveal frees it
         }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
@@ -499,9 +508,10 @@ struct PlayerStage: View {
             if controller.brightness < 1 {
                 Color.black.opacity(1 - controller.brightness).allowsHitTesting(false)
             }
-            // Cover the surface with black while a new stream is opening, so the
-            // previous video's last frame does not flash before the new one renders.
-            if controller.buffering && !controller.isPlaying && !isMusic {
+            // Cover the surface with black+spinner while a new stream is opening
+            // AND for a short hold after playback starts (see VLCController) — this
+            // hides the old frame flash and lets the audio catch the picture.
+            if controller.buffering && !isMusic {
                 Color.black
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
             }
@@ -693,7 +703,10 @@ struct PlayerStage: View {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
     private var seekInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 6) : 0 }
-    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 24) : 10 }
+    // Buttons pulled in further than the seek bar's own inset — the seek bar has a
+    // ~38pt time label at each end, so the buttons must clear that to sit under the
+    // bar itself, not under the labels.
+    private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 66 : 24) : 10 }
 
     private var controlsOverlay: some View {
         VStack(spacing: 0) {
@@ -704,7 +717,10 @@ struct PlayerStage: View {
             }
             .padding(.leading, fullscreen ? safeInsets.left + 16 : 12)
             .padding(.trailing, fullscreen ? safeInsets.right + 16 : 12)
-            .padding(.top, fullscreen ? max(topInset - 6, 2) : 10)
+            // Full screen: clear the status bar. A short (portrait) needs the whole
+            // safe-area inset so the title does not overlap the very top edge; a
+            // landscape one can sit a little higher.
+            .padding(.top, fullscreen ? (screenLandscape ? max(topInset - 6, 2) : topInset + 6) : 10)
             .padding(.bottom, 8)
             Spacer()
             transport
