@@ -105,7 +105,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         super.init()
         player.delegate = self
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .moviePlayback)
+        try? session.setCategory(.playback, mode: .default)
         // Pin the hardware sample rate so it does NOT reconfigure between tracks of
         // different rates (44.1k ↔ 48k) — that route reconfiguration is the "텁"
         // pop heard on every transition, for AVPlayer and libVLC alike. A fixed
@@ -308,7 +308,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             let d = Self.clock(Int32(dur * 1000))
             if d != duration { duration = d }
         }
-        let playing = av.timeControlStatus == .playing || av.rate != 0
+        // Treat "waiting to play" (buffering) as playing, so the pause icon does not
+        // flip back to play for a beat right after a tap.
+        let playing = av.timeControlStatus != .paused
         if isPlaying != playing { isPlaying = playing }
         updateNowPlayingAV(cur: cur, dur: dur)
     }
@@ -708,11 +710,9 @@ struct PlayerStage: View {
     @State private var startBrightness: Double = 1
     @State private var startVolume: Float = 0
     @State private var holdVolume = false
-    // Full-screen hold state: whether a hold is active, whether a vertical swipe
-    // has turned it into a brightness/volume drag, and which side it began on.
+    /// True while a full-screen hold (2×/rewind) is down, so the vertical-drag
+    /// brightness/volume is suppressed for its duration.
     @State private var holdActive = false
-    @State private var holdCancelled = false
-    @State private var heldRight = false
     @State private var showRatePicker = false
     @State private var showVolumeBar = false
     /// The volume bar's shown value, kept locally so the thumb follows the finger
@@ -823,31 +823,15 @@ struct PlayerStage: View {
             else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
             return
         }
-        // A hold starts 2×/rewind immediately (right = 2×, left = rewind). If the
-        // finger then swipes up/down, the drag handler CANCELS this and switches to
-        // brightness/volume — so a stationary hold keeps 2×/rewind, a moving one
-        // adjusts sound/brightness.
-        if active {
-            holdActive = true
-            holdCancelled = false
-            heldRight = x > w / 2
-            startBrightness = controller.brightness
-            startVolume = SystemVolume.shared.level
-            if heldRight { controller.holdRate(2.0) } else { startRewind() }
+        // A full-screen hold runs 2× on the right, rewind on the left. While a hold
+        // is active, the vertical-drag brightness/volume is suppressed (see vdrag) —
+        // the two used to fire together.
+        holdActive = active
+        if x > w / 2 {
+            controller.holdRate(active ? 2.0 : nil)
         } else {
-            holdActive = false
-            if !holdCancelled {           // stationary hold released: undo 2×/rewind
-                if heldRight { controller.holdRate(nil) } else { stopRewind() }
-            }
+            active ? startRewind() : stopRewind()
         }
-    }
-
-    /// Cancel the hold's 2×/rewind the moment a vertical swipe begins, so the drag
-    /// can take over as brightness/volume.
-    private func cancelHoldForDrag() {
-        guard holdActive, !holdCancelled else { return }
-        holdCancelled = true
-        if heldRight { controller.holdRate(nil) } else { stopRewind() }
     }
 
     private func vdrag(_ phase: PlayerGestures.Phase, _ startX: CGFloat, _ w: CGFloat, _ dy: CGFloat) {
@@ -861,21 +845,10 @@ struct PlayerStage: View {
                 dragMode = .swipe
             }
         case .changed:
+            // A hold owns the gesture (2×/rewind) — do not also adjust
+            // brightness/volume while it is down.
+            if holdActive { return }
             let step = Float(-dy / 160)                     // from the current value
-            // A hold that then swipes up/down cancels 2×/rewind and becomes a
-            // brightness (left) / volume (right) adjust — following the side the
-            // hold began on.
-            if holdActive, abs(dy) > 12 {
-                cancelHoldForDrag()
-                if heldRight {
-                    let v = max(0, min(1, startVolume + Float(-dy / 130)))
-                    SystemVolume.shared.set(v); gauge = ("speaker.wave.2", Double(v))
-                } else {
-                    let b = max(0.1, min(1, startBrightness + Double(-dy / 200)))
-                    controller.brightness = b; gauge = ("sun.max", b)
-                }
-                return
-            }
             // A windowed hold turns the finger's up/down into volume anywhere —
             // a shorter reach than brightness so it responds quickly.
             if holdVolume {
@@ -891,17 +864,17 @@ struct PlayerStage: View {
                 gauge = ("speaker.wave.2", Double(v))
             }
         case .ended:
-            // A hold-turned-drag (or any hold) must not also fire the swipe
-            // enter/exit-fullscreen.
-            if holdActive || holdCancelled {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
+            if holdActive {
+                // The hold is driving 2×/rewind — never fire the swipe toggle.
+                dragMode = .none
             } else if dragMode == .swipe {
                 if dy < -42 { if !fullscreen { onEnterFullscreen() } }
                 else if dy > 42 { if fullscreen { onExitFullscreen() } }
+                dragMode = .none
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { gauge = nil }
+                dragMode = .none
             }
-            dragMode = .none
         }
     }
 
