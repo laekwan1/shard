@@ -593,33 +593,30 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let video_wish =
         AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
     let audio = offer.best_audio(&video_wish);
-    // Show AV1 only — it is the smallest at a given quality, and the user asked to
-    // drop H.264 (which also had an AVPlayer playback glitch) and VP9. If a video
-    // has no AV1 at all, fall back to every codec so a download is still possible;
-    // there the codec is shown in the label to tell them apart.
-    let mut av1: Vec<(u32, String, String)> = Vec::new();
-    let mut fallback: Vec<(u32, String, String)> = Vec::new();
-    let mut seen_fallback: Vec<String> = Vec::new();
-    let mut seen_av1: Vec<String> = Vec::new();
+    // One row per resolution, choosing the codec by preference: AV1 > VP9 > H.264
+    // (smallest first; H.264 last because of its AVPlayer playback glitch). The
+    // codec is shown in the label so a fallback to H.264 is visible.
+    fn codec_rank(c: &str) -> u8 {
+        match c { "AV1" => 0, "VP9" => 1, "H.264" => 2, _ => 3 }
+    }
+    // quality -> (rank, itag, label, size), preserving first-seen resolution order.
+    let mut best: std::collections::HashMap<String, (u8, u32, String, String)> = std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
         let codec = video.codec();
+        let r = codec_rank(codec);
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
         let size = if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) };
-        if codec == "AV1" {
-            if !seen_av1.contains(&video.quality) {
-                seen_av1.push(video.quality.clone());
-                av1.push((video.itag, video.quality.clone(), size));
-            }
-        } else {
-            let key = format!("{}|{}", video.quality, codec);
-            if !seen_fallback.contains(&key) {
-                seen_fallback.push(key);
-                let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
-                fallback.push((video.itag, label, size));
-            }
+        let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
+        if !order.contains(&video.quality) { order.push(video.quality.clone()); }
+        let better = best.get(&video.quality).map_or(true, |(cr, ..)| r < *cr);
+        if better { best.insert(video.quality.clone(), (r, video.itag, label, size)); }
+    }
+    for q in order {
+        if let Some((_, itag, label, size)) = best.get(&q) {
+            rows.push((*itag, label.clone(), size.clone()));
         }
     }
-    rows.extend(if av1.is_empty() { fallback } else { av1 });
     Ok(rows)
 }
 
