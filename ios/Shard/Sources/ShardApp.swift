@@ -68,6 +68,6 @@ struct RootView: View {
             }
         }
         .tint(.accent)
-        .onAppear { SystemVolume.shared.attach() }
+        .onAppear { SystemVolume.shared.attach(); AudioKeepAlive.shared.start() }
     }
 }

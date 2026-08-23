@@ -709,8 +709,7 @@ struct PlayerStage: View {
     @State private var dragMode: DragMode = .none
     @State private var startBrightness: Double = 1
     @State private var startVolume: Float = 0
-    @State private var holdVolume = false
-    /// True while a full-screen hold (2×/rewind) is down, so the vertical-drag
+    /// True while a hold (2×/rewind) is down, so the vertical-drag
     /// brightness/volume is suppressed for its duration.
     @State private var holdActive = false
     @State private var showRatePicker = false
@@ -815,17 +814,9 @@ struct PlayerStage: View {
 
     private func hold(_ active: Bool, _ x: CGFloat, _ w: CGFloat) {
         if active { showBar() }
-        // Windowed: a hold brings up the sound, adjusted by moving the finger up
-        // and down (see the drag handler). Full screen keeps the 2×/rewind hold.
-        if !fullscreen {
-            holdVolume = active
-            if active { startVolume = SystemVolume.shared.level }
-            else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
-            return
-        }
-        // A full-screen hold runs 2× on the right, rewind on the left. While a hold
-        // is active, the vertical-drag brightness/volume is suppressed (see vdrag) —
-        // the two used to fire together.
+        // A hold runs 2× on the right, rewind on the left — in both windowed and
+        // full screen. While it is down, the vertical-drag brightness/volume is
+        // suppressed (see vdrag), so the two no longer fire together.
         holdActive = active
         if x > w / 2 {
             controller.holdRate(active ? 2.0 : nil)
@@ -849,13 +840,6 @@ struct PlayerStage: View {
             // brightness/volume while it is down.
             if holdActive { return }
             let step = Float(-dy / 160)                     // from the current value
-            // A windowed hold turns the finger's up/down into volume anywhere —
-            // a shorter reach than brightness so it responds quickly.
-            if holdVolume {
-                let v = max(0, min(1, startVolume + Float(-dy / 100)))
-                SystemVolume.shared.set(v)
-                gauge = ("speaker.wave.2", Double(v)); return
-            }
             if dragMode == .brightness {
                 let b = max(0.1, min(1, startBrightness + Double(step)))
                 controller.brightness = b; gauge = ("sun.max", b)
@@ -1036,6 +1020,7 @@ struct PlayerStage: View {
                     Button { onPrev(); showBar() } label: { Image(systemName: "backward.end.fill").font(.system(size: 15)) }.disabled(!hasPrev)
                     Button { controller.toggle(); showBar() } label: {
                         Image(systemName: controller.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 19))
+                            .animation(nil, value: controller.isPlaying)   // switch icon instantly, no morph
                     }
                     Button { onNext(); showBar() } label: { Image(systemName: "forward.end.fill").font(.system(size: 15)) }.disabled(!hasNext)
                 }
