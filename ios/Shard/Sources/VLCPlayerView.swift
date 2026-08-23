@@ -818,6 +818,10 @@ struct PlayerStage: View {
             else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { gauge = nil } }
             return
         }
+        // The left/right EDGES are for the brightness/volume vertical drag — a hold
+        // that starts there must NOT also fire 2×/rewind (both were applying at
+        // once). Only a hold in the centre band runs 2×/rewind.
+        guard x >= w * 0.2, x <= w * 0.8 else { return }
         if x > w / 2 {
             controller.holdRate(active ? 2.0 : nil)       // right: 2×
         } else {
@@ -1080,7 +1084,7 @@ struct PlayerStage: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             .padding(.trailing, fullscreen ? sideInset : 12)
-            .padding(.bottom, fullscreen ? 96 : 74)   // clear of the transport bar
+            .padding(.bottom, fullscreen ? 64 : 50)   // just above the buttons, as before
         }
     }
 }

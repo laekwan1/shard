@@ -15,7 +15,10 @@ final class AudioKeepAlive {
         if player == nil {
             player = try? AVAudioPlayer(data: Self.silentWav(seconds: 1))
             player?.numberOfLoops = -1
-            player?.volume = 0
+            // Volume 1, NOT 0: the samples are already silence, so nothing is heard,
+            // but a volume-0 player gets optimized out and the route still idles.
+            // At full volume iOS keeps the (silent) stream — and the route — alive.
+            player?.volume = 1
             player?.prepareToPlay()
         }
         if player?.isPlaying == false { player?.play() }
