@@ -258,6 +258,20 @@ struct LibraryScreen: View {
         }
     }
 
+    /// A filled, full-width dialog button so the choices read as buttons, not
+    /// plain text.
+    private func dialogButton(_ title: String, fill: Color, text: Color,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.subheadline.weight(.semibold))
+                .foregroundColor(text)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(fill)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+    }
+
     private func deleteFolderCard(_ folder: String) -> some View {
         VStack(spacing: 14) {
             Text("폴더 삭제").font(.headline)
@@ -265,14 +279,14 @@ struct LibraryScreen: View {
                 .font(.caption).foregroundColor(.muted).multilineTextAlignment(.center)
             VStack(spacing: 8) {
                 if store.folderHasContents(folder) {
-                    Button(role: .destructive) {
+                    dialogButton("전체삭제", fill: .red, text: .white) {
                         store.deleteFolder(folder, withContents: true); deletingFolder = nil; verifyPlaying()
-                    } label: { Text("전체삭제").frame(maxWidth: .infinity) }
+                    }
                 }
-                Button {
+                dialogButton("폴더삭제", fill: Color.toolbar, text: .onSurface) {
                     store.deleteFolder(folder, withContents: false); deletingFolder = nil; verifyPlaying()
-                } label: { Text("폴더삭제").frame(maxWidth: .infinity) }
-                Button("취소") { deletingFolder = nil }.frame(maxWidth: .infinity)
+                }
+                dialogButton("취소", fill: Color.toolbar, text: .muted) { deletingFolder = nil }
             }
         }
         .padding(18)
@@ -290,9 +304,8 @@ struct LibraryScreen: View {
                 .textFieldStyle(.roundedBorder)
                 .autocapitalization(.none)
             HStack(spacing: 10) {
-                Button("취소", action: cancel).frame(maxWidth: .infinity)
-                Button(action: confirm) { Text("바꾸기").bold().frame(maxWidth: .infinity) }
-                    .foregroundColor(.accent)
+                dialogButton("취소", fill: Color.toolbar, text: .muted, action: cancel)
+                dialogButton("바꾸기", fill: .accent, text: .onAccent, action: confirm)
             }
         }
         .padding(18)
@@ -309,14 +322,10 @@ struct LibraryScreen: View {
                 .textFieldStyle(.roundedBorder)
                 .autocapitalization(.none)
             HStack(spacing: 10) {
-                Button("취소") { showNewFolder = false; newFolder = "" }
-                    .frame(maxWidth: .infinity)
-                Button {
+                dialogButton("취소", fill: Color.toolbar, text: .muted) { showNewFolder = false; newFolder = "" }
+                dialogButton("만들기", fill: .accent, text: .onAccent) {
                     store.createFolder(newFolder); newFolder = ""; showNewFolder = false
-                } label: {
-                    Text("만들기").bold().frame(maxWidth: .infinity)
                 }
-                .foregroundColor(.accent)
             }
         }
         .padding(18)
