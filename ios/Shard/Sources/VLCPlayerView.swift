@@ -17,6 +17,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// True while the stream is opening/buffering, so the stage can show a spinner
     /// in the middle instead of a blank picture.
     @Published var buffering = false
+    /// True briefly while the interface is rotating for full screen, so the stage
+    /// can hide the (squishing) video behind black until the rotation settles.
+    @Published var settling = false
     var scrubbing = false
     /// Set when the stream reaches its end. A finished libVLC player will not
     /// resume on play() — its state may read .ended or .stopped — so the replay
@@ -49,6 +52,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// same spot after a phone-call interruption reloads the file.
     private var pendingSeek: Float?
     private var interruptedAt: Float?
+    private var tick = 0
 
     override init() {
         super.init()
@@ -143,6 +147,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func open(_ url: URL) {
         currentURL = url
         reachedEnd = false
+        buffering = true
         position = 0          // jump the bar to the start at once, not a beat later
         // Stop before loading new media, always. A player left in .ended (or an
         // error) state wedged when handed new media — the replayed file, and
@@ -232,14 +237,31 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func stop() { player.stop(); currentURL = nil }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
+        // Time is advancing → real playback, so any spinner comes down. This is
+        // the reliable "actually playing" signal (a state change to .playing does
+        // not always arrive).
+        if buffering { buffering = false }
         // Apply a resume-seek once the reloaded file is actually running.
         if let p = pendingSeek, player.isPlaying, player.position > 0 {
             player.position = p; pendingSeek = nil
         }
-        if !scrubbing { position = player.position }
-        isPlaying = player.isPlaying
-        elapsed = Self.clock(player.time.intValue)
-        if let length = player.media?.length.intValue, length > 0 { duration = Self.clock(length) }
+        // Assign only when the value actually changed. Re-assigning an identical
+        // @Published value still fires objectWillChange, which re-rendered the
+        // whole library four times a second and made the folder rename/delete
+        // dialogs flicker while something played. A small position threshold keeps
+        // the seek bar smooth without a publish on every sub-pixel tick.
+        tick &+= 1
+        if !scrubbing, tick % 2 == 0 {   // ~2×/sec is smooth enough for a thin bar
+            let p = player.position
+            if abs(p - position) > 0.0008 { position = p }
+        }
+        if isPlaying != player.isPlaying { isPlaying = player.isPlaying }
+        let e = Self.clock(player.time.intValue)
+        if e != elapsed { elapsed = e }
+        if let length = player.media?.length.intValue, length > 0 {
+            let d = Self.clock(length)
+            if d != duration { duration = d }
+        }
         updateNowPlaying()
     }
 
@@ -401,6 +423,7 @@ struct PlayerStage: View {
         ZStack {
             Color.black
             VLCSurface(controller: controller).scaleEffect(zoom)
+                .opacity(controller.settling ? 0 : 1)   // hide the squish while rotating
             if isMusic {
                 // A song has no picture of its own — show the saved cover, large,
                 // and fall back to a note only when there is none.
@@ -410,7 +433,7 @@ struct PlayerStage: View {
                     Image(systemName: "music.note").font(.system(size: 64)).foregroundColor(.white.opacity(0.4))
                 }
             }
-            if controller.buffering {
+            if controller.buffering && !controller.isPlaying {
                 ProgressView().progressViewStyle(.circular).tint(.white).scaleEffect(1.3)
             }
             PlayerGestures(
@@ -623,7 +646,7 @@ struct PlayerStage: View {
                 }
             }
         }
-        .padding(6).background(Color.toolbar).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(6).background(Color.black.opacity(0.88)).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
@@ -644,12 +667,12 @@ struct PlayerStage: View {
         }
         .frame(width: 220)
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Color.toolbar).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Color.black.opacity(0.88)).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.trailing, 2)
     }
 
     private var transport: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: fullscreen ? 22 : 10) {
             // Top row: the seek bar only.
             HStack(spacing: 6) {
                 // Fixed width so the seek bar does not grow/shrink as the elapsed
@@ -707,8 +730,8 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 12).padding(.top, 8)
-        .padding(.bottom, fullscreen ? 30 : 16)   // room under the buttons; more in full screen for a short's edge
+        .padding(.horizontal, 12).padding(.top, fullscreen ? 18 : 8)
+        .padding(.bottom, fullscreen ? 34 : 16)   // room under the buttons; more in full screen for a short's edge
         .background(Color.black.opacity(0.3))
         // The picker floats as a separate popup ABOVE the buttons — an overlay, so
         // it never pushes the seek bar or buttons out of place. Right-aligned over
@@ -719,7 +742,7 @@ struct PlayerStage: View {
                 if showVolumeBar { volumeBar }
             }
             .padding(.trailing, 12)
-            .offset(y: -48)
+            .offset(y: fullscreen ? -84 : -52)
         }
     }
 }

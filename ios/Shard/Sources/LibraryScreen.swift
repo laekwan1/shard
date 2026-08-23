@@ -27,7 +27,8 @@ struct LibraryScreen: View {
     @State private var deletingFolder: String?
     @State private var showSettings = false
     @State private var fileMenu: Item?
-    @State private var showFolderPick = false
+    @State private var showFolderPick = false   // card shifted left
+    @State private var showFolderPanel = false  // folder list revealed (a beat later)
     /// Direction of the last shelf switch, so the list slides in the way the
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
@@ -67,7 +68,7 @@ struct LibraryScreen: View {
             }
             if let item = fileMenu {
                 Color.black.opacity(0.35).ignoresSafeArea()
-                    .onTapGesture { fileMenu = nil; showFolderPick = false }
+                    .onTapGesture { fileMenu = nil; showFolderPick = false; showFolderPanel = false }
                     .zIndex(6)
                 fileMenuCard(item).zIndex(7)
             }
@@ -158,6 +159,23 @@ struct LibraryScreen: View {
         return targets
     }
 
+    /// Two-step so the card slides left first, then the folder list slides out
+    /// from where the row was — instead of both moving at once.
+    private func toggleFolderMove() {
+        let spring = Animation.spring(response: 0.32, dampingFraction: 0.85)
+        if !showFolderPick {
+            withAnimation(spring) { showFolderPick = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.13) {
+                withAnimation(spring) { showFolderPanel = true }
+            }
+        } else {
+            withAnimation(spring) { showFolderPanel = false }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                withAnimation(spring) { showFolderPick = false }
+            }
+        }
+    }
+
     private func fileMenuCard(_ item: Item) -> some View {
         let targets = moveTargets(item)
         // The card is anchored (centred) and the folder panel is an OVERLAY, so
@@ -171,7 +189,7 @@ struct LibraryScreen: View {
             if !targets.isEmpty {
                 Divider().background(Color.toolbar)
                 menuRow("폴더로 이동", showFolderPick ? "chevron.right" : "folder") {
-                    withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) { showFolderPick.toggle() }
+                    toggleFolderMove()
                 }
             }
             Divider().background(Color.toolbar)
@@ -181,12 +199,12 @@ struct LibraryScreen: View {
         .background(Color.chrome)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(alignment: .topLeading) {
-            if showFolderPick && !targets.isEmpty {
+            if showFolderPanel && !targets.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(targets.enumerated()), id: \.offset) { i, folder in
                         if i > 0 { Divider().background(Color.toolbar) }
                         menuRow(folder ?? "저장소", folder == nil ? "house.fill" : "folder") {
-                            store.move(item, to: folder); fileMenu = nil; showFolderPick = false
+                            store.move(item, to: folder); fileMenu = nil; showFolderPick = false; showFolderPanel = false
                         }
                     }
                 }
@@ -284,11 +302,14 @@ struct LibraryScreen: View {
             fullscreen: $fullscreen,
             onStop: { stopPlayer() },
             onPullToWeb: { stopPlayer(); close() },
-            onPrev: { if let i = currentIndex, i > 0 { play(at: i - 1) } },
-            onNext: { if let i = currentIndex, i + 1 < store.visible.count { play(at: i + 1) } },
-            hasPrev: (currentIndex ?? 0) > 0,
-            hasNext: (currentIndex ?? Int.max) + 1 < store.visible.count,
-            isMusic: store.kind == .music
+            onPrev: { advance(-1) },
+            onNext: { advance(1) },
+            hasPrev: playingList().count > 1,
+            hasNext: playingList().count > 1,
+            // The stage reflects the PLAYING file's kind, not the shelf on view —
+            // switching to the video shelf while a song plays must not blank the
+            // stage to a video surface (it showed black).
+            isMusic: store.items.first(where: { $0.url == player.currentURL })?.kind == .music
         )
     }
 
@@ -307,12 +328,41 @@ struct LibraryScreen: View {
 
     private func play(at index: Int) {
         guard store.visible.indices.contains(index) else { return }
-        currentIndex = index
+        start(store.visible[index])
+    }
+
+    /// Start a specific file. All playback goes through here so next/previous and
+    /// end-of-track work off the PLAYING file's own shelf+folder, not whatever the
+    /// library happens to be showing — switching the view while something plays no
+    /// longer breaks the "play next" that follows.
+    private func start(_ item: Item) {
+        currentIndex = store.visible.firstIndex(where: { $0.url == item.url })
         player.onEnded = { advanceOnEnd() }
-        player.nowPlayingTitle = store.visible[index].name
-        player.onRemoteNext = { if let i = currentIndex, i + 1 < store.visible.count { play(at: i + 1) } }
-        player.onRemotePrev = { if let i = currentIndex, i > 0 { play(at: i - 1) } }
-        player.open(store.visible[index].url)
+        player.nowPlayingTitle = item.name
+        player.onRemoteNext = { advance(1) }
+        player.onRemotePrev = { advance(-1) }
+        player.open(item.url)
+    }
+
+    /// The list playback moves through: the shelf+folder the playing file belongs
+    /// to. `store.items` is already sorted newest-first, and filtering keeps that
+    /// order, so it matches what `visible` would show for that context.
+    private func playingList() -> [Item] {
+        guard let url = player.currentURL,
+              let cur = store.items.first(where: { $0.url == url }) else { return store.visible }
+        return store.items.filter { $0.kind == cur.kind && $0.folder == cur.folder }
+    }
+    private func playingIndex() -> Int? {
+        guard let url = player.currentURL else { return nil }
+        return playingList().firstIndex(where: { $0.url == url })
+    }
+
+    /// Step to the next/previous track, wrapping around the ends.
+    private func advance(_ dir: Int) {
+        let list = playingList()
+        guard let i = playingIndex(), !list.isEmpty else { return }
+        let n = ((i + dir) % list.count + list.count) % list.count
+        start(list[n])
     }
 
     private func stopPlayer() {
@@ -332,6 +382,12 @@ struct LibraryScreen: View {
         // was the "screen randomly ends up 90° off" after switching a few times.
         orientGen += 1
         let gen = orientGen
+        // Hide the video behind black while the interface turns, so the ugly
+        // mid-rotation squish is not seen — reveal once it has settled.
+        player.settling = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+            if gen == orientGen { player.settling = false }
+        }
         guard fs else {
             Orientation.shared.lock(.portrait, to: .portrait)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
@@ -365,26 +421,24 @@ struct LibraryScreen: View {
     }
 
     private func advanceOnEnd() {
-        guard let i = currentIndex else { return }
-        let count = store.visible.count
+        let list = playingList()
+        guard let i = playingIndex(), !list.isEmpty else { return }
+        let count = list.count
         switch prefs.end {
         case .next:
             // Loop back to the top of the list when the last one finishes, rather
-            // than stopping.
-            play(at: i + 1 < count ? i + 1 : 0)
+            // than stopping — works for video and music alike now that the list is
+            // the playing file's own, not the viewed one.
+            start(list[(i + 1) % count])
         case .shuffle:
-            // Play every track once before any repeats: draw from a bag of all
-            // indices, refilled (reshuffled) only when it runs dry. Plain random
-            // kept landing on the just-played or recent ones.
-            guard count > 0 else { return }
-            if shuffleBag.isEmpty { shuffleBag = Array(0..<count).shuffled() }
-            var next = shuffleBag.removeFirst()
-            if next == i, !shuffleBag.isEmpty {
-                let other = shuffleBag.removeFirst()
-                shuffleBag.append(next)   // keep it for later in this cycle
-                next = other
-            }
-            play(at: next)
+            // Play every OTHER track once before the current one can repeat: the
+            // bag is all indices except the one just played; refilled (excluding
+            // the new current) only when it runs dry. Including the current index
+            // let it come back around too soon.
+            guard count > 1 else { start(list[i]); return }
+            shuffleBag.removeAll { $0 >= count || $0 == i }
+            if shuffleBag.isEmpty { shuffleBag = Array(0..<count).filter { $0 != i }.shuffled() }
+            start(list[shuffleBag.removeFirst()])
         case .stop:
             break
         }
@@ -543,7 +597,7 @@ struct LibraryScreen: View {
                         // Double-tap opens the file's menu; a single tap plays. The
                         // menu moved off long-press because a hold is now the drag
                         // (onDrag) that carries the row onto a folder chip.
-                        .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false }
+                        .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false; showFolderPanel = false }
                         .onTapGesture { play(at: index) }
                         .onDrag { NSItemProvider(object: item.url as NSURL) }
                     Divider().background(Color.toolbar)

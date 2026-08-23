@@ -27,8 +27,14 @@ final class LibraryStore: ObservableObject {
     @Published var items: [Item] = []
     /// The folder being viewed, or nil for the top level.
     @Published var current: String?
-    /// Which shelf is shown — video or music.
-    @Published var kind: MediaKind = .video
+    /// Which shelf is shown — video or music. Switching shelves drops a folder
+    /// selection that does not exist on the new shelf: a folder made only on music
+    /// otherwise stayed "entered" on video, showing an empty non-existent folder.
+    @Published var kind: MediaKind = .video {
+        didSet {
+            if let c = current, !folders.contains(c) { current = nil }
+        }
+    }
 
     /// Folders shown for the current shelf: video and music keep separate lists,
     /// so a folder made on one does not appear on the other. A folder is listed
