@@ -15,6 +15,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     @Published var rate: Float = 1
     @Published var muted = false
     var scrubbing = false
+    /// Set when the stream reaches its end. A finished libVLC player will not
+    /// resume on play() — its state may read .ended or .stopped — so the replay
+    /// path keys off this flag rather than guessing the state.
+    private var reachedEnd = false
     var onEnded: (() -> Void)?
     /// Lock-screen / headset next & previous reach the playlist through these.
     var onRemoteNext: (() -> Void)?
@@ -100,6 +104,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func open(_ url: URL) {
         currentURL = url
+        reachedEnd = false
         player.media = VLCMedia(url: url)
         player.play()
         player.rate = rate
@@ -127,7 +132,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func toggle() {
         // A finished player will not resume on play(); reloading the file is the
         // reliable way to replay from the start.
-        if player.state == .ended || (!player.isPlaying && player.position > 0.995) {
+        if reachedEnd || player.state == .ended || (!player.isPlaying && player.position > 0.995) {
             if let url = currentURL { open(url) }
         } else {
             player.isPlaying ? player.pause() : player.play()
@@ -163,7 +168,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func mediaPlayerStateChanged(_ notification: Notification) {
         isPlaying = player.isPlaying
         updateNowPlaying()
-        if player.state == .ended { onEnded?() }
+        if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
     private static func clock(_ ms: Int32) -> String {
@@ -293,6 +298,9 @@ struct PlayerStage: View {
     @State private var holdVolume = false
     @State private var showRatePicker = false
     @State private var showVolumeBar = false
+    /// True while a bar control is being dragged, so the 3-second auto-hide does
+    /// not pull the bar away mid-adjustment.
+    @State private var interacting = false
 
     var body: some View {
         ZStack {
@@ -397,11 +405,11 @@ struct PlayerStage: View {
                 dragMode = .swipe
             }
         case .changed:
-            let step = Float(-dy / 260)                     // from the current value
+            let step = Float(-dy / 160)                     // from the current value
             // A windowed hold turns the finger's up/down into volume anywhere —
             // a shorter reach than brightness so it responds quickly.
             if holdVolume {
-                let v = max(0, min(1, startVolume + Float(-dy / 150)))
+                let v = max(0, min(1, startVolume + Float(-dy / 100)))
                 controller.volume = v
                 gauge = ("speaker.wave.2", Double(v)); return
             }
@@ -436,9 +444,20 @@ struct PlayerStage: View {
     private func showBar() {
         withAnimation(.easeOut(duration: 0.12)) { showControls = true }
         hideWork?.cancel()
-        let work = DispatchWorkItem { withAnimation { showControls = false } }
+        let work = DispatchWorkItem {
+            // Do not hide while a control is still under the finger.
+            if interacting { return }
+            withAnimation { showControls = false }
+        }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
+    }
+
+    /// Keep the bar up without arming the auto-hide — used while dragging a
+    /// control, so it stays until the drag ends and showBar() re-arms the timer.
+    private func keepBar() {
+        hideWork?.cancel()
+        withAnimation(.easeOut(duration: 0.12)) { showControls = true }
     }
 
     // MARK: overlays
@@ -509,7 +528,9 @@ struct PlayerStage: View {
             Image(systemName: "speaker.fill").font(.system(size: 12)).foregroundColor(.white)
             SeekSlider(value: Binding(get: { Double(controller.volume) },
                                       set: { controller.volume = Float($0) }),
-                       onBegin: { showBar() }, onScrub: { controller.volume = Float($0) }, onEnd: { _ in })
+                       onBegin: { interacting = true; keepBar() },
+                       onScrub: { controller.volume = Float($0); keepBar() },
+                       onEnd: { _ in interacting = false; showBar() })
             Image(systemName: "speaker.wave.3.fill").font(.system(size: 12)).foregroundColor(.white)
         }
         .padding(.horizontal, 16).padding(.vertical, 8)
@@ -518,16 +539,16 @@ struct PlayerStage: View {
     }
 
     private var transport: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 1) {
             // Top row: the seek bar only.
             HStack(spacing: 6) {
                 Text(controller.elapsed).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
                 SeekSlider(
                     value: Binding(get: { Double(controller.position) },
                                    set: { controller.previewSeek(Float($0)) }),
-                    onBegin: { controller.beginScrub(); showBar() },
-                    onScrub: { controller.previewSeek(Float($0)) },
-                    onEnd: { controller.endScrub(Float($0)) }
+                    onBegin: { controller.beginScrub(); interacting = true; keepBar() },
+                    onScrub: { controller.previewSeek(Float($0)); keepBar() },
+                    onEnd: { controller.endScrub(Float($0)); interacting = false; showBar() }
                 )
                 Text(controller.duration).font(.system(size: 10)).foregroundColor(.white).monospacedDigit()
             }
@@ -545,11 +566,21 @@ struct PlayerStage: View {
                     Button { controller.toggleMute() } label: {
                         Image(systemName: controller.muted ? "speaker.slash.fill" : "speaker.wave.2.fill").font(.system(size: 15))
                     }
-                    .onLongPressGesture(minimumDuration: 0.35) { showVolumeBar.toggle(); showRatePicker = false; showBar() }
+                    // A Button's own tap wins over onLongPressGesture, so the hold
+                    // never fired — a simultaneous LongPressGesture runs alongside
+                    // the tap instead, which is what opens the picker.
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
+                        showVolumeBar.toggle(); showRatePicker = false; keepBar()
+                    })
                     Button { controller.cycleRate() } label: {
+                        // Fixed width so 1× ↔ 1.25× does not shove the buttons
+                        // beside it as the rate changes.
                         Text(String(format: "%g×", controller.rate)).font(.system(size: 14, weight: .bold))
+                            .frame(width: 42)
                     }
-                    .onLongPressGesture(minimumDuration: 0.35) { showRatePicker.toggle(); showVolumeBar = false; showBar() }
+                    .simultaneousGesture(LongPressGesture(minimumDuration: 0.3).onEnded { _ in
+                        showRatePicker.toggle(); showVolumeBar = false; keepBar()
+                    })
                     Button { fullscreen.toggle() } label: {
                         Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left"
                                                       : "arrow.up.left.and.arrow.down.right").font(.system(size: 15))
@@ -558,8 +589,8 @@ struct PlayerStage: View {
             }
             .foregroundColor(.white)
         }
-        .padding(.horizontal, 12).padding(.top, 6)
-        .padding(.bottom, fullscreen ? 22 : 5)   // lift buttons off a short's very edge
+        .padding(.horizontal, 12).padding(.top, 2)
+        .padding(.bottom, fullscreen ? 20 : 4)   // lift buttons off a short's very edge
         .background(Color.black.opacity(0.3))
     }
 }

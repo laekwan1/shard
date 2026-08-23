@@ -41,7 +41,6 @@ struct LibraryScreen: View {
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.toolbar, lineWidth: 1))
                         .padding(.horizontal, 10).padding(.bottom, 6)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
                 if !downloads.items.isEmpty { downloadsStrip }
                 if store.visible.isEmpty {
@@ -93,9 +92,10 @@ struct LibraryScreen: View {
                let item = store.items.first(where: { $0.url == url }) {
                 store.kind = item.kind
                 store.current = item.folder
-                withAnimation(.easeOut(duration: 0.25)) {
-                    currentIndex = store.visible.firstIndex(where: { $0.url == url })
-                }
+                // No inner animation: the whole library already slides in from the
+                // right (ShardApp), and animating the stage in here pushed the list
+                // down, which read as the list dropping from the top.
+                currentIndex = store.visible.firstIndex(where: { $0.url == url })
             }
         }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
@@ -506,7 +506,10 @@ struct LibraryScreen: View {
         // returns just like a video frame — so try the image first for both, and
         // fall back to a kind icon.
         Group {
-            if let image = probe.result(for: item.url)?.image ?? cover(item) {
+            // Music first tries its saved cover: the thumbnailer hands back a
+            // black frame for an audio file, which would otherwise mask the cover.
+            if let image = (item.kind == .music ? (cover(item) ?? probe.result(for: item.url)?.image)
+                                                : (probe.result(for: item.url)?.image ?? cover(item))) {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
                 ZStack {

@@ -60,18 +60,37 @@ enum Covers {
     /// URLs are upgraded to maxresdefault (1280×720) so the tile is sharp rather
     /// than the small default the page hands out.
     static func fetch(_ urlString: String, key: String) async {
-        let upgraded = upgradeToMaxRes(urlString)
-        guard let url = URL(string: upgraded) else { return }
-        if let data = try? await plainGet(url), !data.isEmpty {
-            save(key, data: data)
-            return
+        for candidate in candidates(urlString) {
+            guard let url = URL(string: candidate) else { continue }
+            if let data = try? await plainGet(url), data.count > 512 {
+                save(key, data: data)
+                return
+            }
         }
-        // maxresdefault does not exist for every video; fall back to what the
-        // page actually offered.
-        if upgraded != urlString, let url = URL(string: urlString),
-           let data = try? await plainGet(url), !data.isEmpty {
-            save(key, data: data)
+    }
+
+    /// The URLs to try, best quality first. For a YouTube thumbnail we can build
+    /// clean, query-free ytimg URLs from the video id — the query-carrying URL the
+    /// page hands out sometimes 404s on the maxres variant, so a clean
+    /// `.../<id>/maxresdefault.jpg` is the reliable way to a 720p cover.
+    private static func candidates(_ s: String) -> [String] {
+        if let id = ytID(s) {
+            return [
+                "https://i.ytimg.com/vi/\(id)/maxresdefault.jpg",
+                "https://i.ytimg.com/vi/\(id)/sddefault.jpg",
+                "https://i.ytimg.com/vi/\(id)/hqdefault.jpg",
+                s,
+            ]
         }
+        return [s]
+    }
+
+    /// The 11-char video id out of an `i.ytimg.com/vi/<id>/...` thumbnail URL.
+    private static func ytID(_ s: String) -> String? {
+        guard let range = s.range(of: "ytimg.com/vi/") else { return nil }
+        let rest = s[range.upperBound...]
+        let id = rest.prefix { $0 != "/" }
+        return id.count >= 8 ? String(id) : nil
     }
 
     private static func plainGet(_ url: URL) async throws -> Data {
@@ -80,18 +99,5 @@ enum Covers {
             throw URLError(.badServerResponse)
         }
         return data
-    }
-
-    /// `.../vi/<id>/hqdefault.jpg` → `.../vi/<id>/maxresdefault.jpg`, so the cover
-    /// is at least 720p as asked. Only rewrites i.ytimg.com thumbnails; anything
-    /// else is returned unchanged.
-    private static func upgradeToMaxRes(_ s: String) -> String {
-        guard s.contains("ytimg.com/vi/") else { return s }
-        for name in ["hqdefault", "sddefault", "mqdefault", "default", "hq720"] {
-            if s.contains("/\(name).jpg") {
-                return s.replacingOccurrences(of: "/\(name).jpg", with: "/maxresdefault.jpg")
-            }
-        }
-        return s
     }
 }
