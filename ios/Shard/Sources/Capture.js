@@ -105,17 +105,23 @@
   function fixViewport() {
     try {
       var head = document.head || document.documentElement;
-      var m = document.querySelector('meta[name="viewport"]');
-      if (!m) {
-        m = document.createElement("meta");
+      // Normalize EVERY viewport meta, not just the first: sites (pornhub) ship a
+      // second <meta name=viewport> and the browser honours the last one, so fixing
+      // only the first left the zoom in place. A dump showed two metas present.
+      var metas = document.querySelectorAll('meta[name="viewport" i]');
+      if (!metas.length) {
+        var m = document.createElement("meta");
         m.setAttribute("name", "viewport");
         head.appendChild(m);
+        metas = [m];
       }
-      if (m.getAttribute("content") !== VIEWPORT) {
-        fixingViewport = true;                 // so our own change does not re-trigger
-        m.setAttribute("content", VIEWPORT);
-        fixingViewport = false;
+      fixingViewport = true;                    // so our own changes do not re-trigger
+      for (var i = 0; i < metas.length; i++) {
+        if (metas[i].getAttribute("content") !== VIEWPORT) {
+          metas[i].setAttribute("content", VIEWPORT);
+        }
       }
+      fixingViewport = false;
     } catch (e) {}
   }
   fixViewport();
