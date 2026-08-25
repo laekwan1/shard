@@ -78,6 +78,7 @@ struct BrowserScreen: View {
                 else { model.pauseWebVideos(); openLibrary() }
             }
             model.onWebTap = { showAddress = false }
+            model.onBanner = { banner = $0 }
             model.onWebPlaying = { onWebPlaying($0) }
             model.installAdBlock()
             model.onDownloadRequest = { right, bottom in

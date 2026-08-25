@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Network
+import UIKit
 
 /// The page. Owns the WKWebView so navigation state lives in one observable
 /// place the UI binds to. Media is not tracked continuously any more — the app
@@ -109,7 +110,22 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     // MARK: navigation
 
+    /// Set to surface a short message to the user (used by the diagnostics dump).
+    var onBanner: ((String) -> Void)?
+
     func load(_ text: String) {
+        // Diagnostics escape hatch: entering "shard://dom" copies a snapshot of the
+        // page (last search-suggestion markup + viewport/width numbers) to the
+        // clipboard instead of navigating, so the user can paste it back when a
+        // fix has to be made blind (no screenshots). Read-only; touches nothing.
+        if text.trimmingCharacters(in: .whitespaces) == "shard://dom" {
+            webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
+                let json = (value as? String) ?? "{}"
+                UIPasteboard.general.string = json
+                self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
+            }
+            return
+        }
         guard let url = URL(string: Self.normalize(text)) else { return }
         webView.load(URLRequest(url: url))
     }
