@@ -292,68 +292,82 @@
     return null;
   }
 
-  // The rows of previous searches. YouTube's search box did not render a native
-  // remove control here (the earlier version keyed on that and so showed nothing),
-  // and the rows come through as plain blue links, so we take them broadly: every
-  // option / search-results link inside the suggestions area. Guarded to when the
-  // input is EMPTY — that is when the box shows PREVIOUS searches rather than
-  // autocomplete guesses for what is being typed, so we never offer to "delete"
-  // a live suggestion.
+  function rowText(row) { return (row.textContent || '').trim(); }
+
+  // The rows of previous searches inside YouTube's suggestions listbox. Only when
+  // the input is EMPTY (that is when the box shows PREVIOUS searches, not
+  // autocomplete for what is being typed). We take the listbox's options, or its
+  // direct children / search links when it is not marked up with roles.
   function searchRows() {
     var inp = document.querySelector('input[name="search_query"], input.ytSearchboxComponentInput, input[type="search"]');
     if (!inp || inp.value.trim() !== '') return [];
     var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
-    var scope = box || document;
-    var rows = [];
-    scope.querySelectorAll('[role="option"]').forEach(function (o) { rows.push(o); });
-    if (!rows.length) {
-      scope.querySelectorAll('a[href*="search_query="]').forEach(function (a) {
-        // Prefer a list-item wrapper so our button sits at the row's edge.
-        var row = a.closest('li, [role="option"]') || a;
-        if (rows.indexOf(row) < 0) rows.push(row);
-      });
-    }
-    return rows;
+    if (!box || box.hidden) return [];
+    var opts = box.querySelectorAll('[role="option"]');
+    if (opts.length) return Array.prototype.slice.call(opts);
+    var links = box.querySelectorAll('a[href*="search_query="]');
+    if (links.length) return Array.prototype.slice.call(links).map(function (a) { return a.closest('li') || a; });
+    // Last resort: the box's own children that carry text.
+    return Array.prototype.slice.call(box.children).filter(function (c) { return rowText(c); });
   }
 
-  function rowText(row) {
-    return (row.textContent || '').replace(/삭제\s*$/, '').trim();
+  // "삭제" is placed as a FIXED overlay OVER each row's right edge, NOT inside the
+  // row. The previous version appended it inside the row's <a>, so a tap on it hit
+  // the link and ran the search instead of deleting. A separate top-layer element
+  // takes the tap itself, so the row underneath never activates.
+  var delEls = []; // {row, el}
+  function delFor(row) {
+    for (var i = 0; i < delEls.length; i++) if (delEls[i].row === row) return delEls[i];
+    var el = document.createElement('div');
+    el.textContent = '삭제';
+    el.setAttribute('data-shard', 'del');
+    el.style.cssText =
+      'position:fixed;z-index:2147483647;color:#ff5252;text-decoration:underline;' +
+      'font:600 14px system-ui;padding:8px 10px;cursor:pointer;display:none;';
+    // Intercept the tap on every path so the row cannot navigate; act on the tap's
+    // end (touchend for the phone, click for a pointer).
+    function kill(e) { e.preventDefault(); e.stopPropagation(); }
+    ['touchstart', 'pointerdown', 'mousedown'].forEach(function (ev) { el.addEventListener(ev, kill, true); });
+    function act(e) { kill(e); doDelete(row); }
+    el.addEventListener('touchend', act, true);
+    el.addEventListener('click', act, true);
+    document.documentElement.appendChild(el);
+    var rec = { row: row, el: el };
+    delEls.push(rec);
+    return rec;
   }
-
-  function decorateHistory() {
+  function doDelete(row) {
+    hiddenSearches[rowText(row)] = 1;              // stays gone even if re-sent
+    var rm = nativeRemove(row);                     // real server delete if offered
+    if (rm) { try { rm.click(); } catch (e) {} }
+    try { row.style.display = 'none'; } catch (e) {}
+    setTimeout(syncDeletes, 60);
+  }
+  function syncDeletes() {
     try {
       var rows = searchRows();
-      for (var i = 0; i < rows.length; i++) {
-        var row = rows[i];
-        // Already hidden this session -> keep it hidden.
-        if (hiddenSearches[rowText(row)]) { row.style.display = 'none'; continue; }
-        if (row.querySelector(':scope > .shard-del')) continue;
-        var d = document.createElement('span');
-        d.className = 'shard-del';
-        d.textContent = '삭제';
-        d.style.cssText =
-          'position:absolute;right:10px;top:50%;transform:translateY(-50%);z-index:2147483647;' +
-          'color:#ff5252;text-decoration:underline;font:600 13px system-ui;cursor:pointer;padding:6px 8px;';
-        (function (row) {
-          d.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation();
-            hiddenSearches[rowText(row)] = 1;          // stays gone even if re-sent
-            var rm = nativeRemove(row);                 // real server delete if offered
-            if (rm) { try { rm.click(); } catch (err) {} }
-            try { row.style.display = 'none'; } catch (e2) {}
-          }, true);
-        })(row);
-        try {
-          var cs = getComputedStyle(row);
-          if (cs.position === 'static') row.style.position = 'relative';
-          row.style.paddingRight = '56px';
-        } catch (e) {}
-        row.appendChild(d);
-      }
+      var live = [];
+      rows.forEach(function (row) {
+        if (hiddenSearches[rowText(row)]) { row.style.display = 'none'; return; }
+        var rec = delFor(row);
+        var r = row.getBoundingClientRect();
+        if (r.height > 0 && r.width > 0 && r.bottom > 0) {
+          rec.el.style.display = 'block';
+          rec.el.style.left = Math.max(0, r.right - 58) + 'px';
+          rec.el.style.top = (r.top + r.height / 2 - 16) + 'px';
+        } else {
+          rec.el.style.display = 'none';
+        }
+        live.push(rec);
+      });
+      // Hide overlays whose row went away (input filled, box closed, list changed).
+      delEls.forEach(function (rec) { if (live.indexOf(rec) < 0) rec.el.style.display = 'none'; });
     } catch (e) {}
   }
   try {
-    new MutationObserver(function () { decorateHistory(); }).observe(document.documentElement, { childList: true, subtree: true });
+    new MutationObserver(function () { syncDeletes(); }).observe(document.documentElement, { childList: true, subtree: true });
   } catch (e) {}
-  setInterval(decorateHistory, 400);
+  window.addEventListener('scroll', syncDeletes, true);
+  window.addEventListener('resize', syncDeletes, true);
+  setInterval(syncDeletes, 300);
 })();

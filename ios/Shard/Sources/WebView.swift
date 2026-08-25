@@ -31,6 +31,10 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     }
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
+    /// Set when we reload for our own reasons (engine toggle), so the reload does
+    /// not retreat the address panel — the user just tapped a control on it and
+    /// expects it to stay put.
+    private var suppressNavigatedClose = false
     /// Centre swipes: a rightward one opens the address panel, a leftward one the
     /// library. Bound to gesture recognizers on the web view itself so the page
     /// keeps its own taps and scrolls.
@@ -61,6 +65,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             setProxy(port: UInt16(bound))
             engineOn = true
         }
+        suppressNavigatedClose = true
         webView.reload()
     }
 
@@ -182,7 +187,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
-        onNavigated?()
+        if suppressNavigatedClose { suppressNavigatedClose = false }
+        else { onNavigated?() }
         sync()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
