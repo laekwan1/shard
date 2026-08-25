@@ -124,8 +124,15 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         // Report dark to pages (prefers-color-scheme: dark), so Google and other
         // sites match the app's dark theme.
         view.overrideUserInterfaceStyle = .dark
+        // Track the URL directly, not just via didFinish: YouTube/xvideos navigate
+        // by pushState (SPA), which fires no navigation callback — so the address
+        // bar kept showing the URL from the first load. KVO on `url` catches those.
+        urlObservation = view.observe(\.url, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.sync() }
+        }
         return view
     }()
+    private var urlObservation: NSKeyValueObservation?
 
     private static func script(_ name: String) -> String? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "js"),
