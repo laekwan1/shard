@@ -118,7 +118,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         config.userContentController = controller
         config.allowsInlineMediaPlayback = true
 
-        let view = WKWebView(frame: .zero, configuration: config)
+        // Born at screen size, not .zero: with a zero frame the FIRST page laid out
+        // at the wrong width (xvideos tiles overlapped, some sites showed zoomed) and
+        // only a reload — by when SwiftUI had sized the view — fixed it. Starting at
+        // the real width makes the first layout correct. SwiftUI still resizes it.
+        let view = WKWebView(frame: UIScreen.main.bounds, configuration: config)
         view.navigationDelegate = self
         view.allowsBackForwardNavigationGestures = true
         // Report dark to pages (prefers-color-scheme: dark), so Google and other
