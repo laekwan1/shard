@@ -103,6 +103,7 @@ struct BrowserScreen: View {
                 banner = "감지된 미디어가 없습니다"; return
             }
             pendingOffer = json
+            model.lastOffer = json      // kept for the shard://dom diagnostics dump
             pendingTitle = offer.title ?? model.pageTitle
             // Prefer the page's thumbnail; if it was empty, build a clean one from
             // the video id so a cover is still fetched.
@@ -271,7 +272,7 @@ struct BrowserScreen: View {
     }
 
     private func startURL(_ url: String, isHLS: Bool, referer: String, title: String) {
-        downloads.start(title: title) { task, report in
+        downloads.start(title: title, segments: isHLS) { task, report in
             try await Downloader.runURL(url, isHLS: isHLS, referer: referer, title: title,
                                         task: task, progress: report)
         }

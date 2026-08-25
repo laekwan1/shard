@@ -112,6 +112,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     /// Set to surface a short message to the user (used by the diagnostics dump).
     var onBanner: ((String) -> Void)?
+    /// The last offer JSON the page produced, kept only so "shard://dom" can hand
+    /// it back for diagnosing a site whose download failed (e.g. pornhub).
+    var lastOffer: String = ""
 
     func load(_ text: String) {
         // Diagnostics escape hatch: entering "shard://dom" copies a snapshot of the
@@ -120,8 +123,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         // fix has to be made blind (no screenshots). Read-only; touches nothing.
         if text.trimmingCharacters(in: .whitespaces) == "shard://dom" {
             webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
-                let json = (value as? String) ?? "{}"
-                UIPasteboard.general.string = json
+                let page = (value as? String) ?? "{}"
+                let offer = self.lastOffer.isEmpty ? "null" : self.lastOffer
+                UIPasteboard.general.string = "{\"page\":\(page),\"offer\":\(offer)}"
                 self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
             }
             return
@@ -211,9 +215,28 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
+        // Re-fit the page. Some sites (pornhub) render their video page zoomed in
+        // until a layout pass runs — the only trigger used to be opening the
+        // address bar (whose keyboard resized us). Nudge the height by a point and
+        // back so WebKit re-evaluates the (device-width) viewport on its own.
+        let h = webView.frame.height
+        if h > 2 {
+            webView.frame.size.height = h - 1
+            DispatchQueue.main.async { webView.frame.size.height = h }
+        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
+        sync()
+    }
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        // A blocked site with the engine off fails BEFORE it commits, so the old
+        // page just stayed with no word why. Say so (and hint at the engine), but
+        // not for a plain cancel (-999), which fires for normal interrupted loads.
+        isLoading = false
+        if (error as NSError).code != NSURLErrorCancelled {
+            onBanner?("페이지를 열지 못했습니다. 우회 전원을 켜고 다시 시도해 보세요.")
+        }
         sync()
     }
 

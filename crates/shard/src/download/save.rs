@@ -534,18 +534,31 @@ pub fn hls_qualities(manifest_url: &str, referer: &str) -> Result<Vec<(String, S
     if !hls::is_master(&master) {
         return Ok(Vec::new());
     }
+    let variants = hls::variants(&master, manifest_url);
+    // The stream's length is the same across renditions, so fetch it once (from
+    // the best variant's media playlist) and estimate each row's size from its
+    // bitrate — the user wants to see a size (MB), not a bitrate, to choose by.
+    let duration = variants
+        .first()
+        .and_then(|v| media_get(&client, &v.url, referer).ok())
+        .and_then(|r| r.text().ok())
+        .map(|t| hls::duration_seconds(&t))
+        .unwrap_or(0.0);
+
     let mut rows: Vec<(String, String, String)> = Vec::new();
     let mut seen_height: Vec<u32> = Vec::new();
-    for v in hls::variants(&master, manifest_url) {
+    for v in variants {
         // One row per resolution (variants() is highest-first, so the first of a
-        // height is its best bitrate). A stream with no RESOLUTION falls back to
-        // the bitrate as the label so the row is still distinguishable.
+        // height is its best bitrate). A stream with no RESOLUTION falls back to a
+        // generic label so the row is still distinguishable.
         if v.height > 0 {
             if seen_height.contains(&v.height) { continue; }
             seen_height.push(v.height);
         }
         let label = if v.height > 0 { format!("{}p", v.height) } else { "화질".to_string() };
-        let detail = if v.bandwidth > 0 {
+        let detail = if duration > 0.0 && v.bandwidth > 0 {
+            format!("약 {}", human((v.bandwidth as f64 / 8.0 * duration) as u64))
+        } else if v.bandwidth > 0 {
             format!("{:.1} Mbps", v.bandwidth as f64 / 1_000_000.0)
         } else {
             String::new()
