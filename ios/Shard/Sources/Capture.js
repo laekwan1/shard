@@ -121,13 +121,23 @@
   // while the app marks the browser inactive, cancel any full screen the page tries
   // to enter and pause the video. Default active so normal browsing is untouched.
   if (window.__shardBrowserActive === undefined) window.__shardBrowserActive = true;
-  document.addEventListener("webkitbeginfullscreen", function (e) {
-    if (!window.__shardBrowserActive) {
-      var v = e.target;
-      try { if (v && v.webkitExitFullscreen) v.webkitExitFullscreen(); } catch (err) {}
-      try { if (v) v.pause(); } catch (err) {}
-    }
-  }, true);
+  function exitAnyFullscreen() {
+    if (window.__shardBrowserActive) return;
+    // Both the <video> native path (webkit*) AND the standard Fullscreen API a
+    // site's own player may use on orientationchange.
+    try { if (document.exitFullscreen) document.exitFullscreen(); } catch (e) {}
+    try { if (document.webkitExitFullscreen) document.webkitExitFullscreen(); } catch (e) {}
+    try {
+      var vids = document.getElementsByTagName("video");
+      for (var i = 0; i < vids.length; i++) {
+        try { if (vids[i].webkitExitFullscreen) vids[i].webkitExitFullscreen(); } catch (e) {}
+        try { vids[i].pause(); } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  document.addEventListener("webkitbeginfullscreen", exitAnyFullscreen, true);
+  document.addEventListener("fullscreenchange", exitAnyFullscreen, true);
+  document.addEventListener("webkitfullscreenchange", exitAnyFullscreen, true);
 
   // Tell the native side whether any web video is actually playing, so the
   // library's own player can step aside (pause) while a page video plays and

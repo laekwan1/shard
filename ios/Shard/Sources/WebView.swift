@@ -248,29 +248,10 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // A blocked site (engine off) fails before it commits; WKWebView then just
-        // keeps the old page. Show the attempted address failing — like the PC and
-        // Android apps and like any browser — instead of silently staying put or
-        // popping a banner. Not for a plain cancel (-999), which is a normal
-        // interrupted load, not an error.
+        // Leave failures to the web view itself (no custom error page) so the
+        // browser behaves like an ordinary one.
         isLoading = false
-        let ns = error as NSError
-        if ns.code == NSURLErrorCancelled { sync(); return }
-        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? address
-        let host = URL(string: failed)?.host ?? failed
-        let page = """
-        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body style="margin:0;background:#141414;color:#e8e6e3;font:16px -apple-system;\
-        display:flex;align-items:center;justify-content:center;height:100vh">
-        <div style="text-align:center;padding:24px">
-        <div style="font-size:44px">⚠️</div>
-        <p style="font-weight:600">이 페이지를 열 수 없습니다</p>
-        <p style="color:#9a9a9a;word-break:break-all">\(host)</p>
-        <p style="color:#9a9a9a;font-size:14px">우회 전원을 켜면 접속될 수 있습니다.</p>
-        </div></body></html>
-        """
-        webView.loadHTMLString(page, baseURL: URL(string: failed))
-        address = failed
+        sync()
     }
 
     private func sync() {
