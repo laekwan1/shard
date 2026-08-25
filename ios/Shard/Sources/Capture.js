@@ -151,6 +151,20 @@
   document.addEventListener("webkitbeginfullscreen", function () { reportFullscreen(true); }, true);
   document.addEventListener("webkitendfullscreen", function () { reportFullscreen(false); }, true);
 
+  // When the library screen is up (browser hidden behind it), the library forcing
+  // landscape rotates this page too, and a playing site video (pornhub) then goes
+  // to native full screen on its own — hijacking the library's own full screen. So
+  // while the app marks the browser inactive, cancel any full screen the page tries
+  // to enter and pause the video. Default active so normal browsing is untouched.
+  if (window.__shardBrowserActive === undefined) window.__shardBrowserActive = true;
+  document.addEventListener("webkitbeginfullscreen", function (e) {
+    if (!window.__shardBrowserActive) {
+      var v = e.target;
+      try { if (v && v.webkitExitFullscreen) v.webkitExitFullscreen(); } catch (err) {}
+      try { if (v) v.pause(); } catch (err) {}
+    }
+  }, true);
+
   // Tell the native side whether any web video is actually playing, so the
   // library's own player can step aside (pause) while a page video plays and
   // resume when it stops — otherwise the two fought over the audio route and the

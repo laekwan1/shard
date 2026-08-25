@@ -32,7 +32,7 @@ struct RootView: View {
                     // (a track paused ~1s in; full screen dropped to pause on exit).
                     guard !showLibrary else { return }
                     if on && player.isPlaying { player.pause() }
-                }) {
+                }, libraryVisible: showLibrary) {
                     // If the browser was turned to landscape (address rotate button),
                     // force portrait before the library slides in — free() alone left
                     // it sideways, so lock portrait, then free once it has turned.

@@ -6,6 +6,9 @@ import SwiftUI
 struct BrowserScreen: View {
     @ObservedObject var downloads: DownloadsStore
     var onWebPlaying: (Bool) -> Void = { _ in }
+    /// True while the library is shown over the browser — then page videos are
+    /// paused and blocked from entering full screen (see WebModel.setBrowserActive).
+    var libraryVisible: Bool = false
     var openLibrary: () -> Void
 
     @StateObject private var model = WebModel()
@@ -59,6 +62,12 @@ struct BrowserScreen: View {
         .animation(.easeInOut(duration: 0.34), value: showAddress)
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
+        }
+        .onChange(of: libraryVisible) { visible in
+            // Behind the library: pause page videos and block them from grabbing
+            // full screen when the library forces landscape.
+            model.setBrowserActive(!visible)
+            if visible { model.pauseWebVideos() }
         }
         // Web video full-screen rotation is left to iOS. Forcing landscape here
         // kept corrupting the window geometry on exit (page and library came back

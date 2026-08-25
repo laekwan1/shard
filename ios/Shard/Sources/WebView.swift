@@ -30,6 +30,13 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             "document.querySelectorAll('video').forEach(function(v){try{v.pause()}catch(e){}})",
             completionHandler: nil)
     }
+    /// Mark whether the browser is the visible screen. While it is not (the library
+    /// is up), Capture.js cancels any full screen the page video tries to enter —
+    /// otherwise the library's forced landscape sent a playing pornhub video to
+    /// native full screen, hijacking the library's own.
+    func setBrowserActive(_ on: Bool) {
+        webView.evaluateJavaScript("window.__shardBrowserActive=\(on ? "true" : "false")", completionHandler: nil)
+    }
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
     /// Set when we reload for our own reasons (engine toggle), so the reload does
