@@ -240,17 +240,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
-        // Re-fit the page. Some sites (pornhub) render their video page zoomed IN
-        // until a layout pass runs — the only trigger used to be opening the address
-        // bar (whose keyboard resized us). Reset the scroll view to its fit scale so
-        // the page shows at device width without that workaround. Deferred a beat so
-        // it runs after WebKit's own post-load layout.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let sv = webView.scrollView
-            if sv.zoomScale > sv.minimumZoomScale {
-                sv.setZoomScale(sv.minimumZoomScale, animated: false)
-            }
-        }
+        // (An automatic scroll-view zoom reset here was removed — it fired on every
+        // navigation and made pages jump/rotate oddly. The page's own scale stands.)
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false

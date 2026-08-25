@@ -92,47 +92,11 @@
   document.addEventListener("DOMContentLoaded", keepInline);
   setInterval(keepInline, 1000);
 
-  // Fit the page to the screen. Some sites (pornhub, xvideos) ship a viewport that
-  // renders their video page zoomed in, so the right edge — where our download
-  // button sits — is off screen and unreachable; pinching out springs back because
-  // the site keeps re-asserting that viewport. We force a device-width, scale-1
-  // viewport and, via a MutationObserver on the meta, put it back whenever the site
-  // changes it — which counters the spring-back without fighting the user's own
-  // pinch (a pinch changes the visual scale, not this meta). user-scalable stays on
-  // so zooming still works. YouTube's own viewport is already this, so it is a no-op there.
-  var VIEWPORT = "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes";
-  var fixingViewport = false;
-  function fixViewport() {
-    try {
-      var head = document.head || document.documentElement;
-      // Normalize EVERY viewport meta, not just the first: sites (pornhub) ship a
-      // second <meta name=viewport> and the browser honours the last one, so fixing
-      // only the first left the zoom in place. A dump showed two metas present.
-      var metas = document.querySelectorAll('meta[name="viewport" i]');
-      if (!metas.length) {
-        var m = document.createElement("meta");
-        m.setAttribute("name", "viewport");
-        head.appendChild(m);
-        metas = [m];
-      }
-      fixingViewport = true;                    // so our own changes do not re-trigger
-      for (var i = 0; i < metas.length; i++) {
-        if (metas[i].getAttribute("content") !== VIEWPORT) {
-          metas[i].setAttribute("content", VIEWPORT);
-        }
-      }
-      fixingViewport = false;
-    } catch (e) {}
-  }
-  fixViewport();
-  document.addEventListener("DOMContentLoaded", fixViewport);
-  try {
-    new MutationObserver(function () {
-      if (!fixingViewport) fixViewport();
-    }).observe(document.documentElement, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ["content", "name"]
-    });
-  } catch (e) {}
+  // NOTE: an earlier attempt to force a device-width viewport (rewriting the page's
+  // <meta name=viewport> and re-asserting it from a MutationObserver) was removed —
+  // it fought the page on every DOM change and drove a runaway zoom on ALL sites,
+  // even pushing the app's own address bar off screen. The page's own viewport is
+  // left alone. pornhub's zoomed video page is handled a gentler way if at all.
 
   // Tell the native side when a web video goes full screen, so the download
   // button (which belongs over the windowed page) can hide there.
