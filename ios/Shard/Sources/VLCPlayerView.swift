@@ -209,6 +209,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func open(_ url: URL) {
         currentURL = url
         userPaused = false
+        // open() always auto-plays, so hold the button on "playing" from the very
+        // start of the transition. Without this it flipped pause→play→pause on every
+        // next/prev — the old item ended (isPlaying=false) before the new stream's
+        // first frame set it true again. The ticks correct it if the open fails.
+        isPlaying = true
         buffering = true
         reachedEnd = false
         position = 0          // jump the bar to the start at once, not a beat later
