@@ -104,6 +104,45 @@ pub unsafe extern "C" fn shard_youtube_qualities(offer_json: *const c_char) -> *
     }
 }
 
+/// Pickable qualities for an HLS stream, so a non-YouTube site can show the same
+/// quality list YouTube does instead of silently taking the best.
+///
+/// Returns `{"ok":true,"rows":[{"url":"...","label":"1080p","detail":"5.0 Mbps"}]}`
+/// (highest first, one per resolution) — an empty `rows` means the URL is a plain
+/// media playlist with nothing to choose, and the caller downloads it directly.
+/// Freed with `shard_string_free`.
+///
+/// # Safety
+/// `manifest_url` must be a valid NUL-terminated UTF-8 string; `referer` may be null.
+#[no_mangle]
+pub unsafe extern "C" fn shard_hls_qualities(
+    manifest_url: *const c_char,
+    referer: *const c_char,
+) -> *mut c_char {
+    let Some(url) = (unsafe { str_arg(manifest_url) }) else {
+        return result_err("주소를 읽지 못했습니다");
+    };
+    let referer = unsafe { str_arg(referer) }.unwrap_or_default();
+    match save::hls_qualities(&url, &referer) {
+        Ok(rows) => {
+            let mut items = String::new();
+            for (i, (variant_url, label, detail)) in rows.iter().enumerate() {
+                if i > 0 {
+                    items.push(',');
+                }
+                items.push_str(&format!(
+                    r#"{{"url":{},"label":{},"detail":{}}}"#,
+                    json_string(variant_url),
+                    json_string(label),
+                    json_string(detail)
+                ));
+            }
+            into_c_string(format!(r#"{{"ok":true,"rows":[{}]}}"#, items))
+        }
+        Err(e) => result_err(&e.to_string()),
+    }
+}
+
 /// Download a YouTube video (or its audio alone) from a captured offer.
 ///
 /// `itag` names the wanted video format, or `4294967295` for audio only. Same

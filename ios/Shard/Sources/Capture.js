@@ -92,6 +92,42 @@
   document.addEventListener("DOMContentLoaded", keepInline);
   setInterval(keepInline, 1000);
 
+  // Fit the page to the screen. Some sites (pornhub, xvideos) ship a viewport that
+  // renders their video page zoomed in, so the right edge — where our download
+  // button sits — is off screen and unreachable; pinching out springs back because
+  // the site keeps re-asserting that viewport. We force a device-width, scale-1
+  // viewport and, via a MutationObserver on the meta, put it back whenever the site
+  // changes it — which counters the spring-back without fighting the user's own
+  // pinch (a pinch changes the visual scale, not this meta). user-scalable stays on
+  // so zooming still works. YouTube's own viewport is already this, so it is a no-op there.
+  var VIEWPORT = "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=5, user-scalable=yes";
+  var fixingViewport = false;
+  function fixViewport() {
+    try {
+      var head = document.head || document.documentElement;
+      var m = document.querySelector('meta[name="viewport"]');
+      if (!m) {
+        m = document.createElement("meta");
+        m.setAttribute("name", "viewport");
+        head.appendChild(m);
+      }
+      if (m.getAttribute("content") !== VIEWPORT) {
+        fixingViewport = true;                 // so our own change does not re-trigger
+        m.setAttribute("content", VIEWPORT);
+        fixingViewport = false;
+      }
+    } catch (e) {}
+  }
+  fixViewport();
+  document.addEventListener("DOMContentLoaded", fixViewport);
+  try {
+    new MutationObserver(function () {
+      if (!fixingViewport) fixViewport();
+    }).observe(document.documentElement, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ["content", "name"]
+    });
+  } catch (e) {}
+
   // Tell the native side when a web video goes full screen, so the download
   // button (which belongs over the windowed page) can hide there.
   function reportFullscreen(on) {
@@ -275,10 +311,6 @@
   // marks a history entry vs a fresh autocomplete guess), and clicking ours clicks
   // that native control. DEFENSIVE: if the markup changes and no remove control is
   // found, we add nothing and normal search is untouched.
-  // Terms the user deleted this session, hidden on every pass so a row YouTube
-  // re-sends stays gone even when there is no server-side remove to call.
-  var hiddenSearches = {};
-
   function nativeRemove(opt) {
     var kids = opt.querySelectorAll('button, [role="button"], [aria-label], [class]');
     for (var i = 0; i < kids.length; i++) {
@@ -298,11 +330,14 @@
   // the input is EMPTY (that is when the box shows PREVIOUS searches, not
   // autocomplete for what is being typed). We take the listbox's options, or its
   // direct children / search links when it is not marked up with roles.
-  function searchRows() {
+  function searchBox() {
     var inp = document.querySelector('input[name="search_query"], input.ytSearchboxComponentInput, input[type="search"]');
-    if (!inp || inp.value.trim() !== '') return [];
+    if (!inp || inp.value.trim() !== '') return null;
     var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
-    if (!box || box.hidden) return [];
+    if (!box || box.hidden) return null;
+    return box;
+  }
+  function rowsIn(box) {
     var opts = box.querySelectorAll('[role="option"]');
     if (opts.length) return Array.prototype.slice.call(opts);
     var links = box.querySelectorAll('a[href*="search_query="]');
@@ -337,7 +372,10 @@
     return rec;
   }
   function doDelete(row) {
-    hiddenSearches[rowText(row)] = 1;              // stays gone even if re-sent
+    // No session-suppression here: keying off the row text would re-hide the SAME
+    // term the next time the user searches it, which read as "search history stopped
+    // saving". YouTube's own remove (below) makes the deletion stick server-side;
+    // hiding the row is just the immediate feedback.
     var rm = nativeRemove(row);                     // real server delete if offered
     if (rm) { try { rm.click(); } catch (e) {} }
     try { row.style.display = 'none'; } catch (e) {}
@@ -345,21 +383,26 @@
   }
   function syncDeletes() {
     try {
-      var rows = searchRows();
+      var box = searchBox();
       var live = [];
-      rows.forEach(function (row) {
-        if (hiddenSearches[rowText(row)]) { row.style.display = 'none'; return; }
-        var rec = delFor(row);
-        var r = row.getBoundingClientRect();
-        if (r.height > 0 && r.width > 0 && r.bottom > 0) {
-          rec.el.style.display = 'block';
-          rec.el.style.left = Math.max(0, r.right - 58) + 'px';
-          rec.el.style.top = (r.top + r.height / 2 - 16) + 'px';
-        } else {
-          rec.el.style.display = 'none';
-        }
-        live.push(rec);
-      });
+      if (box) {
+        // Pin the button to the LISTBOX's right edge, not the row's: a row is often
+        // an inline element only as wide as its text, so "row.right" landed on top
+        // of the query. The box spans the full width, so its edge is the real right.
+        var boxRight = box.getBoundingClientRect().right;
+        rowsIn(box).forEach(function (row) {
+          var rec = delFor(row);
+          var r = row.getBoundingClientRect();
+          if (r.height > 0 && r.bottom > 0) {
+            rec.el.style.display = 'block';
+            rec.el.style.left = Math.max(0, boxRight - 58) + 'px';
+            rec.el.style.top = (r.top + r.height / 2 - 16) + 'px';
+          } else {
+            rec.el.style.display = 'none';
+          }
+          live.push(rec);
+        });
+      }
       // Hide overlays whose row went away (input filled, box closed, list changed).
       delEls.forEach(function (rec) { if (live.indexOf(rec) < 0) rec.el.style.display = 'none'; });
     } catch (e) {}

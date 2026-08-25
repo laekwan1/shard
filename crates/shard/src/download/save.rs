@@ -522,6 +522,39 @@ fn media_get(
     Ok(response)
 }
 
+/// The pickable qualities of an HLS stream: `(variant_url, label, detail)`, one
+/// per resolution, highest first. Empty when the URL is a plain media playlist
+/// with no variants (there is nothing to choose) — the caller then downloads it
+/// directly, exactly as before. This is what lets a non-YouTube site offer the
+/// same "choose a quality" list YouTube does, instead of silently taking the best.
+pub fn hls_qualities(manifest_url: &str, referer: &str) -> Result<Vec<(String, String, String)>> {
+    use crate::download::hls;
+    let client = media_client()?;
+    let master = media_get(&client, manifest_url, referer)?.text()?;
+    if !hls::is_master(&master) {
+        return Ok(Vec::new());
+    }
+    let mut rows: Vec<(String, String, String)> = Vec::new();
+    let mut seen_height: Vec<u32> = Vec::new();
+    for v in hls::variants(&master, manifest_url) {
+        // One row per resolution (variants() is highest-first, so the first of a
+        // height is its best bitrate). A stream with no RESOLUTION falls back to
+        // the bitrate as the label so the row is still distinguishable.
+        if v.height > 0 {
+            if seen_height.contains(&v.height) { continue; }
+            seen_height.push(v.height);
+        }
+        let label = if v.height > 0 { format!("{}p", v.height) } else { "화질".to_string() };
+        let detail = if v.bandwidth > 0 {
+            format!("{:.1} Mbps", v.bandwidth as f64 / 1_000_000.0)
+        } else {
+            String::new()
+        };
+        rows.push((v.url, label, detail));
+    }
+    Ok(rows)
+}
+
 /// Download a plain progressive file straight to disk.
 ///
 /// The simplest case: one URL, one file, no muxing. The extension is taken from

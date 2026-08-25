@@ -36,6 +36,13 @@ char *shard_download_direct(const char *url, const char *referer,
 // with shard_string_free.
 char *shard_youtube_qualities(const char *offer_json);
 
+// Pickable qualities for an HLS stream. Returns owned JSON:
+// {"ok":true,"rows":[{"url","label","detail"}]} (highest first, one per
+// resolution) or {"ok":false,"error":"..."}. Empty rows means a plain media
+// playlist with nothing to choose — download it directly. referer may be NULL.
+// Free with shard_string_free.
+char *shard_hls_qualities(const char *manifest_url, const char *referer);
+
 // Download a YouTube video (or its audio alone) from a captured offer. itag
 // names the wanted format, or 4294967295 for audio only. Same contract as
 // shard_download_hls.

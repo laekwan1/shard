@@ -1,12 +1,16 @@
 import Foundation
 
-/// One YouTube quality row, as the Rust core lists them.
+/// One quality row. For YouTube it carries an `itag`; for an HLS site (pornhub,
+/// xvideos, …) it carries the variant `url` instead — the same list UI serves
+/// both, so every site gets the same "choose a quality" flow.
 struct YtRow: Identifiable, Decodable {
     let itag: UInt32
     let label: String
     let detail: String
-    var id: UInt32 { itag }
-    var isAudioOnly: Bool { itag == UInt32.max }
+    /// Set for an HLS variant row; nil for a YouTube row.
+    var url: String? = nil
+    var id: String { url ?? String(itag) }
+    var isAudioOnly: Bool { url == nil && itag == UInt32.max }
 }
 
 /// A running save. Holds the cancel flag the C ABI polls; a pointer to it is
@@ -54,6 +58,36 @@ enum Downloader {
                   let label = row["label"] as? String,
                   let detail = row["detail"] as? String else { return nil }
             return YtRow(itag: itag, label: label, detail: detail)
+        }
+    }
+
+    /// The pickable qualities of an HLS stream, highest first, or nil if it could
+    /// not be read. An empty array means the URL is a plain media playlist with
+    /// nothing to choose — the caller downloads it directly. Runs off the main
+    /// thread because it fetches the master playlist over the network.
+    static func hlsQualities(_ url: String, referer: String) async -> [YtRow]? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let raw = url.withCString { u in
+                    referer.withCString { r in shard_hls_qualities(u, r) }
+                }
+                guard let raw = raw else { continuation.resume(returning: nil); return }
+                let json = String(cString: raw)
+                shard_string_free(raw)
+                guard let data = json.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      (obj["ok"] as? Bool) == true,
+                      let rows = obj["rows"] as? [[String: Any]] else {
+                    continuation.resume(returning: nil); return
+                }
+                let out: [YtRow] = rows.compactMap { row in
+                    guard let u = row["url"] as? String,
+                          let label = row["label"] as? String,
+                          let detail = row["detail"] as? String else { return nil }
+                    return YtRow(itag: 0, label: label, detail: detail, url: u)
+                }
+                continuation.resume(returning: out)
+            }
         }
     }
 

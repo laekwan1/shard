@@ -15,6 +15,7 @@ struct BrowserScreen: View {
     @State private var pendingOffer = ""
     @State private var pendingTitle = ""
     @State private var pendingThumb = ""
+    @State private var pendingHLSReferer = ""
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
@@ -119,7 +120,19 @@ struct BrowserScreen: View {
                 qualities = rows
                 withAnimation { showList = true }
             } else if let hls = offer.hls, !hls.isEmpty {
-                startURL(hls, isHLS: true, referer: offer.referer ?? "", title: pendingTitle)
+                // Offer the same quality list YouTube gets. If the master has
+                // variants, show them; otherwise (a plain media playlist, or the
+                // fetch failed) fall back to downloading it directly as before —
+                // so this never blocks a download that used to work.
+                pendingHLSReferer = offer.referer ?? ""
+                let rows = await Downloader.hlsQualities(hls, referer: pendingHLSReferer)
+                if let rows = rows, rows.count > 1 {
+                    banner = nil
+                    qualities = rows
+                    withAnimation { showList = true }
+                } else {
+                    startURL(hls, isHLS: true, referer: pendingHLSReferer, title: pendingTitle)
+                }
             } else if let media = offer.media, !media.isEmpty {
                 startURL(media, isHLS: false, referer: offer.referer ?? "", title: pendingTitle)
             } else {
@@ -235,6 +248,14 @@ struct BrowserScreen: View {
     }
 
     private func startYouTube(_ row: YtRow) {
+        // An HLS variant row carries a URL instead of an itag: download that
+        // rendition directly, the same list UI, a different source.
+        if let variant = row.url {
+            withAnimation { showList = false }
+            startURL(variant, isHLS: true, referer: pendingHLSReferer,
+                     title: "\(pendingTitle) · \(row.label)")
+            return
+        }
         withAnimation { showList = false }
         let offer = pendingOffer
         let label = row.isAudioOnly ? "\(pendingTitle) (음악)" : "\(pendingTitle) · \(row.label)"
