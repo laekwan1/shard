@@ -272,7 +272,9 @@ struct BrowserScreen: View {
     }
 
     private func startURL(_ url: String, isHLS: Bool, referer: String, title: String) {
-        downloads.start(title: title, segments: isHLS) { task, report in
+        // HLS now reports bytes (run_hls estimates the total), so it shows MB and a
+        // real speed just like the others — no segment-count mode needed.
+        downloads.start(title: title) { task, report in
             try await Downloader.runURL(url, isHLS: isHLS, referer: referer, title: title,
                                         task: task, progress: report)
         }

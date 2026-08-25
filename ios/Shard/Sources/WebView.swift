@@ -215,14 +215,16 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
-        // Re-fit the page. Some sites (pornhub) render their video page zoomed in
-        // until a layout pass runs — the only trigger used to be opening the
-        // address bar (whose keyboard resized us). Nudge the height by a point and
-        // back so WebKit re-evaluates the (device-width) viewport on its own.
-        let h = webView.frame.height
-        if h > 2 {
-            webView.frame.size.height = h - 1
-            DispatchQueue.main.async { webView.frame.size.height = h }
+        // Re-fit the page. Some sites (pornhub) render their video page zoomed IN
+        // until a layout pass runs — the only trigger used to be opening the address
+        // bar (whose keyboard resized us). Reset the scroll view to its fit scale so
+        // the page shows at device width without that workaround. Deferred a beat so
+        // it runs after WebKit's own post-load layout.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            let sv = webView.scrollView
+            if sv.zoomScale > sv.minimumZoomScale {
+                sv.setZoomScale(sv.minimumZoomScale, animated: false)
+            }
         }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -230,14 +232,29 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // A blocked site with the engine off fails BEFORE it commits, so the old
-        // page just stayed with no word why. Say so (and hint at the engine), but
-        // not for a plain cancel (-999), which fires for normal interrupted loads.
+        // A blocked site (engine off) fails before it commits; WKWebView then just
+        // keeps the old page. Show the attempted address failing — like the PC and
+        // Android apps and like any browser — instead of silently staying put or
+        // popping a banner. Not for a plain cancel (-999), which is a normal
+        // interrupted load, not an error.
         isLoading = false
-        if (error as NSError).code != NSURLErrorCancelled {
-            onBanner?("페이지를 열지 못했습니다. 우회 전원을 켜고 다시 시도해 보세요.")
-        }
-        sync()
+        let ns = error as NSError
+        if ns.code == NSURLErrorCancelled { sync(); return }
+        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? address
+        let host = URL(string: failed)?.host ?? failed
+        let page = """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0;background:#141414;color:#e8e6e3;font:16px -apple-system;\
+        display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center;padding:24px">
+        <div style="font-size:44px">⚠️</div>
+        <p style="font-weight:600">이 페이지를 열 수 없습니다</p>
+        <p style="color:#9a9a9a;word-break:break-all">\(host)</p>
+        <p style="color:#9a9a9a;font-size:14px">우회 전원을 켜면 접속될 수 있습니다.</p>
+        </div></body></html>
+        """
+        webView.loadHTMLString(page, baseURL: URL(string: failed))
+        address = failed
     }
 
     private func sync() {

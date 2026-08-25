@@ -393,11 +393,20 @@
     delEls.push(rec);
     return rec;
   }
+  // The element to actually hide: the row's outermost wrapper still inside the box.
+  // Hiding just the matched inner element left an empty row (its <li>/wrapper kept
+  // its height) — the "빈 행" that stayed behind.
+  function topRow(box, row) {
+    var e = row;
+    while (e && e.parentElement && e.parentElement !== box) e = e.parentElement;
+    return e || row;
+  }
   function doDelete(row) {
     markDeleted(rowText(row));                       // remembered, so it stays gone on reload
     var rm = nativeRemove(row);                       // also use YouTube's own remove if it has one
     if (rm) { try { rm.click(); } catch (e) {} }
-    try { row.style.display = 'none'; } catch (e) {}
+    var box = searchBox();
+    try { (box ? topRow(box, row) : row).style.display = 'none'; } catch (e) {}
     setTimeout(syncDeletes, 60);
   }
   function syncDeletes() {
@@ -410,9 +419,9 @@
         // of the query. The box spans the full width, so its edge is the real right.
         var boxRight = box.getBoundingClientRect().right;
         rowsIn(box).forEach(function (row) {
-          // A previously-deleted term: keep it hidden and show no button for it.
+          // A previously-deleted term: keep the whole row hidden, no button for it.
           if (isDeleted(rowText(row))) {
-            row.style.display = 'none';
+            topRow(box, row).style.display = 'none';
             return;
           }
           var rec = delFor(row);

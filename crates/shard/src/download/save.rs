@@ -841,7 +841,12 @@ pub fn run_hls(
             }
         };
         whole.append(&mut bytes);
-        on_progress(index as u64 + 1, count);
+        // Report BYTES, not the segment index, so the UI shows MB and a real speed
+        // (MB/s) like every other download. HLS never states a total up front, so
+        // estimate it from how far in we are (bytes so far scaled by segment count).
+        let done = whole.len() as u64;
+        let est = done.saturating_mul(count) / (index as u64 + 1);
+        on_progress(done, est);
     }
 
     if looks_ts {
