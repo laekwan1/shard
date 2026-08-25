@@ -30,6 +30,25 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             "document.querySelectorAll('video').forEach(function(v){try{v.pause()}catch(e){}})",
             completionHandler: nil)
     }
+    /// The `Cookie:` header the page would send for `urlString`, pulled from the
+    /// web view's own cookie store — the download engine runs outside the browser,
+    /// so a site that gates its media behind a session cookie (pornhub) needs this
+    /// handed over, the same way the Android app shares its WebView cookies.
+    func cookieHeader(for urlString: String) async -> String {
+        guard let host = URL(string: urlString)?.host else { return "" }
+        let store = webView.configuration.websiteDataStore.httpCookieStore
+        let all: [HTTPCookie] = await withCheckedContinuation { cont in
+            store.getAllCookies { cont.resume(returning: $0) }
+        }
+        let pairs = all
+            .filter { cookie in
+                let d = cookie.domain.hasPrefix(".") ? String(cookie.domain.dropFirst()) : cookie.domain
+                return host == d || host.hasSuffix("." + d)
+            }
+            .map { "\($0.name)=\($0.value)" }
+        return pairs.joined(separator: "; ")
+    }
+
     /// Mark whether the browser is the visible screen. While it is not (the library
     /// is up), Capture.js cancels any full screen the page video tries to enter —
     /// otherwise the library's forced landscape sent a playing pornhub video to

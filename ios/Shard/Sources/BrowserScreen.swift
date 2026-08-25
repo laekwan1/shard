@@ -19,6 +19,7 @@ struct BrowserScreen: View {
     @State private var pendingTitle = ""
     @State private var pendingThumb = ""
     @State private var pendingHLSReferer = ""
+    @State private var pendingHLSCookie = ""
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
@@ -136,16 +137,18 @@ struct BrowserScreen: View {
                 // fetch failed) fall back to downloading it directly as before —
                 // so this never blocks a download that used to work.
                 pendingHLSReferer = offer.referer ?? ""
-                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer)
+                pendingHLSCookie = await model.cookieHeader(for: hlsURL)
+                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie)
                 if let rows = rows, rows.count > 1 {
                     banner = nil
                     qualities = rows
                     withAnimation { showList = true }
                 } else {
-                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, title: pendingTitle)
+                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie, title: pendingTitle)
                 }
             } else if let media = offer.media, !media.isEmpty {
-                startURL(media, isHLS: false, referer: offer.referer ?? "", title: pendingTitle)
+                let cookie = await model.cookieHeader(for: media)
+                startURL(media, isHLS: false, referer: offer.referer ?? "", cookie: cookie, title: pendingTitle)
             } else {
                 banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
             }
@@ -273,7 +276,7 @@ struct BrowserScreen: View {
         // rendition directly, the same list UI, a different source.
         if let variant = row.url {
             withAnimation { showList = false }
-            startURL(variant, isHLS: true, referer: pendingHLSReferer,
+            startURL(variant, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie,
                      title: "\(pendingTitle) · \(row.label)")
             return
         }
@@ -290,12 +293,12 @@ struct BrowserScreen: View {
         banner = "다운로드를 시작했습니다"
     }
 
-    private func startURL(_ url: String, isHLS: Bool, referer: String, title: String) {
+    private func startURL(_ url: String, isHLS: Bool, referer: String, cookie: String = "", title: String) {
         // HLS now reports bytes (run_hls estimates the total), so it shows MB and a
         // real speed just like the others — no segment-count mode needed.
         downloads.start(title: title) { task, report in
-            try await Downloader.runURL(url, isHLS: isHLS, referer: referer, title: title,
-                                        task: task, progress: report)
+            try await Downloader.runURL(url, isHLS: isHLS, referer: referer, cookie: cookie,
+                                        title: title, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"
     }

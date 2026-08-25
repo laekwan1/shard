@@ -21,14 +21,15 @@ typedef int (*ShardCancel)(void *ctx);
 // {"ok":true,"path":"..."} or {"ok":false,"error":"..."}; free it with
 // shard_string_free. referer/title may be NULL.
 char *shard_download_hls(const char *manifest_url, const char *referer,
-                         const char *into_dir, const char *title,
-                         ShardProgress progress, ShardCancel cancel, void *ctx);
+                         const char *cookie, const char *into_dir,
+                         const char *title, ShardProgress progress,
+                         ShardCancel cancel, void *ctx);
 
 // Save a plain file URL (progressive MP4 / direct <video src>). Same contract.
 char *shard_download_direct(const char *url, const char *referer,
-                            const char *into_dir, const char *title,
-                            ShardProgress progress, ShardCancel cancel,
-                            void *ctx);
+                            const char *cookie, const char *into_dir,
+                            const char *title, ShardProgress progress,
+                            ShardCancel cancel, void *ctx);
 
 // Quality rows for a captured YouTube offer (the ytInitialPlayerResponse the
 // page script built). Returns owned JSON: {"ok":true,"rows":[{itag,label,detail}]}
@@ -39,9 +40,10 @@ char *shard_youtube_qualities(const char *offer_json);
 // Pickable qualities for an HLS stream. Returns owned JSON:
 // {"ok":true,"rows":[{"url","label","detail"}]} (highest first, one per
 // resolution) or {"ok":false,"error":"..."}. Empty rows means a plain media
-// playlist with nothing to choose — download it directly. referer may be NULL.
-// Free with shard_string_free.
-char *shard_hls_qualities(const char *manifest_url, const char *referer);
+// playlist with nothing to choose — download it directly. referer/cookie may be
+// NULL. Free with shard_string_free.
+char *shard_hls_qualities(const char *manifest_url, const char *referer,
+                          const char *cookie);
 
 // Download a YouTube video (or its audio alone) from a captured offer. itag
 // names the wanted format, or 4294967295 for audio only. Same contract as

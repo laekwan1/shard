@@ -497,12 +497,22 @@ fn unused(mut file: File) -> std::io::Result<Vec<u8>> {
 const UA: &str =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-fn media_client() -> Result<reqwest::blocking::Client> {
+fn media_client(cookie: &str) -> Result<reqwest::blocking::Client> {
     use_ring();
-    Ok(reqwest::blocking::Client::builder()
+    let mut builder = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
-        .user_agent(UA)
-        .build()?)
+        .user_agent(UA);
+    // Carry the page's cookies on EVERY request (master, variant, segment, key) as
+    // a default header — sites like pornhub gate their HLS behind a session cookie,
+    // so without this the manifest and segments came back 403 ("조각을 받지 못했습니다").
+    if !cookie.is_empty() {
+        if let Ok(value) = reqwest::header::HeaderValue::from_str(cookie) {
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(reqwest::header::COOKIE, value);
+            builder = builder.default_headers(headers);
+        }
+    }
+    Ok(builder.build()?)
 }
 
 /// GET, with the page as `Referer`. Returns the response for streaming.
@@ -527,9 +537,9 @@ fn media_get(
 /// with no variants (there is nothing to choose) — the caller then downloads it
 /// directly, exactly as before. This is what lets a non-YouTube site offer the
 /// same "choose a quality" list YouTube does, instead of silently taking the best.
-pub fn hls_qualities(manifest_url: &str, referer: &str) -> Result<Vec<(String, String, String)>> {
+pub fn hls_qualities(manifest_url: &str, referer: &str, cookie: &str) -> Result<Vec<(String, String, String)>> {
     use crate::download::hls;
-    let client = media_client()?;
+    let client = media_client(cookie)?;
     let master = media_get(&client, manifest_url, referer)?.text()?;
     if !hls::is_master(&master) {
         return Ok(Vec::new());
@@ -576,13 +586,14 @@ pub fn hls_qualities(manifest_url: &str, referer: &str) -> Result<Vec<(String, S
 pub fn run_direct(
     url: &str,
     referer: &str,
+    cookie: &str,
     into: &Path,
     title: &str,
     on_progress: &mut dyn FnMut(u64, u64),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<PathBuf> {
     std::fs::create_dir_all(into).ok();
-    let client = media_client()?;
+    let client = media_client(cookie)?;
     let mut response = media_get(&client, url, referer)?;
     let total = response.content_length().unwrap_or(0);
 
@@ -778,6 +789,7 @@ pub fn run_youtube(
 pub fn run_hls(
     manifest_url: &str,
     referer: &str,
+    cookie: &str,
     into: &Path,
     title: &str,
     on_progress: &mut dyn FnMut(u64, u64),
@@ -785,7 +797,7 @@ pub fn run_hls(
 ) -> Result<PathBuf> {
     use crate::download::hls;
     std::fs::create_dir_all(into).ok();
-    let client = media_client()?;
+    let client = media_client(cookie)?;
 
     // The master, then the chosen media playlist. A media playlist has no
     // variants, so `variants` comes back empty and the master URL is used as-is.

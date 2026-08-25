@@ -65,11 +65,13 @@ enum Downloader {
     /// not be read. An empty array means the URL is a plain media playlist with
     /// nothing to choose — the caller downloads it directly. Runs off the main
     /// thread because it fetches the master playlist over the network.
-    static func hlsQualities(_ url: String, referer: String) async -> [YtRow]? {
+    static func hlsQualities(_ url: String, referer: String, cookie: String) async -> [YtRow]? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let raw = url.withCString { u in
-                    referer.withCString { r in shard_hls_qualities(u, r) }
+                    referer.withCString { r in
+                        cookie.withCString { c in shard_hls_qualities(u, r, c) }
+                    }
                 }
                 guard let raw = raw else { continuation.resume(returning: nil); return }
                 let json = String(cString: raw)
@@ -122,17 +124,19 @@ enum Downloader {
 
     /// Download a plain URL — an HLS playlist or a progressive file.
     static func runURL(
-        _ url: String, isHLS: Bool, referer: String, title: String,
+        _ url: String, isHLS: Bool, referer: String, cookie: String = "", title: String,
         task: DownloadTask, progress: @escaping (UInt64, UInt64) -> Void
     ) async throws -> URL {
         try await run(task: task, progress: progress) { progressCb, cancelCb, ctx in
             url.withCString { u in
                 referer.withCString { ref in
-                    Downloader.saveDirectory.path.withCString { dir in
-                        title.withCString { t in
-                            isHLS
-                                ? shard_download_hls(u, ref, dir, t, progressCb, cancelCb, ctx)
-                                : shard_download_direct(u, ref, dir, t, progressCb, cancelCb, ctx)
+                    cookie.withCString { ck in
+                        Downloader.saveDirectory.path.withCString { dir in
+                            title.withCString { t in
+                                isHLS
+                                    ? shard_download_hls(u, ref, ck, dir, t, progressCb, cancelCb, ctx)
+                                    : shard_download_direct(u, ref, ck, dir, t, progressCb, cancelCb, ctx)
+                            }
                         }
                     }
                 }

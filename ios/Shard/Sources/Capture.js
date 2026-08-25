@@ -138,6 +138,12 @@
   document.addEventListener("webkitbeginfullscreen", exitAnyFullscreen, true);
   document.addEventListener("fullscreenchange", exitAnyFullscreen, true);
   document.addEventListener("webkitfullscreenchange", exitAnyFullscreen, true);
+  // Also keep the video from RESUMING while the browser is inactive — a play that
+  // starts on the library's forced rotation is what iOS then throws to full screen,
+  // so stopping the play stops the hijack at the source.
+  document.addEventListener("play", function (e) {
+    if (!window.__shardBrowserActive) { try { e.target.pause(); } catch (err) {} }
+  }, true);
 
   // Tell the native side whether any web video is actually playing, so the
   // library's own player can step aside (pause) while a page video plays and
