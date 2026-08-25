@@ -121,19 +121,19 @@ struct BrowserScreen: View {
                 banner = nil
                 qualities = rows
                 withAnimation { showList = true }
-            } else if let hls = offer.hls, !hls.isEmpty {
+            } else if let hlsURL = hlsURL(offer) {
                 // Offer the same quality list YouTube gets. If the master has
                 // variants, show them; otherwise (a plain media playlist, or the
                 // fetch failed) fall back to downloading it directly as before —
                 // so this never blocks a download that used to work.
                 pendingHLSReferer = offer.referer ?? ""
-                let rows = await Downloader.hlsQualities(hls, referer: pendingHLSReferer)
+                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer)
                 if let rows = rows, rows.count > 1 {
                     banner = nil
                     qualities = rows
                     withAnimation { showList = true }
                 } else {
-                    startURL(hls, isHLS: true, referer: pendingHLSReferer, title: pendingTitle)
+                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, title: pendingTitle)
                 }
             } else if let media = offer.media, !media.isEmpty {
                 startURL(media, isHLS: false, referer: offer.referer ?? "", title: pendingTitle)
@@ -141,6 +141,16 @@ struct BrowserScreen: View {
                 banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
             }
         }
+    }
+
+    /// The HLS manifest to use, if any. Prefer the dedicated `hls` field, but also
+    /// accept an `.m3u8` that a site put in `media` — pornhub hands its master
+    /// playlist there, which the old code fed to the progressive downloader and so
+    /// saved a broken file instead of offering the quality list.
+    private func hlsURL(_ offer: Offer) -> String? {
+        if let hls = offer.hls, !hls.isEmpty { return hls }
+        if let media = offer.media, media.contains(".m3u8") { return media }
+        return nil
     }
 
     private func pick(_ itag: UInt32) {
