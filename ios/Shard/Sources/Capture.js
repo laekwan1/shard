@@ -310,13 +310,10 @@
   setInterval(skipAds, 350);
 
   // A red, underlined "삭제" on the right of each PREVIOUS-SEARCH row in YouTube's
-  // search suggestions. Logged-out recent searches live on YouTube's server (keyed
-  // by the visitor cookie), not in localStorage — so clearing the row on screen is
-  // not enough; it has to invoke YouTube's own remove so it stays gone. We only add
-  // our button to rows that actually carry a native remove affordance (that is what
-  // marks a history entry vs a fresh autocomplete guess), and clicking ours clicks
-  // that native control. DEFENSIVE: if the markup changes and no remove control is
-  // found, we add nothing and normal search is untouched.
+  // search suggestions. Deletion is made to stick by remembering the term (see the
+  // localStorage list below) and hiding it ourselves — a refresh used to bring the
+  // row back because YouTube re-sends logged-out recent searches from the server.
+  // If YouTube ALSO exposes a native remove control we click it too, best-effort.
   function nativeRemove(opt) {
     var kids = opt.querySelectorAll('button, [role="button"], [aria-label], [class]');
     for (var i = 0; i < kids.length; i++) {
@@ -331,6 +328,25 @@
   }
 
   function rowText(row) { return (row.textContent || '').trim(); }
+
+  // Deleted previous-searches, kept in localStorage so a delete STICKS across a
+  // reload. YouTube's logged-out recent searches come back from its server (a
+  // per-visitor cookie) after a refresh, and there is no reliable client remove —
+  // so instead of fighting that, we remember what the user deleted and keep those
+  // rows hidden ourselves. A term is un-deleted the moment the user searches it
+  // again (below), so history never looks "stuck off" — that was the earlier bug.
+  function loadDeleted() { try { return JSON.parse(localStorage.getItem('shardDeleted') || '[]'); } catch (e) { return []; } }
+  function saveDeleted(a) { try { localStorage.setItem('shardDeleted', JSON.stringify(a.slice(-300))); } catch (e) {} }
+  var deleted = loadDeleted();
+  function isDeleted(t) { return deleted.indexOf(t) >= 0; }
+  function markDeleted(t) { if (t && !isDeleted(t)) { deleted.push(t); saveDeleted(deleted); } }
+  function unDelete(t) { var i = deleted.indexOf(t); if (i >= 0) { deleted.splice(i, 1); saveDeleted(deleted); } }
+  // Any actual search (this results page's own query) un-deletes that term, so a
+  // thing you deleted and then deliberately searched again is remembered normally.
+  try {
+    var q = new URLSearchParams(location.search).get('search_query');
+    if (q) unDelete(q.trim());
+  } catch (e) {}
 
   // The rows of previous searches inside YouTube's suggestions listbox. Only when
   // the input is EMPTY (that is when the box shows PREVIOUS searches, not
@@ -378,11 +394,8 @@
     return rec;
   }
   function doDelete(row) {
-    // No session-suppression here: keying off the row text would re-hide the SAME
-    // term the next time the user searches it, which read as "search history stopped
-    // saving". YouTube's own remove (below) makes the deletion stick server-side;
-    // hiding the row is just the immediate feedback.
-    var rm = nativeRemove(row);                     // real server delete if offered
+    markDeleted(rowText(row));                       // remembered, so it stays gone on reload
+    var rm = nativeRemove(row);                       // also use YouTube's own remove if it has one
     if (rm) { try { rm.click(); } catch (e) {} }
     try { row.style.display = 'none'; } catch (e) {}
     setTimeout(syncDeletes, 60);
@@ -397,6 +410,11 @@
         // of the query. The box spans the full width, so its edge is the real right.
         var boxRight = box.getBoundingClientRect().right;
         rowsIn(box).forEach(function (row) {
+          // A previously-deleted term: keep it hidden and show no button for it.
+          if (isDeleted(rowText(row))) {
+            row.style.display = 'none';
+            return;
+          }
           var rec = delFor(row);
           var r = row.getBoundingClientRect();
           if (r.height > 0 && r.bottom > 0) {
