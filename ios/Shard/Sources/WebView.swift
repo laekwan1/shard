@@ -67,12 +67,30 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             shard_stop()
             setProxy(port: 0)
             engineOn = false
-        } else {
-            let bound = shard_start(nil, 0)
-            guard bound > 0 else { return }
-            setProxy(port: UInt16(bound))
-            engineOn = true
+            // Turning OFF must block a blocked site AT ONCE. A plain reload kept
+            // showing it, because WKWebView served it from cache / a warm
+            // connection that never went through DPI again. So drop the caches and
+            // reload from origin (ignoring cache) — the fresh request then gets
+            // blocked as it would without the engine. Cookies/localStorage are kept
+            // so the user is not logged out.
+            suppressNavigatedClose = true
+            let types: Set<String> = [
+                WKWebsiteDataTypeDiskCache,
+                WKWebsiteDataTypeMemoryCache,
+                WKWebsiteDataTypeFetchCache,
+                WKWebsiteDataTypeOfflineWebApplicationCache,
+            ]
+            webView.configuration.websiteDataStore.removeData(
+                ofTypes: types, modifiedSince: .distantPast
+            ) { [weak self] in
+                self?.webView.reloadFromOrigin()
+            }
+            return
         }
+        let bound = shard_start(nil, 0)
+        guard bound > 0 else { return }
+        setProxy(port: UInt16(bound))
+        engineOn = true
         suppressNavigatedClose = true
         webView.reload()
     }
