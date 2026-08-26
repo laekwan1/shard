@@ -144,6 +144,21 @@
   document.addEventListener("play", function (e) {
     if (!window.__shardBrowserActive) { try { e.target.pause(); } catch (err) {} }
   }, true);
+  // The native side reaches only the main frame; it relays the active flag to each
+  // child frame here (pornhub's player lives in an iframe). Each frame runs its own
+  // Capture.js, so this sets that frame's flag and pauses its own videos.
+  window.addEventListener("message", function (e) {
+    var d = e.data;
+    if (d && d.__shard === "active") {
+      window.__shardBrowserActive = !!d.on;
+      if (!d.on) {
+        try {
+          var vids = document.getElementsByTagName("video");
+          for (var i = 0; i < vids.length; i++) { try { vids[i].pause(); } catch (err) {} }
+        } catch (err) {}
+      }
+    }
+  }, false);
 
   // Tell the native side whether any web video is actually playing, so the
   // library's own player can step aside (pause) while a page video plays and

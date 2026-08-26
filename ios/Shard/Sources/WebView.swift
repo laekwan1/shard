@@ -54,7 +54,18 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// otherwise the library's forced landscape sent a playing pornhub video to
     /// native full screen, hijacking the library's own.
     func setBrowserActive(_ on: Bool) {
-        webView.evaluateJavaScript("window.__shardBrowserActive=\(on ? "true" : "false")", completionHandler: nil)
+        // Set the flag AND (when going inactive) pause videos — in the main frame
+        // and every child frame. pornhub plays inside an <iframe>, and a main-frame-
+        // only call left that video running, so it still hijacked full screen. The
+        // relay postMessage reaches each frame's Capture.js, which sets its own flag.
+        let js = """
+        (function(on){
+          try { window.__shardBrowserActive = on; } catch(e) {}
+          if (!on) { try { document.querySelectorAll('video').forEach(function(v){ try{v.pause()}catch(e){} }); } catch(e) {} }
+          try { for (var i=0;i<window.frames.length;i++){ try{ window.frames[i].postMessage({__shard:'active', on:on}, '*'); }catch(e){} } } catch(e) {}
+        })(\(on ? "true" : "false"));
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
     }
     /// Called when the page starts navigating, so the address panel can retreat.
     var onNavigated: (() -> Void)?
@@ -266,6 +277,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         else { onNavigated?() }
         sync()
     }
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // Reflect the URL as soon as the new page commits, not only on finish — a
+        // reload/redirect updates the bar sooner and more reliably.
+        sync()
+    }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isLoading = false
         pageTitle = webView.title ?? ""
@@ -361,10 +377,10 @@ struct WebViewContainer: UIViewRepresentable {
             // Leave the bottom strip to the page: that is where YouTube Shorts puts
             // its draggable progress bar, and our swipes were stealing it.
             guard p.y < view.bounds.height * 0.85 else { return }
-            // Only the very edges (24pt) are left for the web view's own
-            // back/forward swipe; everything inside that is ours, so the reach is
-            // wide and meets the edge gesture exactly.
-            guard x > 24, x < w - 24 else { return }
+            // Leave a margin at each edge for the web view's own back/forward swipe.
+            // The RIGHT margin is wider (48pt): the far-right edge is "go forward" in
+            // the page, and a too-close library pull kept triggering there.
+            guard x > 24, x < w - 48 else { return }
             if g.direction == .right { model.onSwipeAddress?() }
             else { model.onSwipeLibrary?() }
         }
