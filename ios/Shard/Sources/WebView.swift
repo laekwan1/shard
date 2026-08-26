@@ -93,50 +93,54 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// the WebView at it (iOS 17+, where WKWebView takes a proxy); reloads so the
     /// change takes effect.
     func toggleEngine() {
+        let current = webView.url
         if engineOn {
             shard_stop()
-            setProxy(port: 0)
+            proxyPort = 0
             engineOn = false
-            // Turning OFF must block a blocked site AT ONCE. A plain reload kept
-            // showing it, because WKWebView served it from cache / a warm
-            // connection that never went through DPI again. So drop the caches and
-            // reload from origin (ignoring cache) — the fresh request then gets
-            // blocked as it would without the engine. Cookies/localStorage are kept
-            // so the user is not logged out.
-            suppressNavigatedClose = true
-            let types: Set<String> = [
-                WKWebsiteDataTypeDiskCache,
-                WKWebsiteDataTypeMemoryCache,
-                WKWebsiteDataTypeFetchCache,
-                WKWebsiteDataTypeOfflineWebApplicationCache,
-            ]
-            webView.configuration.websiteDataStore.removeData(
-                ofTypes: types, modifiedSince: .distantPast
-            ) { [weak self] in
-                self?.webView.reloadFromOrigin()
-            }
-            return
-        }
-        let bound = shard_start(nil, 0)
-        guard bound > 0 else { return }
-        setProxy(port: UInt16(bound))
-        engineOn = true
-        suppressNavigatedClose = true
-        webView.reload()
-    }
-
-    private func setProxy(port: UInt16) {
-        guard #available(iOS 17.0, *) else { return }
-        let store = webView.configuration.websiteDataStore
-        if port > 0, let p = NWEndpoint.Port(rawValue: port) {
-            let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: p)
-            store.proxyConfigurations = [ProxyConfiguration(httpCONNECTProxy: endpoint)]
+            // Turning OFF must block a blocked site AT ONCE. Removing the proxy alone
+            // was not enough: the TLS connections already opened THROUGH the bypass
+            // stay alive in the network process and get reused, so the site kept
+            // loading (the desync only matters at the first handshake). A whole new
+            // data store is a new network context — every warm connection is dropped —
+            // so the reload goes out on fresh connections that DPI blocks again. This
+            // also clears the session (sites log out); the user chose that for a hard off.
+            rebuildWebView(store: WKWebsiteDataStore.nonPersistent(), reload: current)
         } else {
-            store.proxyConfigurations = []
+            let bound = shard_start(nil, 0)
+            guard bound > 0 else { return }
+            proxyPort = UInt16(bound)
+            engineOn = true
+            rebuildWebView(store: WKWebsiteDataStore.default(), reload: current)
         }
     }
 
-    lazy var webView: WKWebView = {
+    /// The bound port of the local bypass proxy, or 0 when the engine is off. Kept
+    /// so a freshly rebuilt web view can be pointed at it.
+    private var proxyPort: UInt16 = 0
+
+    /// Swap in a brand-new WKWebView on `store`, dropping the old session and all its
+    /// connections, then load `reload` (the current page). Bumping `generation` makes
+    /// the SwiftUI container replace the displayed view.
+    private func rebuildWebView(store: WKWebsiteDataStore, reload url: URL?) {
+        // Detach the old view cleanly (it otherwise keeps `self` alive through its
+        // message handler).
+        webView.configuration.userContentController.removeAllScriptMessageHandlers()
+        webView.navigationDelegate = nil
+        urlObservation = nil
+
+        webView = makeWebView(store: store)
+        generation += 1
+        installAdBlock()          // the fresh view has no rules yet; re-apply them
+        suppressNavigatedClose = true
+        if let url {
+            webView.load(URLRequest(url: url))
+        } else if let u = URL(string: Self.normalize(address)) {
+            webView.load(URLRequest(url: u))
+        }
+    }
+
+    private func makeWebView(store: WKWebsiteDataStore) -> WKWebView {
         let controller = WKUserContentController()
         if let js = Self.script("Capture") {
             controller.addUserScript(
@@ -147,6 +151,13 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         let config = WKWebViewConfiguration()
         config.userContentController = controller
         config.allowsInlineMediaPlayback = true
+        config.websiteDataStore = store
+        // Point the session at the bypass proxy when the engine is on (iOS 17+).
+        if proxyPort > 0, #available(iOS 17.0, *),
+           let p = NWEndpoint.Port(rawValue: proxyPort) {
+            let endpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: p)
+            store.proxyConfigurations = [ProxyConfiguration(httpCONNECTProxy: endpoint)]
+        }
 
         // Born at screen size, not .zero: with a zero frame the FIRST page laid out
         // at the wrong width (xvideos tiles overlapped, some sites showed zoomed) and
@@ -165,8 +176,13 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             DispatchQueue.main.async { self?.sync() }
         }
         return view
-    }()
+    }
+
+    /// The live web view. Replaced whole on an engine toggle (see rebuildWebView).
+    private(set) lazy var webView: WKWebView = makeWebView(store: .default())
     private var urlObservation: NSKeyValueObservation?
+    /// Bumped whenever the web view is replaced, so the SwiftUI container swaps it in.
+    @Published var generation = 0
 
     private static func script(_ name: String) -> String? {
         guard let url = Bundle.main.url(forResource: name, withExtension: "js"),

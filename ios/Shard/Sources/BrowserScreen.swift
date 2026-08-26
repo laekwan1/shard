@@ -39,6 +39,9 @@ struct BrowserScreen: View {
             // swipes for address/library are recognizers on the web view itself
             // (see WebViewContainer) so they never swallow the page's touches.
             WebViewContainer(model: model)
+                // Replaced when the engine toggles (the web view is rebuilt on a
+                // fresh session); the id change makes SwiftUI swap in the new view.
+                .id(model.generation)
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.
