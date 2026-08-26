@@ -14,7 +14,11 @@ struct BrowserScreen: View {
     @StateObject private var model = WebModel()
     @StateObject private var bookmarks = BookmarksStore()
     @State private var showStart = false
+    @State private var renaming: Bookmark?
+    @State private var renameText = ""
     @State private var editing = ""
+    /// The user's homepage: where the home button goes, and the first page opened.
+    @AppStorage("shard.homepage") private var homepage = "https://m.youtube.com"
 
     @State private var qualities: [YtRow] = []
     @State private var pendingOffer = ""
@@ -133,7 +137,7 @@ struct BrowserScreen: View {
                 requestDownload()
             }
             model.onPick = { itag in pick(itag) }
-            if model.address.isEmpty { model.load("https://m.youtube.com") }
+            if model.address.isEmpty { model.load(homepage) }
         }
     }
 
@@ -228,14 +232,34 @@ struct BrowserScreen: View {
     private var addressPanel: some View {
         HStack(spacing: 10) {
             if engineRevealed {
-                // The bypass ON/OFF, lit amber when the engine is on.
-                Button { model.toggleEngine() } label: {
-                    Image(systemName: "power").foregroundColor(model.engineOn ? .accent : .muted)
-                }
-                .frame(width: 24)
+                // The bypass ON/OFF, lit amber when the engine is on — boxed and set
+                // off by a divider so it reads as separate from the home/star row.
+                Image(systemName: "power")
+                    .foregroundColor(model.engineOn ? .accent : .muted)
+                    .frame(width: 32, height: 30)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.engineOn ? Color.accent : Color.toolbar, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.toggleEngine() }
+                Divider().frame(height: 22).background(Color.toolbar)
             }
-            iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
-            iconButton(showStart ? "house.fill" : "house") { withAnimation { showStart.toggle() } }
+            // Home: tap → the set homepage; hold → make the current page the homepage.
+            tapHoldIcon(showStart ? "house.fill" : "house", color: .onSurface, tap: {
+                withAnimation { showStart = false }
+                model.load(homepage)
+                showAddress = false
+            }, hold: {
+                if !model.address.isEmpty && model.address != "about:blank" {
+                    homepage = model.address
+                    banner = "이 페이지를 홈으로 설정했습니다"
+                }
+            })
+            // Star: tap → the favorites (bookmarks) page; hold → add the current page.
+            tapHoldIcon("star", color: showStart ? .accent : .onSurface, tap: {
+                withAnimation { showStart.toggle() }
+            }, hold: {
+                bookmarks.toggle(url: model.address, title: model.pageTitle)
+                banner = bookmarks.isBookmarked(model.address) ? "즐겨찾기에 추가했습니다" : "즐겨찾기에서 뺐습니다"
+            })
 
             URLField(text: $editing) { model.load(editing); showAddress = false; showStart = false }
                 .frame(height: 22)   // a UITextField wrapper has no height of its
@@ -245,13 +269,6 @@ struct BrowserScreen: View {
                 .background(Color.chrome)
                 .clipShape(Capsule())
                 .onChange(of: model.address) { editing = $0 }
-
-            // Star: bookmark / un-bookmark the current page.
-            Button { bookmarks.toggle(url: model.address, title: model.pageTitle) } label: {
-                Image(systemName: bookmarks.isBookmarked(model.address) ? "star.fill" : "star")
-                    .foregroundColor(bookmarks.isBookmarked(model.address) ? .accent : .onSurface)
-            }
-            .frame(width: 26)
 
             iconButton(landscape ? "rotate.left" : "rotate.right") { rotate() }
         }
@@ -289,6 +306,18 @@ struct BrowserScreen: View {
         .frame(width: 26)
     }
 
+    /// An icon that acts on tap AND on a long press — used for home (go / set-home)
+    /// and star (open favorites / add-current). A plain Button can't carry both, so
+    /// this drives the gestures on a bare image.
+    private func tapHoldIcon(_ name: String, color: Color, tap: @escaping () -> Void, hold: @escaping () -> Void) -> some View {
+        Image(systemName: name)
+            .foregroundColor(color)
+            .frame(width: 28, height: 30)
+            .contentShape(Rectangle())
+            .onTapGesture { tap() }
+            .onLongPressGesture(minimumDuration: 0.4) { hold() }
+    }
+
     private func banner(_ text: String) -> some View {
         Text(text)
             .font(.callout).padding(12)
@@ -311,6 +340,9 @@ struct BrowserScreen: View {
                         ForEach(bookmarks.bookmarks) { b in
                             tile(title: b.title, url: b.url)
                                 .contextMenu {
+                                    Button { renaming = b; renameText = b.title } label: {
+                                        Label("이름 바꾸기", systemImage: "pencil")
+                                    }
                                     Button(role: .destructive) { bookmarks.remove(b) } label: {
                                         Label("삭제", systemImage: "trash")
                                     }
@@ -335,6 +367,11 @@ struct BrowserScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.surface.ignoresSafeArea())
+        .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+            TextField("이름", text: $renameText)
+            Button("확정") { if let b = renaming { bookmarks.rename(b, to: renameText) }; renaming = nil }
+            Button("취소", role: .cancel) { renaming = nil }
+        }
     }
 
     private func section(_ title: String) -> some View {

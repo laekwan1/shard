@@ -662,14 +662,17 @@ private struct SeekRow: View {
     var onEnd: (Double) -> Void
     var body: some View {
         HStack(spacing: 6) {
-            // Fixed width so the bar does not grow/shrink as the elapsed time
-            // gains or loses a digit (0:09 → 0:10 → 1:00:00).
+            // Fixed width so the bar does not grow/shrink as the elapsed time gains or
+            // loses a digit; wide enough for an hours clock (1:23:45), and lineLimit(1)
+            // + a scale floor keep it to ONE line instead of wrapping to two.
             Text(ui.elapsed).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().frame(width: 38, alignment: .trailing)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                .frame(width: 50, alignment: .trailing)
             SeekSlider(value: Binding(get: { Double(ui.position) }, set: { onScrub($0) }),
                        onBegin: onBegin, onScrub: onScrub, onEnd: onEnd)
             Text(ui.duration).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().frame(width: 38, alignment: .leading)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+                .frame(width: 50, alignment: .leading)
         }
     }
 }

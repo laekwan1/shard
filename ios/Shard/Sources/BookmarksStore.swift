@@ -39,6 +39,13 @@ final class BookmarksStore: ObservableObject {
         save()
     }
 
+    func rename(_ b: Bookmark, to title: String) {
+        let name = title.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, let i = bookmarks.firstIndex(where: { $0.url == b.url }) else { return }
+        bookmarks[i].title = name
+        save()
+    }
+
     /// Count a page load toward its host's "자주 방문" tally.
     func recordVisit(_ url: String) {
         let h = host(url)
