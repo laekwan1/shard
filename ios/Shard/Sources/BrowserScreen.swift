@@ -18,6 +18,8 @@ struct BrowserScreen: View {
     @State private var renameText = ""
     @State private var editingHomepage = false
     @State private var homepageText = ""
+    @State private var editingTiles = false
+    @State private var jiggle = false
     @State private var editing = ""
     /// The user's homepage: where the home button goes, and the first page opened.
     @AppStorage("shard.homepage") private var homepage = "https://m.youtube.com"
@@ -391,26 +393,46 @@ struct BrowserScreen: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 if !bookmarks.bookmarks.isEmpty {
-                    section("북마크")
+                    HStack {
+                        section("북마크")
+                        Spacer()
+                        if editingTiles {
+                            Button("완료") { withAnimation { editingTiles = false } }
+                                .font(.subheadline).foregroundColor(.accent)
+                        }
+                    }
                     LazyVGrid(columns: cols, spacing: 14) {
                         ForEach(bookmarks.bookmarks) { b in
-                            tile(title: b.title, url: b.url)
-                                .contextMenu {
-                                    Button { renaming = b; renameText = b.title } label: {
-                                        Label("이름 바꾸기", systemImage: "pencil")
+                            tile(title: b.title, url: b.url) {
+                                // In edit mode a tap renames; otherwise it opens.
+                                if editingTiles { renaming = b; renameText = b.title }
+                                else { model.load(b.url); showStart = false; showAddress = false }
+                            }
+                            // Jiggle + a delete badge in edit mode, like the home screen.
+                            .rotationEffect(.degrees(editingTiles ? (jiggle ? 2 : -2) : 0))
+                            .overlay(alignment: .topLeading) {
+                                if editingTiles {
+                                    Button { bookmarks.remove(b) } label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .font(.system(size: 22)).symbolRenderingMode(.palette)
+                                            .foregroundStyle(.white, .black.opacity(0.55))
                                     }
-                                    Button(role: .destructive) { bookmarks.remove(b) } label: {
-                                        Label("삭제", systemImage: "trash")
-                                    }
+                                    .offset(x: -2, y: -4)
                                 }
+                            }
+                            .onLongPressGesture { withAnimation { editingTiles = true } }
                         }
                     }
                 }
                 let freq = bookmarks.frequent(limit: 12)
-                if !freq.isEmpty {
+                if !freq.isEmpty && !editingTiles {
                     section("자주 방문")
                     LazyVGrid(columns: cols, spacing: 14) {
-                        ForEach(freq, id: \.host) { f in tile(title: f.host, url: f.url) }
+                        ForEach(freq, id: \.host) { f in
+                            tile(title: f.host, url: f.url) {
+                                model.load(f.url); showStart = false; showAddress = false
+                            }
+                        }
                     }
                 }
                 if bookmarks.bookmarks.isEmpty && freq.isEmpty {
@@ -423,6 +445,12 @@ struct BrowserScreen: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.surface.ignoresSafeArea())
+        .onChange(of: editingTiles) { on in
+            // Drive the wiggle: start an autoreversing repeat while in edit mode.
+            if on { withAnimation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true)) { jiggle = true } }
+            else { jiggle = false }
+        }
+        .onChange(of: showStart) { shown in if !shown { editingTiles = false } }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("이름", text: $renameText)
             Button("확정") { if let b = renaming { bookmarks.rename(b, to: renameText) }; renaming = nil }
@@ -434,21 +462,18 @@ struct BrowserScreen: View {
         Text(title).font(.headline).foregroundColor(.onSurface)
     }
 
-    private func tile(title: String, url: String) -> some View {
+    private func tile(title: String, url: String, onTap: @escaping () -> Void) -> some View {
         let host = URL(string: url)?.host ?? url
-        return Button {
-            model.load(url); showStart = false; showAddress = false
-        } label: {
-            VStack(spacing: 6) {
-                favicon(host)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                Text(title).font(.caption).foregroundColor(.onSurface)
-                    .lineLimit(1).truncationMode(.tail)
-            }
-            .frame(maxWidth: .infinity)
+        return VStack(spacing: 6) {
+            favicon(host)
+                .frame(width: 64, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            Text(title).font(.caption).foregroundColor(.onSurface)
+                .lineLimit(1).truncationMode(.tail)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
     }
 
     /// The site's own icon, from Google's favicon service (reachable without the
