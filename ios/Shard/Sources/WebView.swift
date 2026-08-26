@@ -310,10 +310,28 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // Leave failures to the web view itself (no custom error page) so the
-        // browser behaves like an ordinary one.
+        // A load that never commits (a blocked site with the engine off) otherwise
+        // leaves a blank screen with no word why. Show a plain "cannot connect" page
+        // at the attempted address — what an ordinary browser does — but not for a
+        // cancel (-999), which is a normal interrupted load, not a failure.
         isLoading = false
-        sync()
+        let ns = error as NSError
+        if ns.code == NSURLErrorCancelled { sync(); return }
+        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? address
+        let host = URL(string: failed)?.host ?? failed
+        let page = """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0;background:#141414;color:#e8e6e3;font:16px -apple-system;\
+        display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center;padding:24px">
+        <div style="font-size:44px">⚠️</div>
+        <p style="font-weight:600">연결할 수 없습니다</p>
+        <p style="color:#9a9a9a;word-break:break-all">\(host)</p>
+        <p style="color:#9a9a9a;font-size:14px">우회 전원을 켜면 접속될 수 있습니다.</p>
+        </div></body></html>
+        """
+        webView.loadHTMLString(page, baseURL: URL(string: failed))
+        address = failed
     }
 
     private func sync() {
