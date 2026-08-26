@@ -146,11 +146,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // music profile (A2DP); then re-assert playback + 48kHz.
             let session = AVAudioSession.sharedInstance()
             try? session.setActive(false, options: .notifyOthersOnDeactivation)
-            // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
-        // never asks for the call profile (HFP), so a call that flipped the earbuds to
-        // HFP is more likely to fall back to A2DP for us rather than stay crackly.
-        try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
+            // .allowBluetoothA2DP names the music-quality profile and never asks for the
+            // call profile (HFP), so a call that flipped the earbuds to HFP falls back to
+            // A2DP for us rather than staying crackly.
+            try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
             try? session.setPreferredSampleRate(48000)
+            try? session.setActive(true)
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then

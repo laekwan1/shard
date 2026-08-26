@@ -140,6 +140,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         webView.configuration.userContentController.removeAllScriptMessageHandlers()
         webView.navigationDelegate = nil
         urlObservation = nil
+        progressObservation = nil
 
         webView = makeWebView(store: store)
         generation += 1
@@ -350,12 +351,12 @@ struct WebViewContainer: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model) }
 
     func makeUIView(context: Context) -> WKWebView {
-        // Return the web view directly, as this always did before the zoom detour. A
-        // run of "fixes" (screen-size initial frame, .frame(width:) clamps, an
-        // Auto-Layout host that hugged the page's content) each INTRODUCED the very
-        // width runaway they were meant to cure — YouTube, which was fine, started
-        // rendering zoomed/cut only after them. The plain return is the version that
-        // worked; the pornhub page's own zoom is a separate, page-side thing.
+        // Return the web view directly. Earlier "fixes" (screen-size initial frame,
+        // .frame(width:) clamps, an Auto-Layout host that HUGGED the page content) all
+        // made the width runaway worse, not better. The real cause is that on iOS 16+
+        // SwiftUI asks the representable how big it wants to be and the WKWebView
+        // answered with the page's content width — so the fix lives in sizeThatFits
+        // below (cap to the proposed window size), not in wrapping the view here.
         let view = model.webView
         let refresh = UIRefreshControl()
         refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload), for: .valueChanged)
