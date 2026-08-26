@@ -21,7 +21,13 @@
       if (typeof url !== "string") return;
       var bare = url.split("?")[0].toLowerCase();
       if (bare.indexOf(".m3u8") >= 0) {
-        if (!window.__shardMedia.m3u8) window.__shardMedia.m3u8 = url;
+        // Keep the LATEST m3u8, not the first: these URLs are signed and expire, so
+        // by download time an old one returned 410 ("조각을 받지 못했습니다"). The most
+        // recent sighting is the freshest. Prefer a master over a media playlist,
+        // but a newer master still wins.
+        var isMaster = bare.indexOf("master") >= 0 || bare.indexOf("playlist") >= 0;
+        var haveMaster = /master|playlist/i.test(window.__shardMedia.m3u8 || "");
+        if (isMaster || !haveMaster) window.__shardMedia.m3u8 = url;
         if (window.__shardMedia.list.indexOf(url) < 0) window.__shardMedia.list.push(url);
       } else if (/\.mp4$/.test(bare) || /\.mp4\//.test(bare)) {
         window.__shardMedia.mp4 = url;
