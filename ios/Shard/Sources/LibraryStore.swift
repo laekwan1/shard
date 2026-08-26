@@ -96,8 +96,39 @@ final class LibraryStore: ObservableObject {
         return v?.contentModificationDate ?? v?.creationDate ?? .distantPast
     }
 
+    /// A user-set order (file names), so drag-to-reorder sticks. Items with an entry
+    /// come first in that order; the rest keep newest-first. Persisted.
+    @Published private var manualOrder: [String] = (UserDefaults.standard.array(forKey: "shard.itemOrder") as? [String]) ?? []
+    private func orderKey(_ item: Item) -> String { item.url.lastPathComponent }
+
     /// The items shown for the current folder and shelf — music gets folders too.
-    var visible: [Item] { items.filter { $0.folder == current && $0.kind == kind } }
+    var visible: [Item] {
+        let base = items.filter { $0.folder == current && $0.kind == kind }
+        return base.sorted { a, b in
+            let ia = manualOrder.firstIndex(of: orderKey(a))
+            let ib = manualOrder.firstIndex(of: orderKey(b))
+            switch (ia, ib) {
+            case let (x?, y?): return x < y     // both placed: user's order
+            case (.some, nil): return true      // placed before unplaced
+            case (nil, .some): return false
+            default: return Self.modified(a.url) > Self.modified(b.url)   // newest first
+            }
+        }
+    }
+
+    /// Move `dragged` to sit where `target` is, within the current shelf. Records an
+    /// explicit order for the whole visible set so the result is stable.
+    func moveItem(_ dragged: Item, over target: Item) {
+        guard orderKey(dragged) != orderKey(target) else { return }
+        // Give every currently-visible item an order entry (in its shown order) so the
+        // reorder is well-defined even the first time.
+        for it in visible where !manualOrder.contains(orderKey(it)) { manualOrder.append(orderKey(it)) }
+        guard let from = manualOrder.firstIndex(of: orderKey(dragged)),
+              let to = manualOrder.firstIndex(of: orderKey(target)) else { return }
+        let k = manualOrder.remove(at: from)
+        manualOrder.insert(k, at: min(to, manualOrder.count))
+        UserDefaults.standard.set(manualOrder, forKey: "shard.itemOrder")
+    }
 
     func createFolder(_ name: String) {
         let clean = name.trimmingCharacters(in: .whitespaces)

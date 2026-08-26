@@ -33,6 +33,7 @@ struct LibraryScreen: View {
     /// finger went: to music (a left swipe) the new list enters from the right.
     @State private var toMusic = true
     @State private var orientGen = 0
+    @State private var dragging: Item?
     @Namespace private var shelfNS
 
     var body: some View {
@@ -676,7 +677,11 @@ struct LibraryScreen: View {
                         // (onDrag) that carries the row onto a folder chip.
                         .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false; showFolderPanel = false }
                         .onTapGesture { play(at: index) }
-                        .onDrag { NSItemProvider(object: item.url as NSURL) }
+                        .opacity(dragging?.url == item.url ? 0.4 : 1)
+                        .onDrag { dragging = item; return NSItemProvider(object: item.url as NSURL) }
+                        // Dropping onto another row reorders; dragging up onto a folder
+                        // chip still moves to that folder (that drop lives on the chip).
+                        .onDrop(of: [.fileURL], delegate: RowReorderDrop(item: item, dragging: $dragging, store: store))
                     Divider().background(Color.toolbar)
                 }
             }
@@ -768,6 +773,21 @@ struct LibraryScreen: View {
         } label: { Label("폴더로 이동", systemImage: "folder") }
         Button(role: .destructive) { store.delete(item) } label: { Label("삭제", systemImage: "trash") }
     }
+}
+
+/// Live-reorder: as a dragged row hovers over another, the store swaps their order.
+/// Dropping onto a folder chip is a SEPARATE drop (on the chip) that moves to a
+/// folder — this one only fires over list rows, so the two do not fight.
+private struct RowReorderDrop: DropDelegate {
+    let item: Item
+    @Binding var dragging: Item?
+    let store: LibraryStore
+    func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
+    func dropEntered(info: DropInfo) {
+        guard let d = dragging, d.url != item.url else { return }
+        withAnimation(.easeInOut(duration: 0.15)) { store.moveItem(d, over: item) }
+    }
+    func performDrop(info: DropInfo) -> Bool { dragging = nil; return true }
 }
 
 /// The folder chips row, split out of LibraryScreen so it observes only the store

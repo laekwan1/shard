@@ -15,9 +15,12 @@ final class BookmarksStore: ObservableObject {
     @Published private(set) var bookmarks: [Bookmark] = []
     /// host → visit count, for the "자주 방문" tiles.
     @Published private(set) var visits: [String: Int] = [:]
+    /// Recently visited pages, newest first, for the "방문기록" section.
+    @Published private(set) var history: [Bookmark] = []
 
     private let bookmarksKey = "shard.bookmarks"
     private let visitsKey = "shard.visits"
+    private let historyKey = "shard.history"
 
     init() { load() }
 
@@ -46,11 +49,20 @@ final class BookmarksStore: ObservableObject {
         save()
     }
 
-    /// Count a page load toward its host's "자주 방문" tally.
-    func recordVisit(_ url: String) {
+    /// Count a page load toward its host's "자주 방문" tally, and push it onto the
+    /// recent-history list (deduped, newest first, capped).
+    func recordVisit(_ url: String, title: String = "") {
         let h = host(url)
-        guard !h.isEmpty else { return }
+        guard !h.isEmpty, url != "about:blank" else { return }
         visits[h, default: 0] += 1
+        history.removeAll { $0.url == url }
+        history.insert(Bookmark(url: url, title: title.isEmpty ? h : title), at: 0)
+        if history.count > 60 { history = Array(history.prefix(60)) }
+        save()
+    }
+
+    func clearHistory() {
+        history = []
         save()
     }
 
@@ -73,6 +85,7 @@ final class BookmarksStore: ObservableObject {
         let d = UserDefaults.standard
         if let b = try? JSONEncoder().encode(bookmarks) { d.set(b, forKey: bookmarksKey) }
         if let v = try? JSONEncoder().encode(visits) { d.set(v, forKey: visitsKey) }
+        if let h = try? JSONEncoder().encode(history) { d.set(h, forKey: historyKey) }
     }
 
     private func load() {
@@ -82,6 +95,9 @@ final class BookmarksStore: ObservableObject {
         }
         if let v = d.data(forKey: visitsKey), let map = try? JSONDecoder().decode([String: Int].self, from: v) {
             visits = map
+        }
+        if let h = d.data(forKey: historyKey), let list = try? JSONDecoder().decode([Bookmark].self, from: h) {
+            history = list
         }
     }
 }

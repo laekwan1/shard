@@ -134,7 +134,7 @@ struct BrowserScreen: View {
             }
         }
         .onChange(of: model.address) { url in
-            bookmarks.recordVisit(url)
+            bookmarks.recordVisit(url, title: model.pageTitle)
             if !url.isEmpty && url != "about:blank" { showStart = false }
         }
         .onChange(of: libraryVisible) { visible in
@@ -435,7 +435,33 @@ struct BrowserScreen: View {
                         }
                     }
                 }
-                if bookmarks.bookmarks.isEmpty && freq.isEmpty {
+                if !bookmarks.history.isEmpty && !editingTiles {
+                    HStack {
+                        section("방문기록")
+                        Spacer()
+                        Button("지우기") { bookmarks.clearHistory() }
+                            .font(.subheadline).foregroundColor(.muted)
+                    }
+                    VStack(spacing: 0) {
+                        ForEach(bookmarks.history.prefix(20)) { h in
+                            Button { model.load(h.url); showStart = false; showAddress = false } label: {
+                                HStack(spacing: 10) {
+                                    favicon(URL(string: h.url)?.host ?? h.url)
+                                        .frame(width: 26, height: 26).clipShape(RoundedRectangle(cornerRadius: 6))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(h.title).font(.subheadline).foregroundColor(.onSurface).lineLimit(1)
+                                        Text(h.url).font(.caption2).foregroundColor(.muted).lineLimit(1)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.vertical, 7).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            Divider().background(Color.toolbar)
+                        }
+                    }
+                }
+                if bookmarks.bookmarks.isEmpty && freq.isEmpty && bookmarks.history.isEmpty {
                     Text("별을 눌러 북마크를 추가하면 여기에 모입니다.")
                         .font(.callout).foregroundColor(.muted)
                         .frame(maxWidth: .infinity, alignment: .center).padding(.top, 80)
