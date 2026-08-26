@@ -61,6 +61,11 @@ final class BookmarksStore: ObservableObject {
         save()
     }
 
+    func removeHistory(_ b: Bookmark) {
+        history.removeAll { $0.url == b.url }
+        save()
+    }
+
     func clearHistory() {
         history = []
         save()

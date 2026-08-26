@@ -93,9 +93,9 @@ struct BrowserScreen: View {
                     }
                 }
             }
-            .offset(y: showAddress ? 0 : -400)
-            .opacity(showAddress ? 1 : 0)
-            .allowsHitTesting(showAddress)
+            .offset(y: (showAddress || showStart) ? 0 : -400)
+            .opacity((showAddress || showStart) ? 1 : 0)
+            .allowsHitTesting(showAddress || showStart)
             if showList {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { withAnimation { showList = false } }
@@ -107,6 +107,8 @@ struct BrowserScreen: View {
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
+
+            if editingHomepage { homepageEditor.transition(.opacity) }
 
             // A thin load bar at the very top: shows a page is still connecting, and
             // vanishes when it is done — so a blocked site's white screen is not a
@@ -283,12 +285,14 @@ struct BrowserScreen: View {
                 editingHomepage = true
             })
             // Star: tap → the favorites (bookmarks) page; hold → add the current page.
-            tapHoldIcon("star", color: showStart ? .accent : .onSurface, tap: {
-                withAnimation { showStart.toggle() }
-            }, hold: {
-                bookmarks.toggle(url: model.address, title: model.pageTitle)
-                banner = bookmarks.isBookmarked(model.address) ? "즐겨찾기에 추가했습니다" : "즐겨찾기에서 뺐습니다"
-            })
+            // Filled white when the current page is already bookmarked.
+            tapHoldIcon(bookmarks.isBookmarked(model.address) ? "star.fill" : "star",
+                        color: showStart ? .accent : (bookmarks.isBookmarked(model.address) ? .white : .onSurface),
+                        tap: { withAnimation { showStart.toggle() } },
+                        hold: {
+                            bookmarks.toggle(url: model.address, title: model.pageTitle)
+                            banner = bookmarks.isBookmarked(model.address) ? "즐겨찾기에 추가했습니다" : "즐겨찾기에서 뺐습니다"
+                        })
 
             URLField(text: $editing) { model.load(editing); showAddress = false; showStart = false }
                 .frame(height: 22)   // a UITextField wrapper has no height of its
@@ -308,19 +312,39 @@ struct BrowserScreen: View {
             DragGesture(minimumDistance: 24).onEnded { v in
                 guard abs(v.translation.width) > 40, abs(v.translation.height) < 60 else { return }
                 if v.translation.width > 0 { withAnimation { engineRevealed = true } }
-                else { showAddress = false }
+                // Don't swipe the bar away while the favorites page is up — the home/
+                // star buttons on it are the only way back off that page.
+                else if !showStart { showAddress = false }
             }
         )
-        .alert("홈페이지", isPresented: $editingHomepage) {
-            TextField("주소", text: $homepageText)
-            Button("저장") {
-                let v = homepageText.trimmingCharacters(in: .whitespaces)
-                if !v.isEmpty { homepage = WebModel.normalize(v) }
+    }
+
+    /// A small dialog for the homepage URL. Uses URLField so it grabs focus and
+    /// selects the whole (prefilled) address, ready to be typed over at once.
+    private var homepageEditor: some View {
+        ZStack {
+            Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { editingHomepage = false }
+            VStack(alignment: .leading, spacing: 14) {
+                Text("홈페이지").font(.headline).foregroundColor(.onSurface)
+                Text("홈 버튼을 누르면 이동할 주소").font(.caption).foregroundColor(.muted)
+                URLField(text: $homepageText, autofocus: true) { saveHomepage() }
+                    .frame(height: 22).padding(.horizontal, 12).padding(.vertical, 10)
+                    .background(Color.chrome).clipShape(Capsule())
+                HStack {
+                    Button("취소") { editingHomepage = false }.foregroundColor(.muted)
+                    Spacer()
+                    Button("저장") { saveHomepage() }.foregroundColor(.accent).font(.body.weight(.semibold))
+                }
             }
-            Button("취소", role: .cancel) {}
-        } message: {
-            Text("홈 버튼을 누르면 이동할 주소")
+            .padding(20).background(Color.surface).clipShape(RoundedRectangle(cornerRadius: 16))
+            .padding(28)
         }
+    }
+
+    private func saveHomepage() {
+        let v = homepageText.trimmingCharacters(in: .whitespaces)
+        if !v.isEmpty { homepage = WebModel.normalize(v) }
+        editingHomepage = false
     }
 
     private func rotate() {
@@ -386,96 +410,80 @@ struct BrowserScreen: View {
 
     // MARK: start page (home)
 
-    /// A full page of tiles over the web: bookmarks first, then most-visited. Tapping
-    /// one opens it; long-pressing a bookmark offers to remove it.
+    /// The home page over the web: a single scrolling ROW of favorite tiles up top,
+    /// and the visit history below as the only VERTICALLY scrolling area.
     private var startPage: some View {
-        let cols = [GridItem(.adaptive(minimum: 96, maximum: 140), spacing: 14)]
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                if !bookmarks.bookmarks.isEmpty {
-                    HStack {
-                        section("북마크")
-                        Spacer()
-                        if editingTiles {
-                            Button("완료") { withAnimation { editingTiles = false } }
-                                .font(.subheadline).foregroundColor(.accent)
-                        }
-                    }
-                    LazyVGrid(columns: cols, spacing: 14) {
-                        ForEach(bookmarks.bookmarks) { b in
-                            tile(title: b.title, url: b.url) {
-                                // In edit mode a tap renames; otherwise it opens.
-                                if editingTiles { renaming = b; renameText = b.title }
-                                else { model.load(b.url); showStart = false; showAddress = false }
-                            }
-                            // Jiggle + a delete badge in edit mode, like the home screen.
-                            .rotationEffect(.degrees(editingTiles ? (jiggle ? 2 : -2) : 0))
-                            .overlay(alignment: .topLeading) {
-                                if editingTiles {
-                                    Button { bookmarks.remove(b) } label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .font(.system(size: 22)).symbolRenderingMode(.palette)
-                                            .foregroundStyle(.white, .black.opacity(0.55))
-                                    }
-                                    .offset(x: -2, y: -4)
-                                }
-                            }
-                            .onLongPressGesture { withAnimation { editingTiles = true } }
-                        }
-                    }
-                }
-                let freq = bookmarks.frequent(limit: 12)
-                if !freq.isEmpty && !editingTiles {
-                    section("자주 방문")
-                    LazyVGrid(columns: cols, spacing: 14) {
-                        ForEach(freq, id: \.host) { f in
-                            tile(title: f.host, url: f.url) {
-                                model.load(f.url); showStart = false; showAddress = false
-                            }
-                        }
-                    }
-                }
-                if !bookmarks.history.isEmpty && !editingTiles {
-                    HStack {
-                        section("방문기록")
-                        Spacer()
-                        Button("지우기") { bookmarks.clearHistory() }
-                            .font(.subheadline).foregroundColor(.muted)
-                    }
-                    VStack(spacing: 0) {
-                        ForEach(bookmarks.history.prefix(20)) { h in
-                            Button { model.load(h.url); showStart = false; showAddress = false } label: {
-                                HStack(spacing: 10) {
-                                    favicon(URL(string: h.url)?.host ?? h.url)
-                                        .frame(width: 26, height: 26).clipShape(RoundedRectangle(cornerRadius: 6))
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(h.title).font(.subheadline).foregroundColor(.onSurface).lineLimit(1)
-                                        Text(h.url).font(.caption2).foregroundColor(.muted).lineLimit(1)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.vertical, 7).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            Divider().background(Color.toolbar)
-                        }
-                    }
-                }
-                if bookmarks.bookmarks.isEmpty && freq.isEmpty && bookmarks.history.isEmpty {
-                    Text("별을 눌러 북마크를 추가하면 여기에 모입니다.")
-                        .font(.callout).foregroundColor(.muted)
-                        .frame(maxWidth: .infinity, alignment: .center).padding(.top, 80)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                section("즐겨찾기")
+                Spacer()
+                if editingTiles {
+                    Button("완료") { withAnimation { editingTiles = false } }
+                        .font(.subheadline).foregroundColor(.accent)
                 }
             }
-            .padding(20)
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+
+            if bookmarks.bookmarks.isEmpty {
+                Text("주소창의 ⭐를 눌러 즐겨찾기를 추가하세요.")
+                    .font(.caption).foregroundColor(.muted).padding(.horizontal, 16).padding(.bottom, 8)
+            } else {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(bookmarks.bookmarks) { b in bookmarkTile(b) }
+                    }
+                    .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 12)
+                }
+            }
+
+            let freq = bookmarks.frequent(limit: 20)
+            if !freq.isEmpty {
+                section("자주 방문")
+                    .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 6)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(freq, id: \.host) { f in
+                            frequentTile(host: f.host, url: f.url)
+                        }
+                    }
+                    .padding(.horizontal, 16).padding(.bottom, 12)
+                }
+            }
+
+            Divider().background(Color.toolbar)
+
+            HStack {
+                section("방문기록")
+                Spacer()
+                if !bookmarks.history.isEmpty {
+                    Button("전체 지우기") { bookmarks.clearHistory() }
+                        .font(.subheadline).foregroundColor(.muted)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 2)
+
+            if bookmarks.history.isEmpty {
+                Text("방문기록이 없습니다.").font(.callout).foregroundColor(.muted)
+                    .frame(maxWidth: .infinity, alignment: .center).padding(.top, 40)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(bookmarks.history) { h in historyRow(h) }
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.surface.ignoresSafeArea())
+        // A tap on empty page space leaves edit mode (the home-screen way).
+        .contentShape(Rectangle())
+        .onTapGesture { if editingTiles { withAnimation { editingTiles = false } } }
         .onChange(of: editingTiles) { on in
-            // Drive the wiggle: start an autoreversing repeat while in edit mode.
             if on { withAnimation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true)) { jiggle = true } }
             else { jiggle = false }
         }
+        .onChange(of: bookmarks.bookmarks.count) { c in if c == 0 { editingTiles = false } }
         .onChange(of: showStart) { shown in if !shown { editingTiles = false } }
         .alert("이름 바꾸기", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
             TextField("이름", text: $renameText)
@@ -488,18 +496,74 @@ struct BrowserScreen: View {
         Text(title).font(.headline).foregroundColor(.onSurface)
     }
 
-    private func tile(title: String, url: String, onTap: @escaping () -> Void) -> some View {
-        let host = URL(string: url)?.host ?? url
-        return VStack(spacing: 6) {
-            favicon(host)
-                .frame(width: 64, height: 64)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            Text(title).font(.caption).foregroundColor(.onSurface)
-                .lineLimit(1).truncationMode(.tail)
+    /// A small favorite tile: tap opens (or renames in edit mode), long-press starts
+    /// edit mode (jiggle + a delete badge), like a home-screen icon.
+    private func bookmarkTile(_ b: Bookmark) -> some View {
+        VStack(spacing: 5) {
+            favicon(URL(string: b.url)?.host ?? b.url)
+                .frame(width: 54, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            Text(b.title).font(.caption2).foregroundColor(.onSurface)
+                .lineLimit(1).truncationMode(.tail).frame(width: 66)
         }
-        .frame(maxWidth: .infinity)
+        .frame(width: 68)
         .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+        .onTapGesture {
+            if editingTiles { renaming = b; renameText = b.title }
+            else { model.load(b.url); showStart = false; showAddress = false }
+        }
+        .rotationEffect(.degrees(editingTiles ? (jiggle ? 2 : -2) : 0))
+        .overlay(alignment: .topLeading) {
+            if editingTiles {
+                Button { bookmarks.remove(b) } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 20)).symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .black.opacity(0.6))
+                }
+                .offset(x: -4, y: -4)
+            }
+        }
+        .onLongPressGesture { withAnimation { editingTiles = true } }
+    }
+
+    /// A most-visited tile — same look as a favorite, but no edit/delete (it is
+    /// derived from history, not user-managed).
+    private func frequentTile(host: String, url: String) -> some View {
+        VStack(spacing: 5) {
+            favicon(host)
+                .frame(width: 54, height: 54)
+                .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            Text(host.replacingOccurrences(of: "www.", with: "")).font(.caption2).foregroundColor(.onSurface)
+                .lineLimit(1).truncationMode(.tail).frame(width: 66)
+        }
+        .frame(width: 68)
+        .contentShape(Rectangle())
+        .onTapGesture { model.load(url); showStart = false; showAddress = false }
+    }
+
+    /// One history row: opens on tap; the trailing ✕ removes just that entry.
+    private func historyRow(_ h: Bookmark) -> some View {
+        HStack(spacing: 8) {
+            Button { model.load(h.url); showStart = false; showAddress = false } label: {
+                HStack(spacing: 10) {
+                    favicon(URL(string: h.url)?.host ?? h.url)
+                        .frame(width: 26, height: 26).clipShape(RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(h.title).font(.subheadline).foregroundColor(.onSurface).lineLimit(1)
+                        Text(h.url).font(.caption2).foregroundColor(.muted).lineLimit(1)
+                    }
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            Button { bookmarks.removeHistory(h) } label: {
+                Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.muted).padding(8)
+            }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 5)
+        .overlay(Divider().background(Color.toolbar), alignment: .bottom)
     }
 
     /// The site's own icon, from Google's favicon service (reachable without the

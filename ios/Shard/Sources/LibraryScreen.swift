@@ -686,7 +686,6 @@ struct LibraryScreen: View {
                         // (onDrag) that carries the row onto a folder chip.
                         .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false; showFolderPanel = false }
                         .onTapGesture { play(at: index) }
-                        .opacity(dragging?.url == item.url ? 0.35 : 1)
                         .onDrag { dragging = item; dropTarget = nil; return NSItemProvider(object: item.url as NSURL) }
                         // Dropping onto another row reorders; dragging up onto a folder
                         // chip still moves to that folder (that drop lives on the chip).

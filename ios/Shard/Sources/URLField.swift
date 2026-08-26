@@ -5,6 +5,9 @@ import SwiftUI
 /// address, and clearing the old one character by character is slow.
 struct URLField: UIViewRepresentable {
     @Binding var text: String
+    /// Grab focus (and select all — see the delegate) as soon as it appears. Used by
+    /// the homepage editor so the whole address is ready to be replaced at once.
+    var autofocus = false
     var onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -12,6 +15,7 @@ struct URLField: UIViewRepresentable {
     func makeUIView(context: Context) -> UITextField {
         let field = UITextField()
         field.delegate = context.coordinator
+        if autofocus { DispatchQueue.main.async { field.becomeFirstResponder() } }
         field.placeholder = "주소 또는 검색"
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
