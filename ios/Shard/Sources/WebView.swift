@@ -364,25 +364,14 @@ struct WebViewContainer: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(model) }
 
-    func makeUIView(context: Context) -> UIView {
+    func makeUIView(context: Context) -> WKWebView {
+        // Return the web view directly, as this always did before the zoom detour. A
+        // run of "fixes" (screen-size initial frame, .frame(width:) clamps, an
+        // Auto-Layout host that hugged the page's content) each INTRODUCED the very
+        // width runaway they were meant to cure — YouTube, which was fine, started
+        // rendering zoomed/cut only after them. The plain return is the version that
+        // worked; the pornhub page's own zoom is a separate, page-side thing.
         let view = model.webView
-        // Wrap the web view in a plain host and PIN it with Auto Layout. Returning the
-        // WKWebView straight to SwiftUI let its content width feed back into SwiftUI's
-        // sizing: the page laid out wide, which widened the view, which widened the
-        // page — a runaway that grew the frame 402→474→668 and pushed everything (the
-        // address bar too) off the right. A plain UIView has no intrinsic size, so
-        // SwiftUI sizes the host from its proposal and the web view just fills it.
-        let host = UIView()
-        host.clipsToBounds = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(view)
-        NSLayoutConstraint.activate([
-            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            view.topAnchor.constraint(equalTo: host.topAnchor),
-            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-        ])
-
         let refresh = UIRefreshControl()
         refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload), for: .valueChanged)
         view.scrollView.refreshControl = refresh
@@ -409,10 +398,10 @@ struct WebViewContainer: UIViewRepresentable {
         pan.cancelsTouchesInView = false
         pan.delegate = context.coordinator
         view.addGestureRecognizer(pan)
-        return host
+        return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {}
+    func updateUIView(_ uiView: WKWebView, context: Context) {}
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let model: WebModel
