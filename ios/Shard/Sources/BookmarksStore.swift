@@ -77,7 +77,9 @@ final class BookmarksStore: ObservableObject {
         let pinned = Set(bookmarks.map { host($0.url) })
         return visits
             .filter { $0.value >= 2 && !pinned.contains($0.key) }
-            .sorted { $0.value > $1.value }
+            // Break count ties by host name so the order is STABLE — a dictionary's
+            // own order shuffles between renders, which made the tiles jump around.
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
             .prefix(limit)
             .map { (host: $0.key, url: "https://\($0.key)") }
     }

@@ -422,7 +422,9 @@ struct BrowserScreen: View {
                         .font(.subheadline).foregroundColor(.accent)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
+            // Clear the address bar that floats over the top, so the header shows and
+            // the tiles' delete badge (which sits above each tile) is not clipped.
+            .padding(.horizontal, 16).padding(.top, 54).padding(.bottom, 2)
 
             if bookmarks.bookmarks.isEmpty {
                 Text("주소창의 ⭐를 눌러 즐겨찾기를 추가하세요.")
