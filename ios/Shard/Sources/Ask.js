@@ -81,6 +81,7 @@
       media: mp4,
       hls: hls,
       hlsList: (media.list || []).join("\n"),
+      headers: media.headers || {},
       referer: location.href,
       title: document.title || "",
       thumb: picture,

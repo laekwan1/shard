@@ -7,8 +7,12 @@ struct YtRow: Identifiable, Decodable {
     let itag: UInt32
     let label: String
     let detail: String
-    /// Set for an HLS variant row; nil for a YouTube row.
+    /// Set for a non-YouTube row (HLS variant OR a direct progressive file); nil for
+    /// a YouTube row.
     var url: String? = nil
+    /// For a `url` row: true = HLS manifest, false = a direct progressive file. Lets
+    /// even a single-quality/ad download go through the list instead of auto-saving.
+    var isHLS: Bool = true
     var id: String { url ?? String(itag) }
     var isAudioOnly: Bool { url == nil && itag == UInt32.max }
 }
@@ -65,13 +69,15 @@ enum Downloader {
     /// not be read. An empty array means the URL is a plain media playlist with
     /// nothing to choose — the caller downloads it directly. Runs off the main
     /// thread because it fetches the master playlist over the network.
-    static func hlsQualities(_ url: String, referer: String, cookie: String, ua: String) async -> [YtRow]? {
+    static func hlsQualities(_ url: String, referer: String, cookie: String, ua: String, extra: String) async -> [YtRow]? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let raw = url.withCString { u in
                     referer.withCString { r in
                         cookie.withCString { c in
-                            ua.withCString { a in shard_hls_qualities(u, r, c, a) }
+                            ua.withCString { a in
+                                extra.withCString { e in shard_hls_qualities(u, r, c, a, e) }
+                            }
                         }
                     }
                 }
@@ -126,7 +132,8 @@ enum Downloader {
 
     /// Download a plain URL — an HLS playlist or a progressive file.
     static func runURL(
-        _ url: String, isHLS: Bool, referer: String, cookie: String = "", ua: String = "", title: String,
+        _ url: String, isHLS: Bool, referer: String, cookie: String = "", ua: String = "",
+        extra: String = "", title: String,
         task: DownloadTask, progress: @escaping (UInt64, UInt64) -> Void
     ) async throws -> URL {
         try await run(task: task, progress: progress) { progressCb, cancelCb, ctx in
@@ -134,11 +141,13 @@ enum Downloader {
                 referer.withCString { ref in
                     cookie.withCString { ck in
                         ua.withCString { agent in
-                            Downloader.saveDirectory.path.withCString { dir in
-                                title.withCString { t in
-                                    isHLS
-                                        ? shard_download_hls(u, ref, ck, agent, dir, t, progressCb, cancelCb, ctx)
-                                        : shard_download_direct(u, ref, ck, agent, dir, t, progressCb, cancelCb, ctx)
+                            extra.withCString { ex in
+                                Downloader.saveDirectory.path.withCString { dir in
+                                    title.withCString { t in
+                                        isHLS
+                                            ? shard_download_hls(u, ref, ck, agent, ex, dir, t, progressCb, cancelCb, ctx)
+                                            : shard_download_direct(u, ref, ck, agent, ex, dir, t, progressCb, cancelCb, ctx)
+                                    }
                                 }
                             }
                         }
@@ -201,6 +210,8 @@ struct Offer: Decodable {
     let formats: [Fmt]?
     let media: String?
     let hls: String?
+    /// Custom request headers the page's player set on its media fetches (a token).
+    let headers: [String: String]?
     let referer: String?
     let title: String?
     let thumb: String?

@@ -46,6 +46,7 @@ pub unsafe extern "C" fn shard_download_hls(
     referer: *const c_char,
     cookie: *const c_char,
     user_agent: *const c_char,
+    extra_headers: *const c_char,
     into_dir: *const c_char,
     title: *const c_char,
     progress: Option<ProgressCb>,
@@ -58,6 +59,7 @@ pub unsafe extern "C" fn shard_download_hls(
     let referer = unsafe { str_arg(referer) }.unwrap_or_default();
     let cookie = unsafe { str_arg(cookie) }.unwrap_or_default();
     let ua = unsafe { str_arg(user_agent) }.unwrap_or_default();
+    let extra = unsafe { str_arg(extra_headers) }.unwrap_or_default();
     let Some(dir) = (unsafe { str_arg(into_dir) }) else {
         return result_err("저장 폴더를 읽지 못했습니다");
     };
@@ -67,7 +69,7 @@ pub unsafe extern "C" fn shard_download_hls(
     let mut on_progress = |done: u64, total: u64| holder.progress(done, total);
     let cancelled = || holder.cancelled();
 
-    match save::run_hls(&url, &referer, &cookie, &ua, Path::new(&dir), &title, &mut on_progress, &cancelled) {
+    match save::run_hls(&url, &referer, &cookie, &ua, &extra, Path::new(&dir), &title, &mut on_progress, &cancelled) {
         Ok(path) => result_ok(&path.to_string_lossy()),
         Err(e) => result_err(&e.to_string()),
     }
@@ -124,6 +126,7 @@ pub unsafe extern "C" fn shard_hls_qualities(
     referer: *const c_char,
     cookie: *const c_char,
     user_agent: *const c_char,
+    extra_headers: *const c_char,
 ) -> *mut c_char {
     let Some(url) = (unsafe { str_arg(manifest_url) }) else {
         return result_err("주소를 읽지 못했습니다");
@@ -131,7 +134,8 @@ pub unsafe extern "C" fn shard_hls_qualities(
     let referer = unsafe { str_arg(referer) }.unwrap_or_default();
     let cookie = unsafe { str_arg(cookie) }.unwrap_or_default();
     let ua = unsafe { str_arg(user_agent) }.unwrap_or_default();
-    match save::hls_qualities(&url, &referer, &cookie, &ua) {
+    let extra = unsafe { str_arg(extra_headers) }.unwrap_or_default();
+    match save::hls_qualities(&url, &referer, &cookie, &ua, &extra) {
         Ok(rows) => {
             let mut items = String::new();
             for (i, (variant_url, label, detail)) in rows.iter().enumerate() {
@@ -198,6 +202,7 @@ pub unsafe extern "C" fn shard_download_direct(
     referer: *const c_char,
     cookie: *const c_char,
     user_agent: *const c_char,
+    extra_headers: *const c_char,
     into_dir: *const c_char,
     title: *const c_char,
     progress: Option<ProgressCb>,
@@ -210,6 +215,7 @@ pub unsafe extern "C" fn shard_download_direct(
     let referer = unsafe { str_arg(referer) }.unwrap_or_default();
     let cookie = unsafe { str_arg(cookie) }.unwrap_or_default();
     let ua = unsafe { str_arg(user_agent) }.unwrap_or_default();
+    let extra = unsafe { str_arg(extra_headers) }.unwrap_or_default();
     let Some(dir) = (unsafe { str_arg(into_dir) }) else {
         return result_err("저장 폴더를 읽지 못했습니다");
     };
@@ -219,7 +225,7 @@ pub unsafe extern "C" fn shard_download_direct(
     let mut on_progress = |done: u64, total: u64| holder.progress(done, total);
     let cancelled = || holder.cancelled();
 
-    match save::run_direct(&url, &referer, &cookie, &ua, Path::new(&dir), &title, &mut on_progress, &cancelled) {
+    match save::run_direct(&url, &referer, &cookie, &ua, &extra, Path::new(&dir), &title, &mut on_progress, &cancelled) {
         Ok(path) => result_ok(&path.to_string_lossy()),
         Err(e) => result_err(&e.to_string()),
     }

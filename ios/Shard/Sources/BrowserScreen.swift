@@ -21,6 +21,7 @@ struct BrowserScreen: View {
     @State private var pendingHLSReferer = ""
     @State private var pendingHLSCookie = ""
     @State private var pendingHLSUA = ""
+    @State private var pendingHLSHeaders = ""
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
@@ -166,11 +167,12 @@ struct BrowserScreen: View {
                 pendingHLSReferer = offer.referer ?? ""
                 pendingHLSCookie = await model.cookieHeader(for: hlsURL)
                 pendingHLSUA = await model.userAgent()
+                pendingHLSHeaders = headerString(offer.headers)
                 // ALWAYS show a list — the user picks, even when there is only one
                 // quality (never auto-save). If the manifest has no variants (a plain
                 // media playlist, or it could not be read), offer the stream itself
                 // as a single "다운로드" row so it is still a deliberate choice.
-                var rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA) ?? []
+                var rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA, extra: pendingHLSHeaders) ?? []
                 if rows.isEmpty {
                     rows = [YtRow(itag: 0, label: "다운로드", detail: "", url: hlsURL)]
                 }
@@ -178,9 +180,16 @@ struct BrowserScreen: View {
                 qualities = rows
                 withAnimation { showList = true }
             } else if let media = offer.media, !media.isEmpty {
-                let cookie = await model.cookieHeader(for: media)
-                let ua = await model.userAgent()
-                startURL(media, isHLS: false, referer: offer.referer ?? "", cookie: cookie, ua: ua, title: pendingTitle)
+                // A direct (progressive) file — an ad, a plain <video src>. Show it in
+                // the list too (a single row) so it is a deliberate pick, not a silent
+                // auto-download, the same as every other source.
+                pendingHLSReferer = offer.referer ?? ""
+                pendingHLSCookie = await model.cookieHeader(for: media)
+                pendingHLSUA = await model.userAgent()
+                pendingHLSHeaders = headerString(offer.headers)
+                banner = nil
+                qualities = [YtRow(itag: 0, label: "다운로드", detail: "", url: media, isHLS: false)]
+                withAnimation { showList = true }
             } else {
                 banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
             }
@@ -308,8 +317,9 @@ struct BrowserScreen: View {
         // rendition directly, the same list UI, a different source.
         if let variant = row.url {
             withAnimation { showList = false }
-            startURL(variant, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie,
-                     ua: pendingHLSUA, title: "\(pendingTitle) · \(row.label)")
+            let label = row.isHLS ? "\(pendingTitle) · \(row.label)" : pendingTitle
+            startURL(variant, isHLS: row.isHLS, referer: pendingHLSReferer, cookie: pendingHLSCookie,
+                     ua: pendingHLSUA, extra: pendingHLSHeaders, title: label)
             return
         }
         withAnimation { showList = false }
@@ -325,12 +335,17 @@ struct BrowserScreen: View {
         banner = "다운로드를 시작했습니다"
     }
 
-    private func startURL(_ url: String, isHLS: Bool, referer: String, cookie: String = "", ua: String = "", title: String) {
+    /// The captured player headers as "Name: Value" lines for the download engine.
+    private func headerString(_ headers: [String: String]?) -> String {
+        headers?.map { "\($0.key): \($0.value)" }.joined(separator: "\n") ?? ""
+    }
+
+    private func startURL(_ url: String, isHLS: Bool, referer: String, cookie: String = "", ua: String = "", extra: String = "", title: String) {
         // HLS now reports bytes (run_hls estimates the total), so it shows MB and a
         // real speed just like the others — no segment-count mode needed.
         downloads.start(title: title) { task, report in
             try await Downloader.runURL(url, isHLS: isHLS, referer: referer, cookie: cookie, ua: ua,
-                                        title: title, task: task, progress: report)
+                                        extra: extra, title: title, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"
     }

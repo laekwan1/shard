@@ -15,6 +15,30 @@
   window.__shardSabrReady = true;
   window.__shardSabr = null;
   window.__shardMedia = window.__shardMedia || { mp4: "", m3u8: "", list: [] };
+  // Request headers the PAGE'S player set on its media fetches (hls.js etc.). The
+  // browser's own headers (Cookie/UA/Referer) are NOT visible here — only what the
+  // page passes to fetch/XHR — so this catches a custom auth token if the player
+  // uses one. Native-HLS playback bypasses JS entirely and leaves this empty.
+  window.__shardMedia.headers = window.__shardMedia.headers || {};
+  function isMediaURL(url) {
+    try {
+      var bare = String(url).split("?")[0].toLowerCase();
+      return bare.indexOf(".m3u8") >= 0 || bare.indexOf(".ts") >= 0 ||
+             /\.mp4($|\/)/.test(bare) || bare.indexOf(".m4s") >= 0 || bare.indexOf("segment") >= 0;
+    } catch (e) { return false; }
+  }
+  function noteHeaders(url, obj) {
+    try {
+      if (!obj || !isMediaURL(url)) return;
+      var skip = /^(cookie|user-agent|referer|origin|host|accept-encoding|connection|content-length|sec-)/i;
+      var each = function (name, value) {
+        if (name && value != null && !skip.test(name)) window.__shardMedia.headers[name] = String(value);
+      };
+      if (typeof Headers !== "undefined" && obj instanceof Headers) obj.forEach(function (v, k) { each(k, v); });
+      else if (Array.isArray(obj)) obj.forEach(function (p) { each(p[0], p[1]); });
+      else Object.keys(obj).forEach(function (k) { each(k, obj[k]); });
+    } catch (e) {}
+  }
 
   function noteMedia(url) {
     try {
@@ -42,6 +66,8 @@
         var isRequest = typeof Request !== "undefined" && input instanceof Request;
         var url = isRequest ? input.url : String(input);
         noteMedia(url);
+        if (init && init.headers) noteHeaders(url, init.headers);
+        if (isRequest && input.headers) noteHeaders(url, input.headers);
         if (url.indexOf("videoplayback") >= 0) {
           var method = (init && init.method) || (isRequest ? input.method : "GET");
           if (method === "POST") {
@@ -70,14 +96,25 @@
     };
   }
 
-  // XHR too: hls.js and many players fetch over XMLHttpRequest, not fetch.
+  // XHR too: hls.js and many players fetch over XMLHttpRequest, not fetch. Remember
+  // the URL on open and each setRequestHeader, then record them (a custom token the
+  // player attaches to its segment requests).
   try {
     var openOriginal = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function (method, url) {
       try {
-        noteMedia(String(url));
+        this.__shardURL = String(url);
+        noteMedia(this.__shardURL);
       } catch (e) {}
       return openOriginal.apply(this, arguments);
+    };
+    var setHeaderOriginal = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+      try {
+        var h = {}; h[name] = value;
+        noteHeaders(this.__shardURL || "", h);
+      } catch (e) {}
+      return setHeaderOriginal.apply(this, arguments);
     };
   } catch (e) {}
 
