@@ -16,6 +16,8 @@ struct BrowserScreen: View {
     @State private var showStart = false
     @State private var renaming: Bookmark?
     @State private var renameText = ""
+    @State private var editingHomepage = false
+    @State private var homepageText = ""
     @State private var editing = ""
     /// The user's homepage: where the home button goes, and the first page opened.
     @AppStorage("shard.homepage") private var homepage = "https://m.youtube.com"
@@ -275,10 +277,8 @@ struct BrowserScreen: View {
                 model.load(homepage)
                 showAddress = false
             }, hold: {
-                if !model.address.isEmpty && model.address != "about:blank" {
-                    homepage = model.address
-                    banner = "이 페이지를 홈으로 설정했습니다"
-                }
+                homepageText = homepage      // prefill the field with the current home
+                editingHomepage = true
             })
             // Star: tap → the favorites (bookmarks) page; hold → add the current page.
             tapHoldIcon("star", color: showStart ? .accent : .onSurface, tap: {
@@ -309,6 +309,16 @@ struct BrowserScreen: View {
                 else { showAddress = false }
             }
         )
+        .alert("홈페이지", isPresented: $editingHomepage) {
+            TextField("주소", text: $homepageText)
+            Button("저장") {
+                let v = homepageText.trimmingCharacters(in: .whitespaces)
+                if !v.isEmpty { homepage = WebModel.normalize(v) }
+            }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("홈 버튼을 누르면 이동할 주소")
+        }
     }
 
     private func rotate() {
@@ -426,21 +436,40 @@ struct BrowserScreen: View {
 
     private func tile(title: String, url: String) -> some View {
         let host = URL(string: url)?.host ?? url
-        let letter = String(host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased()
         return Button {
             model.load(url); showStart = false; showAddress = false
         } label: {
             VStack(spacing: 6) {
-                Text(letter.isEmpty ? "?" : letter)
-                    .font(.system(size: 30, weight: .semibold)).foregroundColor(.white)
+                favicon(host)
                     .frame(width: 64, height: 64)
-                    .background(tileColor(host)).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 Text(title).font(.caption).foregroundColor(.onSurface)
                     .lineLimit(1).truncationMode(.tail)
             }
             .frame(maxWidth: .infinity)
         }
         .buttonStyle(.plain)
+    }
+
+    /// The site's own icon, from Google's favicon service (reachable without the
+    /// bypass), falling back to a colored initial while it loads or if it fails.
+    @ViewBuilder private func favicon(_ host: String) -> some View {
+        let letter = String(host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased()
+        let fallback = Text(letter.isEmpty ? "?" : letter)
+            .font(.system(size: 30, weight: .semibold)).foregroundColor(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity).background(tileColor(host))
+        if let u = URL(string: "https://www.google.com/s2/favicons?domain=\(host)&sz=64") {
+            AsyncImage(url: u) { phase in
+                if let img = phase.image {
+                    img.resizable().scaledToFit().padding(14)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(Color.chrome)
+                } else {
+                    fallback
+                }
+            }
+        } else {
+            fallback
+        }
     }
 
     /// A stable color per host, from a simple hash — so a site keeps its tile color.
