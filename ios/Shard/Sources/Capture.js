@@ -488,6 +488,11 @@
         docScrollWidth: document.documentElement.scrollWidth,
         bodyScrollWidth: document.body ? document.body.scrollWidth : 0,
         visualScale: (window.visualViewport && window.visualViewport.scale) || null,
+        screenWidth: window.screen && window.screen.width,
+        screenHeight: window.screen && window.screen.height,
+        outerWidth: window.outerWidth,
+        dpr: window.devicePixelRatio,
+        vvWidth: window.visualViewport && window.visualViewport.width,
         url: location.href
       };
     } catch (e) { window.__shardDebug.err = String(e); }
