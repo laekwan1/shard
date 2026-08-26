@@ -321,6 +321,15 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
+        // Reset the page to its fit scale. Symptom: a page renders zoomed-in and cut
+        // on the right until the address bar's keyboard appears — that means the
+        // scroll view's zoomScale stayed above the fit scale from a previous page and
+        // the new page inherited it. Snapping it back to minimumZoomScale (the
+        // fit-to-width scale) fixes it, with no viewport rewriting or frame nudging.
+        let sv = webView.scrollView
+        if sv.zoomScale > sv.minimumZoomScale + 0.001 {
+            sv.setZoomScale(sv.minimumZoomScale, animated: false)
+        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
