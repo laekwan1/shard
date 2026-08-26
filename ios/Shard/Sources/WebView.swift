@@ -319,11 +319,30 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // No custom error page: whatever the network returns for a blocked site (an
-        // ISP block page, a reset) should show through as-is. A custom page here just
-        // masked the real block response.
+        // This fires only when there is NO server response at all — an HTTPS site
+        // blocked by SNI reset (RST), a timeout. (An HTTP block that redirects to the
+        // government notice page SUCCEEDS instead, and shows through untouched.) Without
+        // handling it, the load just stayed on the previous page and the address bar
+        // snapped back to it. So show the attempted address failing, and keep the bar
+        // on that address. Not for a plain cancel (-999), a normal interrupted load.
         isLoading = false
-        sync()
+        let ns = error as NSError
+        if ns.code == NSURLErrorCancelled { sync(); return }
+        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? address
+        let host = URL(string: failed)?.host ?? failed
+        let page = """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0;background:#141414;color:#e8e6e3;font:16px -apple-system;\
+        display:flex;align-items:center;justify-content:center;height:100vh">
+        <div style="text-align:center;padding:24px">
+        <div style="font-size:44px">⚠️</div>
+        <p style="font-weight:600">이 사이트에 연결할 수 없습니다</p>
+        <p style="color:#9a9a9a;word-break:break-all">\(host)</p>
+        <p style="color:#9a9a9a;font-size:14px">차단되었거나 응답이 없습니다. 우회 전원을 켜보세요.</p>
+        </div></body></html>
+        """
+        webView.loadHTMLString(page, baseURL: URL(string: failed))
+        address = failed
     }
 
     private func sync() {
