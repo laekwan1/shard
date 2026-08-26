@@ -43,6 +43,9 @@ struct BrowserScreen: View {
                 // Replaced when the engine toggles (the web view is rebuilt on a
                 // fresh session); the id change makes SwiftUI swap in the new view.
                 .id(model.generation)
+                // Pin the web view to the screen width so its content-size feedback
+                // cannot stretch the layout past the window (see the clamp in RootView).
+                .frame(width: UIScreen.main.bounds.width)
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.
@@ -90,13 +93,14 @@ struct BrowserScreen: View {
         }
         .animation(.easeInOut(duration: 0.34), value: showAddress)
         .onChange(of: showAddress) { shown in
-            if !shown { engineRevealed = false }
-        }
-        .onChange(of: model.isLoading) { loading in
-            // A load starting (including pull-to-refresh) discards half-typed address
-            // text and shows the real current URL — otherwise text typed but not
-            // entered stayed in the bar after a refresh.
-            if loading { editing = model.address }
+            if !shown {
+                engineRevealed = false
+                // Closing the panel drops any half-typed, not-entered text and shows
+                // the real current URL again. (Doing this on load-start instead broke a
+                // NEW navigation: it overwrote the address the user just entered with the
+                // previous page's URL before the new one committed/failed.)
+                editing = model.address
+            }
         }
         .onChange(of: libraryVisible) { visible in
             // Behind the library: pause page videos and block them from grabbing
