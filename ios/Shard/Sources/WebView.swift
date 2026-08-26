@@ -302,8 +302,17 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
-        // (An automatic scroll-view zoom reset here was removed — it fired on every
-        // navigation and made pages jump/rotate oddly. The page's own scale stands.)
+        // Force ONE relayout so the page re-fits its real size. WKWebView lays a page
+        // out before it has its final bounds — YouTube's video page then renders
+        // zoomed and cut, and the only thing that fixed it was the keyboard resizing
+        // us when the address bar opened. Nudge the height by a point and back to
+        // reproduce that resize once, per load. This alone — no viewport rewriting,
+        // no zoom reset (those looped and made the screen jump before).
+        let f = webView.frame
+        if f.height > 2 {
+            webView.frame.size.height = f.height - 1
+            DispatchQueue.main.async { webView.frame = f }
+        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
