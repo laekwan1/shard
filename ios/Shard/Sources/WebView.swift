@@ -364,8 +364,25 @@ struct WebViewContainer: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(model) }
 
-    func makeUIView(context: Context) -> WKWebView {
+    func makeUIView(context: Context) -> UIView {
         let view = model.webView
+        // Wrap the web view in a plain host and PIN it with Auto Layout. Returning the
+        // WKWebView straight to SwiftUI let its content width feed back into SwiftUI's
+        // sizing: the page laid out wide, which widened the view, which widened the
+        // page — a runaway that grew the frame 402→474→668 and pushed everything (the
+        // address bar too) off the right. A plain UIView has no intrinsic size, so
+        // SwiftUI sizes the host from its proposal and the web view just fills it.
+        let host = UIView()
+        host.clipsToBounds = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            view.topAnchor.constraint(equalTo: host.topAnchor),
+            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+
         let refresh = UIRefreshControl()
         refresh.addTarget(context.coordinator, action: #selector(Coordinator.reload), for: .valueChanged)
         view.scrollView.refreshControl = refresh
@@ -392,10 +409,10 @@ struct WebViewContainer: UIViewRepresentable {
         pan.cancelsTouchesInView = false
         pan.delegate = context.coordinator
         view.addGestureRecognizer(pan)
-        return view
+        return host
     }
 
-    func updateUIView(_ uiView: WKWebView, context: Context) {}
+    func updateUIView(_ uiView: UIView, context: Context) {}
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let model: WebModel

@@ -66,12 +66,6 @@ struct RootView: View {
                 .offset(x: showLibrary ? 0 : geo.size.width + geo.safeAreaInsets.trailing)
                 .zIndex(1)
             }
-            // Hard-clamp the whole app to the window width. Diagnostics showed the web
-            // area growing to 474pt inside a 402pt window (WKWebView feeding its content
-            // width back into SwiftUI's sizing), pushing the right edge — address bar
-            // included — off screen. Pinning to geo.size stops anything from exceeding it.
-            .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
-            .clipped()
         }
         .tint(.accent)
         .onAppear { SystemVolume.shared.attach() }

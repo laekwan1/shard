@@ -43,9 +43,6 @@ struct BrowserScreen: View {
                 // Replaced when the engine toggles (the web view is rebuilt on a
                 // fresh session); the id change makes SwiftUI swap in the new view.
                 .id(model.generation)
-                // Pin the web view to the screen width so its content-size feedback
-                // cannot stretch the layout past the window (see the clamp in RootView).
-                .frame(width: UIScreen.main.bounds.width)
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.
