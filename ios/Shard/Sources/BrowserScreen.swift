@@ -42,6 +42,12 @@ struct BrowserScreen: View {
                 // Replaced when the engine toggles (the web view is rebuilt on a
                 // fresh session); the id change makes SwiftUI swap in the new view.
                 .id(model.generation)
+                // Pin the web view to the real screen width. A diagnostics dump showed
+                // the page laid out at innerWidth 482 on a ~402pt screen — SwiftUI was
+                // handing the web view a frame wider than the display, so `width=
+                // device-width` pages (YouTube's video page) rendered zoomed and cut on
+                // the right. Forcing the screen width makes device-width resolve right.
+                .frame(width: UIScreen.main.bounds.width)
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.

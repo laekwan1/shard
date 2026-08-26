@@ -231,9 +231,14 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         }
     }
 
+    /// The address the user last asked to open, so a failed load keeps the bar on it
+    /// instead of snapping back to the previous page.
+    private var lastRequested = ""
+
     func load(_ text: String) {
         if text.trimmingCharacters(in: .whitespaces) == "shard://dom" { copyDiagnostics(); return }
         guard let url = URL(string: Self.normalize(text)) else { return }
+        lastRequested = url.absoluteString
         webView.load(URLRequest(url: url))
     }
 
@@ -335,12 +340,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         // does not snap back to the previous page.
         isLoading = false
         let ns = error as NSError
-        if ns.code != NSURLErrorCancelled,
-           let failed = ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String {
-            address = failed
-        } else {
-            sync()
-        }
+        if ns.code == NSURLErrorCancelled { sync(); return }
+        // Keep the bar on the address the user tried to open (or the failing URL),
+        // not the previous page it snapped back to.
+        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? lastRequested
+        if !failed.isEmpty { address = failed } else { sync() }
     }
 
     private func sync() {
