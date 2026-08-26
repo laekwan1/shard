@@ -12,6 +12,8 @@ struct BrowserScreen: View {
     var openLibrary: () -> Void
 
     @StateObject private var model = WebModel()
+    @StateObject private var bookmarks = BookmarksStore()
+    @State private var showStart = false
     @State private var editing = ""
 
     @State private var qualities: [YtRow] = []
@@ -44,6 +46,12 @@ struct BrowserScreen: View {
                 // Replaced when the engine toggles (the web view is rebuilt on a
                 // fresh session); the id change makes SwiftUI swap in the new view.
                 .id(model.generation)
+
+            // The start page (home): bookmarks + most-visited tiles, over the web.
+            if showStart {
+                startPage
+                    .transition(.opacity)
+            }
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.
@@ -89,6 +97,10 @@ struct BrowserScreen: View {
                 // previous page's URL before the new one committed/failed.)
                 editing = model.address
             }
+        }
+        .onChange(of: model.address) { url in
+            bookmarks.recordVisit(url)
+            if !url.isEmpty && url != "about:blank" { showStart = false }
         }
         .onChange(of: libraryVisible) { visible in
             // Behind the library: pause page videos and block them from grabbing
@@ -223,9 +235,9 @@ struct BrowserScreen: View {
                 .frame(width: 24)
             }
             iconButton("chevron.left", enabled: model.canGoBack) { model.goBack() }
-            iconButton("chevron.right", enabled: model.canGoForward) { model.goForward() }
+            iconButton(showStart ? "house.fill" : "house") { withAnimation { showStart.toggle() } }
 
-            URLField(text: $editing) { model.load(editing); showAddress = false }
+            URLField(text: $editing) { model.load(editing); showAddress = false; showStart = false }
                 .frame(height: 22)   // a UITextField wrapper has no height of its
                                      // own, so without this it stretched the panel
                                      // to the whole screen.
@@ -233,6 +245,13 @@ struct BrowserScreen: View {
                 .background(Color.chrome)
                 .clipShape(Capsule())
                 .onChange(of: model.address) { editing = $0 }
+
+            // Star: bookmark / un-bookmark the current page.
+            Button { bookmarks.toggle(url: model.address, title: model.pageTitle) } label: {
+                Image(systemName: bookmarks.isBookmarked(model.address) ? "star.fill" : "star")
+                    .foregroundColor(bookmarks.isBookmarked(model.address) ? .accent : .onSurface)
+            }
+            .frame(width: 26)
 
             iconButton(landscape ? "rotate.left" : "rotate.right") { rotate() }
         }
@@ -276,6 +295,76 @@ struct BrowserScreen: View {
             .background(.ultraThinMaterial)
             .cornerRadius(10).padding(.bottom, 16)
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
+    }
+
+    // MARK: start page (home)
+
+    /// A full page of tiles over the web: bookmarks first, then most-visited. Tapping
+    /// one opens it; long-pressing a bookmark offers to remove it.
+    private var startPage: some View {
+        let cols = [GridItem(.adaptive(minimum: 96, maximum: 140), spacing: 14)]
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                if !bookmarks.bookmarks.isEmpty {
+                    section("북마크")
+                    LazyVGrid(columns: cols, spacing: 14) {
+                        ForEach(bookmarks.bookmarks) { b in
+                            tile(title: b.title, url: b.url)
+                                .contextMenu {
+                                    Button(role: .destructive) { bookmarks.remove(b) } label: {
+                                        Label("삭제", systemImage: "trash")
+                                    }
+                                }
+                        }
+                    }
+                }
+                let freq = bookmarks.frequent(limit: 12)
+                if !freq.isEmpty {
+                    section("자주 방문")
+                    LazyVGrid(columns: cols, spacing: 14) {
+                        ForEach(freq, id: \.host) { f in tile(title: f.host, url: f.url) }
+                    }
+                }
+                if bookmarks.bookmarks.isEmpty && freq.isEmpty {
+                    Text("별을 눌러 북마크를 추가하면 여기에 모입니다.")
+                        .font(.callout).foregroundColor(.muted)
+                        .frame(maxWidth: .infinity, alignment: .center).padding(.top, 80)
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.surface.ignoresSafeArea())
+    }
+
+    private func section(_ title: String) -> some View {
+        Text(title).font(.headline).foregroundColor(.onSurface)
+    }
+
+    private func tile(title: String, url: String) -> some View {
+        let host = URL(string: url)?.host ?? url
+        let letter = String(host.replacingOccurrences(of: "www.", with: "").prefix(1)).uppercased()
+        return Button {
+            model.load(url); showStart = false; showAddress = false
+        } label: {
+            VStack(spacing: 6) {
+                Text(letter.isEmpty ? "?" : letter)
+                    .font(.system(size: 30, weight: .semibold)).foregroundColor(.white)
+                    .frame(width: 64, height: 64)
+                    .background(tileColor(host)).clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Text(title).font(.caption).foregroundColor(.onSurface)
+                    .lineLimit(1).truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A stable color per host, from a simple hash — so a site keeps its tile color.
+    private func tileColor(_ host: String) -> Color {
+        let hues: [Double] = [0.02, 0.09, 0.13, 0.33, 0.53, 0.58, 0.75, 0.83, 0.92]
+        let h = abs(host.hashValue) % hues.count
+        return Color(hue: hues[h], saturation: 0.55, brightness: 0.72)
     }
 
     private let listWidth: CGFloat = 264
