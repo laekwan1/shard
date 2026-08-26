@@ -603,27 +603,35 @@ pub fn run_direct(
 
     let extension = url_extension(url).unwrap_or("mp4");
     let output = into.join(format!("{}.{extension}", safe_name(title)));
-    let mut file = File::create(&output)?;
 
-    let mut done: u64 = 0;
-    let mut buffer = [0u8; 64 * 1024];
-    loop {
-        if cancelled() {
-            let _ = std::fs::remove_file(&output);
-            bail!("취소되었습니다");
+    // Any failure below must not leave a partial file behind — a mid-stream read/write
+    // error used to leave a 0-byte (or half) file that then showed up in the library.
+    // Do the streaming in a closure and delete the output on any error.
+    let outcome = (|| -> Result<()> {
+        let mut file = File::create(&output)?;
+        let mut done: u64 = 0;
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            if cancelled() {
+                bail!("취소되었습니다");
+            }
+            let read = response.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            file.write_all(&buffer[..read])?;
+            done += read as u64;
+            on_progress(done, total.max(done));
         }
-        let read = response.read(&mut buffer)?;
-        if read == 0 {
-            break;
+        file.flush()?;
+        if done == 0 {
+            bail!("받은 내용이 없습니다");
         }
-        file.write_all(&buffer[..read])?;
-        done += read as u64;
-        on_progress(done, total.max(done));
-    }
-    file.flush()?;
-    if done == 0 {
+        Ok(())
+    })();
+    if let Err(e) = outcome {
         let _ = std::fs::remove_file(&output);
-        bail!("받은 내용이 없습니다");
+        return Err(e);
     }
     Ok(output)
 }

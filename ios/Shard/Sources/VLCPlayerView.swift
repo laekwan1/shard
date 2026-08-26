@@ -105,7 +105,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         super.init()
         player.delegate = self
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .default)
+        // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
+        // never asks for the call profile (HFP), so a call that flipped the earbuds to
+        // HFP is more likely to fall back to A2DP for us rather than stay crackly.
+        try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
         // Pin the hardware sample rate so it does NOT reconfigure between tracks of
         // different rates (44.1k ↔ 48k) — that route reconfiguration is the "텁"
         // pop heard on every transition, for AVPlayer and libVLC alike. A fixed
@@ -133,14 +136,21 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             wasPlayingAtInterruption = isPlaying && !userPaused
         case .ended:
             // Re-establish the WHOLE session FIRST, whether or not we auto-resume: a
-            // phone call leaves it on the call's category and a low sample rate (24kHz),
-            // and playing onto that — even a song the user starts by hand afterwards —
-            // crackled like bad radio (a resampling artifact; oddly clean only at 0.75×).
-            // Re-assert playback + 48kHz so every later play is clean too.
+            // phone call leaves it on the call's category and a low sample rate, and
+            // playing onto that — even a song the user starts by hand afterwards —
+            // crackled like bad radio (a resampling artifact; oddly clean only at
+            // 0.75×). Worse, with BLUETOOTH earphones the call flips them to the
+            // low-quality call profile (HFP, 16kHz) and they can stay stuck there —
+            // surviving even an app restart. A deactivate→reactivate cycle makes iOS
+            // renegotiate the route, which is what kicks the earphones back to the
+            // music profile (A2DP); then re-assert playback + 48kHz.
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .default)
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
+        // never asks for the call profile (HFP), so a call that flipped the earbuds to
+        // HFP is more likely to fall back to A2DP for us rather than stay crackly.
+        try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
             try? session.setPreferredSampleRate(48000)
-            try? session.setActive(true)
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then
