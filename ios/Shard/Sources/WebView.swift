@@ -305,6 +305,12 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
+        // Tell the page to recompute its responsive layout at the final size. Some
+        // grids (xvideos' home thumbnails) are laid out once, early, before the web
+        // view has settled, and render overlapping until something makes them recompute
+        // — a reload fixed it. A plain resize event does the same, page-side only (no
+        // native frame/scale change, so none of the zoom-runaway risk).
+        webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))", completionHandler: nil)
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
