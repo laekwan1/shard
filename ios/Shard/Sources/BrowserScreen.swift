@@ -67,6 +67,12 @@ struct BrowserScreen: View {
         .onChange(of: showAddress) { shown in
             if !shown { engineRevealed = false }
         }
+        .onChange(of: model.isLoading) { loading in
+            // A load starting (including pull-to-refresh) discards half-typed address
+            // text and shows the real current URL — otherwise text typed but not
+            // entered stayed in the bar after a refresh.
+            if loading { editing = model.address }
+        }
         .onChange(of: libraryVisible) { visible in
             // Behind the library: pause page videos and block them from grabbing
             // full screen when the library forces landscape.
