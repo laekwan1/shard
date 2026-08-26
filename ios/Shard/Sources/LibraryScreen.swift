@@ -34,6 +34,7 @@ struct LibraryScreen: View {
     @State private var toMusic = true
     @State private var orientGen = 0
     @State private var dragging: Item?
+    @State private var dropTarget: Item?
     @Namespace private var shelfNS
 
     var body: some View {
@@ -391,6 +392,7 @@ struct LibraryScreen: View {
     /// A row dropped on a folder chip moves that file into the folder (nil =
     /// the top level).
     private func drop(_ providers: [NSItemProvider], to folder: String?) -> Bool {
+        dragging = nil; dropTarget = nil     // this drag became a folder move, not a reorder
         guard let provider = providers.first else { return false }
         provider.loadObject(ofClass: NSURL.self) { object, _ in
             guard let url = (object as? NSURL) as URL? else { return }
@@ -667,6 +669,13 @@ struct LibraryScreen: View {
         ScrollView {
             LazyVStack(spacing: 0) {
                 ForEach(Array(store.visible.enumerated()), id: \.element.id) { index, item in
+                    // A gap opens above the row the finger is hovering, so the drop
+                    // point is visible before the finger lifts.
+                    if dragging != nil, dropTarget?.url == item.url, dragging?.url != item.url {
+                        Rectangle().fill(Color.accent).frame(height: 2)
+                            .padding(.horizontal, 12).padding(.vertical, 4)
+                            .transition(.opacity)
+                    }
                     row(item)
                         // A tap plays; a long-press opens the file's own menu (a
                         // custom one, so "move to folder" can show the folders in
@@ -677,14 +686,21 @@ struct LibraryScreen: View {
                         // (onDrag) that carries the row onto a folder chip.
                         .onTapGesture(count: 2) { fileMenu = item; showFolderPick = false; showFolderPanel = false }
                         .onTapGesture { play(at: index) }
-                        .opacity(dragging?.url == item.url ? 0.4 : 1)
-                        .onDrag { dragging = item; return NSItemProvider(object: item.url as NSURL) }
+                        .opacity(dragging?.url == item.url ? 0.35 : 1)
+                        .onDrag { dragging = item; dropTarget = nil; return NSItemProvider(object: item.url as NSURL) }
                         // Dropping onto another row reorders; dragging up onto a folder
                         // chip still moves to that folder (that drop lives on the chip).
-                        .onDrop(of: [.fileURL], delegate: RowReorderDrop(item: item, dragging: $dragging, store: store))
+                        .onDrop(of: [.fileURL], delegate: RowReorderDrop(item: item, dragging: $dragging, target: $dropTarget, store: store))
                     Divider().background(Color.toolbar)
                 }
             }
+        }
+        // A drop that lands on empty list space (no row, no folder chip) just ends the
+        // drag: clear the lifted/gap state so the row settles back where it started.
+        .onDrop(of: [.fileURL], isTargeted: nil) { _ in
+            let wasReordering = dragging != nil
+            dragging = nil; dropTarget = nil
+            return wasReordering
         }
         // Horizontal fling switches shelves (right: music→video then leave to web;
         // left: video→music) — works while a video plays too.
@@ -775,19 +791,29 @@ struct LibraryScreen: View {
     }
 }
 
-/// Live-reorder: as a dragged row hovers over another, the store swaps their order.
-/// Dropping onto a folder chip is a SEPARATE drop (on the chip) that moves to a
-/// folder — this one only fires over list rows, so the two do not fight.
+/// Reorder like the system does: hovering a row marks it as the insertion point (a
+/// gap opens there), the move is COMMITTED only when the finger lifts, and leaving
+/// every row clears the gap so the item falls back to where it started. Dropping onto
+/// a folder chip is a SEPARATE drop (on the chip) that moves to a folder — this one
+/// only fires over list rows, so the two do not fight.
 private struct RowReorderDrop: DropDelegate {
     let item: Item
     @Binding var dragging: Item?
+    @Binding var target: Item?
     let store: LibraryStore
     func dropUpdated(info: DropInfo) -> DropProposal? { DropProposal(operation: .move) }
     func dropEntered(info: DropInfo) {
         guard let d = dragging, d.url != item.url else { return }
-        withAnimation(.easeInOut(duration: 0.15)) { store.moveItem(d, over: item) }
+        withAnimation(.easeInOut(duration: 0.15)) { target = item }   // show the gap here
     }
-    func performDrop(info: DropInfo) -> Bool { dragging = nil; return true }
+    func dropExited(info: DropInfo) {
+        if target?.url == item.url { withAnimation(.easeInOut(duration: 0.15)) { target = nil } }
+    }
+    func performDrop(info: DropInfo) -> Bool {
+        if let d = dragging, d.url != item.url { withAnimation { store.moveItem(d, over: item) } }
+        dragging = nil; target = nil
+        return true
+    }
 }
 
 /// The folder chips row, split out of LibraryScreen so it observes only the store
