@@ -13,25 +13,14 @@ struct Download: Identifiable {
     var rate: Double = 0
     var lastDone: UInt64 = 0
     var lastTime: Date = Date()
-    /// HLS reports progress as segment COUNTS, not bytes — so the same numbers must
-    /// not be run through ByteCountFormatter (that printed "5 bytes / 120 bytes").
-    var countsSegments: Bool = false
 
     enum Status: Equatable { case running, finished, failed(String), cancelled }
 
     var fraction: Double { total > 0 ? Double(done) / Double(total) : 0 }
 
-    /// "12.3 MB / 45.0 MB · 3.1 MB/s · 남은 10초", as far as it is known. For an HLS
-    /// download the numbers are segment counts, shown as "12 / 120 조각".
+    /// "12.3 MB / 45.0 MB · 3.1 MB/s · 남은 10초", as far as it is known. (HLS reports
+    /// bytes too now — run_hls estimates the total — so everything uses MB/s.)
     var detail: String {
-        if countsSegments {
-            var parts = [total > 0 ? "\(done) / \(total) 조각" : "\(done) 조각"]
-            if rate > 0 && total > done {
-                let secs = Int(Double(total - done) / rate)
-                parts.append(secs >= 60 ? "남은 \(secs / 60)분" : "남은 \(secs)초")
-            }
-            return parts.joined(separator: " · ")
-        }
         let f = ByteCountFormatter.string(fromByteCount: Int64(done), countStyle: .file)
         var parts = [total > 0 ? "\(f) / \(ByteCountFormatter.string(fromByteCount: Int64(total), countStyle: .file))" : f]
         if rate > 0 {
@@ -58,12 +47,10 @@ final class DownloadsStore: ObservableObject {
     func start(
         title: String,
         cover: String? = nil,
-        segments: Bool = false,
         run: @escaping (DownloadTask, @escaping (UInt64, UInt64) -> Void) async throws -> URL
     ) {
         let task = DownloadTask()
-        var download = Download(title: title, task: task)
-        download.countsSegments = segments
+        let download = Download(title: title, task: task)
         items.insert(download, at: 0)
         let id = download.id
 
