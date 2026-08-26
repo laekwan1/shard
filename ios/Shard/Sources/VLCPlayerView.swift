@@ -132,12 +132,20 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             interruptedAt = player.position
             wasPlayingAtInterruption = isPlaying && !userPaused
         case .ended:
+            // Re-establish the WHOLE session FIRST, whether or not we auto-resume: a
+            // phone call leaves it on the call's category and a low sample rate (24kHz),
+            // and playing onto that — even a song the user starts by hand afterwards —
+            // crackled like bad radio (a resampling artifact; oddly clean only at 0.75×).
+            // Re-assert playback + 48kHz so every later play is clean too.
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default)
+            try? session.setPreferredSampleRate(48000)
+            try? session.setActive(true)
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then
             // stopping it (or locking the screen) resumed playback on its own.
             guard wasPlayingAtInterruption, !userPaused else { interruptedAt = nil; return }
-            try? AVAudioSession.sharedInstance().setActive(true)
             if backend == .av {
                 avPlay()
             } else if let url = currentURL {
