@@ -21,11 +21,24 @@ struct URLField: UIViewRepresentable {
         field.textColor = UIColor(Color.onSurface)
         field.tintColor = UIColor(Color.accent)
         field.font = .systemFont(ofSize: 15)
+        // Do NOT let the field's text drive the layout width. A UITextField's
+        // intrinsic width grows with its text, and on iOS 16+ SwiftUI reads that —
+        // a long URL (a YouTube watch page) made this field, then the address panel,
+        // then the whole ZStack (web view included) wider than the screen, cutting the
+        // right. Low hugging/compression + a proposal-capped size keep it flexible.
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return field
     }
 
     func updateUIView(_ field: UITextField, context: Context) {
         if !field.isFirstResponder { field.text = text }
+    }
+
+    @available(iOS 16.0, *)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextField, context: Context) -> CGSize? {
+        // Take the width the row offers instead of the text's own (unbounded) width.
+        CGSize(width: proposal.width ?? 40, height: 22)
     }
 
     final class Coordinator: NSObject, UITextFieldDelegate {
