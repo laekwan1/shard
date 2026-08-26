@@ -527,7 +527,20 @@ fn media_get(
     let mut request = client.get(url);
     if !referer.is_empty() {
         request = request.header("Referer", referer);
+        // Some CDNs (pornhub's phncdn) check Origin/Accept too, not just Referer —
+        // a bare request got 401 even with the signed URL and cookies. Send the
+        // page's own origin and a browser-like Accept so the request looks like the
+        // player's. The origin is the referer's scheme+host.
+        if let Ok(u) = reqwest::Url::parse(referer) {
+            if let Some(host) = u.host_str() {
+                let origin = format!("{}://{}", u.scheme(), host);
+                request = request.header("Origin", origin);
+            }
+        }
     }
+    request = request
+        .header("Accept", "*/*")
+        .header("Accept-Language", "en-US,en;q=0.9");
     let response = request.send()?;
     if !response.status().is_success() {
         bail!("서버가 {} 로 응답했습니다", response.status().as_u16());
