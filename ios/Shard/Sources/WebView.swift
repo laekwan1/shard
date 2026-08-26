@@ -388,6 +388,17 @@ struct WebViewContainer: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 
+    // Size to the PROPOSED size (the window), never to the web content. On iOS 16+
+    // SwiftUI otherwise asks the WKWebView how big it wants to be and a wide page
+    // answered wider than the screen — which fed back and grew the layout, cutting
+    // the right (address bar included). Returning the proposal caps it at the window.
+    // (Not called on iOS 15, which used the proposal already.)
+    @available(iOS 16.0, *)
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: WKWebView, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? UIScreen.main.bounds.width,
+               height: proposal.height ?? UIScreen.main.bounds.height)
+    }
+
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         let model: WebModel
         weak var refresh: UIRefreshControl?
