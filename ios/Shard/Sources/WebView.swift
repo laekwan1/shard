@@ -49,6 +49,25 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         return pairs.joined(separator: "; ")
     }
 
+    /// Reload the page and wait for the media manifest to be RE-captured fresh, for a
+    /// site (pornhub) whose m3u8 URL is signed and expires — the captured one 410s by
+    /// download time. Reloads, nudges the video to play (muted) so the player
+    /// re-requests its manifest, and polls the freshly-captured URL. Returns a new
+    /// m3u8 different from `stale`, or nil on timeout (caller falls back to `stale`).
+    func refreshManifest(stale: String) async -> String? {
+        webView.reload()
+        for _ in 0..<12 {                                   // up to ~6s
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            let js = """
+            try { document.querySelectorAll('video').forEach(function(v){ v.muted = true; var p = v.play(); if (p && p.catch) p.catch(function(){}); }); } catch(e) {}
+            (window.__shardMedia && window.__shardMedia.m3u8) || ""
+            """
+            let cur = (try? await webView.evaluateJavaScript(js)) as? String ?? ""
+            if !cur.isEmpty && cur != stale { return cur }
+        }
+        return nil
+    }
+
     /// Mark whether the browser is the visible screen. While it is not (the library
     /// is up), Capture.js cancels any full screen the page video tries to enter —
     /// otherwise the library's forced landscape sent a playing pornhub video to

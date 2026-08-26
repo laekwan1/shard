@@ -140,7 +140,16 @@ struct BrowserScreen: View {
                 banner = nil
                 qualities = rows
                 withAnimation { showList = true }
-            } else if let hlsURL = hlsURL(offer) {
+            } else if var hlsURL = hlsURL(offer) {
+                // A signed, expiring manifest (pornhub: validfrom/validto in the URL)
+                // 410s by download time. Reload the page and re-capture a fresh one
+                // right before downloading. Only for those URLs — a plain manifest
+                // (xvideos/most sites) downloads at once, unchanged.
+                if hlsURL.contains("validfrom") || hlsURL.contains("validto")
+                    || hlsURL.contains("expire") || hlsURL.contains("&exp=") {
+                    banner = "다운로드 준비 중… 주소 갱신"
+                    if let fresh = await model.refreshManifest(stale: hlsURL) { hlsURL = fresh }
+                }
                 // Offer the same quality list YouTube gets. If the master has
                 // variants, show them; otherwise (a plain media playlist, or the
                 // fetch failed) fall back to downloading it directly as before —
