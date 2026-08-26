@@ -220,10 +220,16 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// raised the keyboard, which relaid-out the page and undid the very zoom we were
     /// trying to measure. Read-only; touches nothing.
     func copyDiagnostics() {
+        let f = webView.frame
+        let sup = webView.superview?.bounds ?? .zero
+        let win = webView.window?.bounds ?? .zero
+        let sv = webView.scrollView
+        let ins = sv.adjustedContentInset
+        let native = "\"frameW\":\(f.width),\"frameH\":\(f.height),\"supW\":\(sup.width),\"winW\":\(win.width),\"zoom\":\(sv.zoomScale),\"minZoom\":\(sv.minimumZoomScale),\"contentW\":\(sv.contentSize.width),\"insL\":\(ins.left),\"insR\":\(ins.right)"
         webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
             let page = (value as? String) ?? "{}"
             let offer = self.lastOffer.isEmpty ? "null" : self.lastOffer
-            UIPasteboard.general.string = "{\"page\":\(page),\"offer\":\(offer)}"
+            UIPasteboard.general.string = "{\"native\":{\(native)},\"page\":\(page),\"offer\":\(offer)}"
             self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
         }
     }

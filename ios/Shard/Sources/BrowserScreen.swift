@@ -43,12 +43,6 @@ struct BrowserScreen: View {
                 // Replaced when the engine toggles (the web view is rebuilt on a
                 // fresh session); the id change makes SwiftUI swap in the new view.
                 .id(model.generation)
-                // Pin the web view to the real screen width. A diagnostics dump showed
-                // the page laid out at innerWidth 482 on a ~402pt screen — SwiftUI was
-                // handing the web view a frame wider than the display, so `width=
-                // device-width` pages (YouTube's video page) rendered zoomed and cut on
-                // the right. Forcing the screen width makes device-width resolve right.
-                .frame(width: UIScreen.main.bounds.width)
 
             // Always mounted and slid by an offset — a conditional `if` with a
             // .transition popped away on close no matter how the flag was animated.
@@ -69,6 +63,16 @@ struct BrowserScreen: View {
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
+
+            // TEMPORARY diagnostics button (no keyboard, so it captures the zoomed
+            // state). Remove once the zoom origin is confirmed.
+            Button { model.copyDiagnostics() } label: {
+                Image(systemName: "ladybug.fill")
+                    .font(.system(size: 15)).foregroundColor(.white)
+                    .padding(10).background(Color.black.opacity(0.5)).clipShape(Circle())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 12).padding(.bottom, 24)
 
             // A thin load bar at the very top: shows a page is still connecting, and
             // vanishes when it is done — so a blocked site's white screen is not a
@@ -173,14 +177,17 @@ struct BrowserScreen: View {
                 pendingHLSReferer = offer.referer ?? ""
                 pendingHLSCookie = await model.cookieHeader(for: hlsURL)
                 pendingHLSUA = await model.userAgent()
-                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA)
-                if let rows = rows, rows.count > 1 {
-                    banner = nil
-                    qualities = rows
-                    withAnimation { showList = true }
-                } else {
-                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA, title: pendingTitle)
+                // ALWAYS show a list — the user picks, even when there is only one
+                // quality (never auto-save). If the manifest has no variants (a plain
+                // media playlist, or it could not be read), offer the stream itself
+                // as a single "다운로드" row so it is still a deliberate choice.
+                var rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA) ?? []
+                if rows.isEmpty {
+                    rows = [YtRow(itag: 0, label: "다운로드", detail: "", url: hlsURL)]
                 }
+                banner = nil
+                qualities = rows
+                withAnimation { showList = true }
             } else if let media = offer.media, !media.isEmpty {
                 let cookie = await model.cookieHeader(for: media)
                 let ua = await model.userAgent()
