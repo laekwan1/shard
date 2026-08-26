@@ -20,6 +20,7 @@ struct BrowserScreen: View {
     @State private var pendingThumb = ""
     @State private var pendingHLSReferer = ""
     @State private var pendingHLSCookie = ""
+    @State private var pendingHLSUA = ""
     @State private var banner: String?
     @State private var showAddress = false
     @State private var showList = false
@@ -69,19 +70,19 @@ struct BrowserScreen: View {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
 
-            // TEMPORARY diagnostics button. A tap raises no keyboard, so it captures
-            // the page WHILE it is still zoomed (typing "shard://dom" relaid it out
-            // and hid the very problem). Remove once the zoom issue is diagnosed.
-            Button { model.copyDiagnostics() } label: {
-                Image(systemName: "ladybug.fill")
-                    .font(.system(size: 15))
-                    .foregroundColor(.white)
-                    .padding(10)
-                    .background(Color.black.opacity(0.5))
-                    .clipShape(Circle())
+            // A thin load bar at the very top: shows a page is still connecting, and
+            // vanishes when it is done — so a blocked site's white screen is not a
+            // mystery (still trying vs. finished/failed).
+            if model.isLoading && model.progress < 1 {
+                GeometryReader { g in
+                    Rectangle().fill(Color.accent)
+                        .frame(width: g.size.width * CGFloat(max(0.05, model.progress)), height: 2.5)
+                        .animation(.easeOut(duration: 0.2), value: model.progress)
+                }
+                .frame(height: 2.5)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .ignoresSafeArea(edges: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            .padding(.leading, 12).padding(.bottom, 24)
         }
         .animation(.easeInOut(duration: 0.34), value: showAddress)
         .onChange(of: showAddress) { shown in
@@ -160,33 +161,30 @@ struct BrowserScreen: View {
                 banner = nil
                 qualities = rows
                 withAnimation { showList = true }
-            } else if var hlsURL = hlsURL(offer) {
-                // A signed, expiring manifest (pornhub: validfrom/validto in the URL)
-                // 410s by download time. Reload the page and re-capture a fresh one
-                // right before downloading. Only for those URLs — a plain manifest
-                // (xvideos/most sites) downloads at once, unchanged.
-                if hlsURL.contains("validfrom") || hlsURL.contains("validto")
-                    || hlsURL.contains("expire") || hlsURL.contains("&exp=") {
-                    banner = "다운로드 준비 중… 주소 갱신"
-                    if let fresh = await model.refreshManifest(stale: hlsURL) { hlsURL = fresh }
-                }
+            } else if let hlsURL = hlsURL(offer) {
+                // (No reload/re-capture: pornhub's signed URL is valid for ~2 hours,
+                // so it was never an expiry problem — the reload just reset the page
+                // and annoyed. The real gap vs Android was a missing User-Agent, now
+                // passed below.)
                 // Offer the same quality list YouTube gets. If the master has
                 // variants, show them; otherwise (a plain media playlist, or the
                 // fetch failed) fall back to downloading it directly as before —
                 // so this never blocks a download that used to work.
                 pendingHLSReferer = offer.referer ?? ""
                 pendingHLSCookie = await model.cookieHeader(for: hlsURL)
-                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie)
+                pendingHLSUA = await model.userAgent()
+                let rows = await Downloader.hlsQualities(hlsURL, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA)
                 if let rows = rows, rows.count > 1 {
                     banner = nil
                     qualities = rows
                     withAnimation { showList = true }
                 } else {
-                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie, title: pendingTitle)
+                    startURL(hlsURL, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie, ua: pendingHLSUA, title: pendingTitle)
                 }
             } else if let media = offer.media, !media.isEmpty {
                 let cookie = await model.cookieHeader(for: media)
-                startURL(media, isHLS: false, referer: offer.referer ?? "", cookie: cookie, title: pendingTitle)
+                let ua = await model.userAgent()
+                startURL(media, isHLS: false, referer: offer.referer ?? "", cookie: cookie, ua: ua, title: pendingTitle)
             } else {
                 banner = "감지된 미디어가 없습니다. 영상을 재생한 뒤 다시 눌러 보세요."
             }
@@ -315,7 +313,7 @@ struct BrowserScreen: View {
         if let variant = row.url {
             withAnimation { showList = false }
             startURL(variant, isHLS: true, referer: pendingHLSReferer, cookie: pendingHLSCookie,
-                     title: "\(pendingTitle) · \(row.label)")
+                     ua: pendingHLSUA, title: "\(pendingTitle) · \(row.label)")
             return
         }
         withAnimation { showList = false }
@@ -331,11 +329,11 @@ struct BrowserScreen: View {
         banner = "다운로드를 시작했습니다"
     }
 
-    private func startURL(_ url: String, isHLS: Bool, referer: String, cookie: String = "", title: String) {
+    private func startURL(_ url: String, isHLS: Bool, referer: String, cookie: String = "", ua: String = "", title: String) {
         // HLS now reports bytes (run_hls estimates the total), so it shows MB and a
         // real speed just like the others — no segment-count mode needed.
         downloads.start(title: title) { task, report in
-            try await Downloader.runURL(url, isHLS: isHLS, referer: referer, cookie: cookie,
+            try await Downloader.runURL(url, isHLS: isHLS, referer: referer, cookie: cookie, ua: ua,
                                         title: title, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"

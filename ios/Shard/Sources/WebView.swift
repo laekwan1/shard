@@ -12,6 +12,10 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
+    /// Page load progress 0…1, for the thin bar that shows whether a page is still
+    /// connecting or done — asked for after a blocked site left only a white screen
+    /// with no sign of whether it was still trying.
+    @Published var progress: Double = 0
     /// The download button on a video was pressed, with its bottom-right corner
     /// (in web points) so the list can drop right under it.
     var onDownloadRequest: ((_ right: CGFloat, _ bottom: CGFloat) -> Void)?
@@ -49,23 +53,12 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         return pairs.joined(separator: "; ")
     }
 
-    /// Reload the page and wait for the media manifest to be RE-captured fresh, for a
-    /// site (pornhub) whose m3u8 URL is signed and expires — the captured one 410s by
-    /// download time. Reloads, nudges the video to play (muted) so the player
-    /// re-requests its manifest, and polls the freshly-captured URL. Returns a new
-    /// m3u8 different from `stale`, or nil on timeout (caller falls back to `stale`).
-    func refreshManifest(stale: String) async -> String? {
-        webView.reload()
-        for _ in 0..<12 {                                   // up to ~6s
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            let js = """
-            try { document.querySelectorAll('video').forEach(function(v){ v.muted = true; var p = v.play(); if (p && p.catch) p.catch(function(){}); }); } catch(e) {}
-            (window.__shardMedia && window.__shardMedia.m3u8) || ""
-            """
-            let cur = (try? await webView.evaluateJavaScript(js)) as? String ?? ""
-            if !cur.isEmpty && cur != stale { return cur }
-        }
-        return nil
+    /// The page's own User-Agent, handed to the download engine so its requests match
+    /// the browser session — some CDNs (pornhub's) refuse a request whose UA does not
+    /// look like the browser that got the signed URL. The Android app passes this too.
+    func userAgent() async -> String {
+        let ua = try? await webView.evaluateJavaScript("navigator.userAgent")
+        return (ua as? String) ?? ""
     }
 
     /// Mark whether the browser is the visible screen. While it is not (the library
@@ -194,12 +187,16 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         urlObservation = view.observe(\.url, options: [.new]) { [weak self] _, _ in
             DispatchQueue.main.async { self?.sync() }
         }
+        progressObservation = view.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
+            DispatchQueue.main.async { self?.progress = wv.estimatedProgress }
+        }
         return view
     }
 
     /// The live web view. Replaced whole on an engine toggle (see rebuildWebView).
     private(set) lazy var webView: WKWebView = makeWebView(store: .default())
     private var urlObservation: NSKeyValueObservation?
+    private var progressObservation: NSKeyValueObservation?
     /// Bumped whenever the web view is replaced, so the SwiftUI container swaps it in.
     @Published var generation = 0
 

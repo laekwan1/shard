@@ -470,11 +470,11 @@ impl Downloads {
                 let _ = tx.send(Step::Progress(done, total));
             };
             let outcome = if hls {
-                save::run_hls(&url, &referer, "", &into, &title_for_job, &mut report, &|| {
+                save::run_hls(&url, &referer, "", "", &into, &title_for_job, &mut report, &|| {
                     stop.load(Ordering::Relaxed)
                 })
             } else {
-                save::run_direct(&url, &referer, "", &into, &title_for_job, &mut report, &|| {
+                save::run_direct(&url, &referer, "", "", &into, &title_for_job, &mut report, &|| {
                     stop.load(Ordering::Relaxed)
                 })
             };
