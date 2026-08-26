@@ -61,10 +61,37 @@ struct BrowserScreen: View {
             // .transition popped away on close no matter how the flag was animated.
             // An offset is a plain layout move, so open and close are the same
             // slide. allowsHitTesting keeps the hidden panel from eating top taps.
-            addressPanel
-                .offset(y: showAddress ? 0 : -200)
-                .opacity(showAddress ? 1 : 0)
-                .allowsHitTesting(showAddress)
+            VStack(spacing: 0) {
+                addressPanel
+                // Autocomplete: matches from bookmarks + visited hosts as you type.
+                if showAddress, !editing.isEmpty, editing != model.address {
+                    let matches = addressSuggestions
+                    if !matches.isEmpty {
+                        VStack(spacing: 0) {
+                            ForEach(matches, id: \.url) { m in
+                                Button { model.load(m.url); showAddress = false; showStart = false } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: m.bookmarked ? "star.fill" : "clock")
+                                            .font(.system(size: 12)).foregroundColor(.muted).frame(width: 16)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(m.title).font(.subheadline).foregroundColor(.onSurface).lineLimit(1)
+                                            Text(m.url).font(.caption2).foregroundColor(.muted).lineLimit(1)
+                                        }
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16).padding(.vertical, 9).contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Divider().background(Color.toolbar).padding(.leading, 42)
+                            }
+                        }
+                        .background(Color.surface)
+                    }
+                }
+            }
+            .offset(y: showAddress ? 0 : -400)
+            .opacity(showAddress ? 1 : 0)
+            .allowsHitTesting(showAddress)
             if showList {
                 Color.black.opacity(0.001).ignoresSafeArea()
                     .onTapGesture { withAnimation { showList = false } }
@@ -324,6 +351,25 @@ struct BrowserScreen: View {
             .background(.ultraThinMaterial)
             .cornerRadius(10).padding(.bottom, 16)
             .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { banner = nil } }
+    }
+
+    struct Suggestion { let title: String; let url: String; let bookmarked: Bool }
+
+    /// Address-bar autocomplete: bookmarks first, then visited hosts, matched against
+    /// what has been typed (host or title contains it). Deduplicated by URL, few shown.
+    private var addressSuggestions: [Suggestion] {
+        let q = editing.lowercased().trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        var out: [Suggestion] = []
+        var seen = Set<String>()
+        for b in bookmarks.bookmarks where b.url.lowercased().contains(q) || b.title.lowercased().contains(q) {
+            if seen.insert(b.url).inserted { out.append(Suggestion(title: b.title, url: b.url, bookmarked: true)) }
+        }
+        for (host, _) in bookmarks.visits.sorted(by: { $0.value > $1.value }) where host.lowercased().contains(q) {
+            let url = "https://\(host)"
+            if seen.insert(url).inserted { out.append(Suggestion(title: host, url: url, bookmarked: false)) }
+        }
+        return Array(out.prefix(6))
     }
 
     // MARK: start page (home)
