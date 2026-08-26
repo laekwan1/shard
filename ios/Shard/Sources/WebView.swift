@@ -321,47 +321,24 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         isLoading = false
         pageTitle = webView.title ?? ""
         sync()
-        // Force ONE relayout so the page re-fits its real size. WKWebView lays a page
-        // out before it has its final bounds — YouTube's video page then renders
-        // zoomed and cut, and the only thing that fixed it was the keyboard resizing
-        // us when the address bar opened. Nudge the height by a point and back to
-        // reproduce that resize once, per load. This alone — no viewport rewriting,
-        // no zoom reset (those looped and made the screen jump before).
-        let f = webView.frame
-        if f.height > 2 {
-            webView.frame.size.height = f.height - 1
-            DispatchQueue.main.async { webView.frame = f }
-        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // This fires only when there is NO server response at all — an HTTPS site
-        // blocked by SNI reset (RST), a timeout. (An HTTP block that redirects to the
-        // government notice page SUCCEEDS instead, and shows through untouched.) Without
-        // handling it, the load just stayed on the previous page and the address bar
-        // snapped back to it. So show the attempted address failing, and keep the bar
-        // on that address. Not for a plain cancel (-999), a normal interrupted load.
+        // Vanilla: no custom page, no overlay. An HTTP block shows the government
+        // warning page (a real redirect that succeeds); an HTTPS reset just fails,
+        // like any browser. We only keep the address bar on the attempted URL so it
+        // does not snap back to the previous page.
         isLoading = false
         let ns = error as NSError
-        if ns.code == NSURLErrorCancelled { sync(); return }
-        let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? address
-        let host = URL(string: failed)?.host ?? failed
-        let page = """
-        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-        <body style="margin:0;background:#141414;color:#e8e6e3;font:16px -apple-system;\
-        display:flex;align-items:center;justify-content:center;height:100vh">
-        <div style="text-align:center;padding:24px">
-        <div style="font-size:44px">⚠️</div>
-        <p style="font-weight:600">이 사이트에 연결할 수 없습니다</p>
-        <p style="color:#9a9a9a;word-break:break-all">\(host)</p>
-        <p style="color:#9a9a9a;font-size:14px">차단되었거나 응답이 없습니다. 우회 전원을 켜보세요.</p>
-        </div></body></html>
-        """
-        webView.loadHTMLString(page, baseURL: URL(string: failed))
-        address = failed
+        if ns.code != NSURLErrorCancelled,
+           let failed = ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String {
+            address = failed
+        } else {
+            sync()
+        }
     }
 
     private func sync() {
