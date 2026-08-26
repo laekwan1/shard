@@ -217,20 +217,22 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     /// it back for diagnosing a site whose download failed (e.g. pornhub).
     var lastOffer: String = ""
 
-    func load(_ text: String) {
-        // Diagnostics escape hatch: entering "shard://dom" copies a snapshot of the
-        // page (last search-suggestion markup + viewport/width numbers) to the
-        // clipboard instead of navigating, so the user can paste it back when a
-        // fix has to be made blind (no screenshots). Read-only; touches nothing.
-        if text.trimmingCharacters(in: .whitespaces) == "shard://dom" {
-            webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
-                let page = (value as? String) ?? "{}"
-                let offer = self.lastOffer.isEmpty ? "null" : self.lastOffer
-                UIPasteboard.general.string = "{\"page\":\(page),\"offer\":\(offer)}"
-                self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
-            }
-            return
+    /// Copy a snapshot of the page (viewport/width numbers, last search-suggestion
+    /// markup, last offer) to the clipboard, read-only. Callable from the diag button
+    /// so it captures the CURRENT state WITHOUT the keyboard — typing "shard://dom"
+    /// raised the keyboard, which relaid-out the page and undid the very zoom we were
+    /// trying to measure. Read-only; touches nothing.
+    func copyDiagnostics() {
+        webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
+            let page = (value as? String) ?? "{}"
+            let offer = self.lastOffer.isEmpty ? "null" : self.lastOffer
+            UIPasteboard.general.string = "{\"page\":\(page),\"offer\":\(offer)}"
+            self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
         }
+    }
+
+    func load(_ text: String) {
+        if text.trimmingCharacters(in: .whitespaces) == "shard://dom" { copyDiagnostics(); return }
         guard let url = URL(string: Self.normalize(text)) else { return }
         webView.load(URLRequest(url: url))
     }

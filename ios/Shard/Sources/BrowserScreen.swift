@@ -62,6 +62,20 @@ struct BrowserScreen: View {
             if let banner = banner {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
+
+            // TEMPORARY diagnostics button. A tap raises no keyboard, so it captures
+            // the page WHILE it is still zoomed (typing "shard://dom" relaid it out
+            // and hid the very problem). Remove once the zoom issue is diagnosed.
+            Button { model.copyDiagnostics() } label: {
+                Image(systemName: "ladybug.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(Color.black.opacity(0.5))
+                    .clipShape(Circle())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            .padding(.leading, 12).padding(.bottom, 24)
         }
         .animation(.easeInOut(duration: 0.34), value: showAddress)
         .onChange(of: showAddress) { shown in
