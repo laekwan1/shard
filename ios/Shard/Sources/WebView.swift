@@ -208,38 +208,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     // MARK: navigation
 
-    /// Set to surface a short message to the user (used by the diagnostics dump).
-    var onBanner: ((String) -> Void)?
-    /// The last offer JSON the page produced, kept only so "shard://dom" can hand
-    /// it back for diagnosing a site whose download failed (e.g. pornhub).
-    var lastOffer: String = ""
-
-    /// Copy a snapshot of the page (viewport/width numbers, last search-suggestion
-    /// markup, last offer) to the clipboard, read-only. Callable from the diag button
-    /// so it captures the CURRENT state WITHOUT the keyboard — typing "shard://dom"
-    /// raised the keyboard, which relaid-out the page and undid the very zoom we were
-    /// trying to measure. Read-only; touches nothing.
-    func copyDiagnostics() {
-        let f = webView.frame
-        let sup = webView.superview?.bounds ?? .zero
-        let win = webView.window?.bounds ?? .zero
-        let sv = webView.scrollView
-        let ins = sv.adjustedContentInset
-        let native = "\"frameW\":\(f.width),\"frameH\":\(f.height),\"supW\":\(sup.width),\"winW\":\(win.width),\"zoom\":\(sv.zoomScale),\"minZoom\":\(sv.minimumZoomScale),\"contentW\":\(sv.contentSize.width),\"insL\":\(ins.left),\"insR\":\(ins.right)"
-        webView.evaluateJavaScript("JSON.stringify(window.__shardDebug||{})") { value, _ in
-            let page = (value as? String) ?? "{}"
-            let offer = self.lastOffer.isEmpty ? "null" : self.lastOffer
-            UIPasteboard.general.string = "{\"native\":{\(native)},\"page\":\(page),\"offer\":\(offer)}"
-            self.onBanner?("진단 정보를 클립보드에 복사했습니다. 붙여넣어 주세요.")
-        }
-    }
-
     /// The address the user last asked to open, so a failed load keeps the bar on it
     /// instead of snapping back to the previous page.
     private var lastRequested = ""
 
     func load(_ text: String) {
-        if text.trimmingCharacters(in: .whitespaces) == "shard://dom" { copyDiagnostics(); return }
         guard let url = URL(string: Self.normalize(text)) else { return }
         lastRequested = url.absoluteString
         webView.load(URLRequest(url: url))
@@ -337,17 +310,29 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         sync()
     }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        // Vanilla: no custom page, no overlay. An HTTP block shows the government
-        // warning page (a real redirect that succeeds); an HTTPS reset just fails,
-        // like any browser. We only keep the address bar on the attempted URL so it
-        // does not snap back to the previous page.
+        // A load that never commits (an HTTPS site blocked by SNI reset) left a blank
+        // white screen with no word why. Show a Chrome-style "cannot connect" page at
+        // the attempted address so it reads like an ordinary browser. (An HTTP block
+        // that redirects to the government warning page SUCCEEDS instead and shows
+        // through untouched.) Not for a plain cancel (-999), a normal interrupted load.
         isLoading = false
         let ns = error as NSError
         if ns.code == NSURLErrorCancelled { sync(); return }
-        // Keep the bar on the address the user tried to open (or the failing URL),
-        // not the previous page it snapped back to.
         let failed = (ns.userInfo[NSURLErrorFailingURLStringErrorKey] as? String) ?? lastRequested
-        if !failed.isEmpty { address = failed } else { sync() }
+        let host = URL(string: failed)?.host ?? failed
+        let page = """
+        <html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+        <body style="margin:0;background:#141414;color:#e8e6e3;font:15px -apple-system;\
+        display:flex;align-items:center;justify-content:center;min-height:100vh">
+        <div style="max-width:460px;padding:28px">
+        <div style="font-size:40px;margin-bottom:8px">⚠️</div>
+        <p style="font-size:18px;font-weight:600;margin:0 0 8px">이 사이트에 연결할 수 없습니다</p>
+        <p style="color:#9a9a9a;word-break:break-all;margin:0 0 14px"><b>\(host)</b> 의 연결이 거부되었습니다.</p>
+        <p style="color:#7a7a7a;font-size:13px;margin:0">ERR_CONNECTION_CLOSED · 차단되었거나 응답이 없습니다. 우회 전원을 켜고 다시 시도해 보세요.</p>
+        </div></body></html>
+        """
+        webView.loadHTMLString(page, baseURL: URL(string: failed))
+        address = failed
     }
 
     private func sync() {

@@ -64,16 +64,6 @@ struct BrowserScreen: View {
                 self.banner(banner).frame(maxHeight: .infinity, alignment: .bottom)
             }
 
-            // TEMPORARY diagnostics button (no keyboard, so it captures the zoomed
-            // state). Remove once the zoom origin is confirmed.
-            Button { model.copyDiagnostics() } label: {
-                Image(systemName: "ladybug.fill")
-                    .font(.system(size: 15)).foregroundColor(.white)
-                    .padding(10).background(Color.black.opacity(0.5)).clipShape(Circle())
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            .padding(.leading, 12).padding(.bottom, 24)
-
             // A thin load bar at the very top: shows a page is still connecting, and
             // vanishes when it is done — so a blocked site's white screen is not a
             // mystery (still trying vs. finished/failed).
@@ -123,7 +113,6 @@ struct BrowserScreen: View {
                 else { model.pauseWebVideos(); openLibrary() }
             }
             model.onWebTap = { showAddress = false }
-            model.onBanner = { banner = $0 }
             model.onWebPlaying = { onWebPlaying($0) }
             model.installAdBlock()
             model.onDownloadRequest = { right, bottom in
@@ -148,7 +137,6 @@ struct BrowserScreen: View {
                 banner = "감지된 미디어가 없습니다"; return
             }
             pendingOffer = json
-            model.lastOffer = json      // kept for the shard://dom diagnostics dump
             pendingTitle = offer.title ?? model.pageTitle
             // Prefer the page's thumbnail; if it was empty, build a clean one from
             // the video id so a cover is still fetched.

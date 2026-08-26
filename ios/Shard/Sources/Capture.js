@@ -461,41 +461,4 @@
   window.addEventListener('scroll', syncDeletes, true);
   window.addEventListener('resize', syncDeletes, true);
   setInterval(syncDeletes, 300);
-
-  // Diagnostics for the "shard://dom" clipboard dump — so a fix that has to be
-  // made without a screenshot can be based on the real device DOM. Records the
-  // last non-empty search-suggestion markup (with, per row, whether any remove
-  // control is detectable) and the viewport/width numbers behind the zoom.
-  window.__shardDebug = window.__shardDebug || {};
-  function collectDebug() {
-    try {
-      var box = document.querySelector('.ytSearchboxComponentSuggestionsContainer, #i0[role="listbox"], [role="listbox"]');
-      if (box && !box.hidden && box.children.length) {
-        var rows = rowsIn(box);
-        window.__shardDebug.suggest = {
-          boxTag: box.tagName, boxClass: String(box.className), rowCount: rows.length,
-          rows: rows.slice(0, 4).map(function (r) {
-            return { text: rowText(r), removeFound: !!nativeRemove(r), html: r.outerHTML.slice(0, 700) };
-          }),
-          boxHtml: box.outerHTML.slice(0, 1500)
-        };
-      }
-      var vps = [];
-      document.querySelectorAll('meta[name="viewport" i]').forEach(function (m) { vps.push(m.getAttribute('content')); });
-      window.__shardDebug.viewport = {
-        metas: vps,
-        innerWidth: window.innerWidth,
-        docScrollWidth: document.documentElement.scrollWidth,
-        bodyScrollWidth: document.body ? document.body.scrollWidth : 0,
-        visualScale: (window.visualViewport && window.visualViewport.scale) || null,
-        screenWidth: window.screen && window.screen.width,
-        screenHeight: window.screen && window.screen.height,
-        outerWidth: window.outerWidth,
-        dpr: window.devicePixelRatio,
-        vvWidth: window.visualViewport && window.visualViewport.width,
-        url: location.href
-      };
-    } catch (e) { window.__shardDebug.err = String(e); }
-  }
-  setInterval(collectDebug, 400);
 })();
