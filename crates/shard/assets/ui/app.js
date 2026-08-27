@@ -418,7 +418,7 @@ function paintFolders() {
     foldersEl.appendChild(button);
   };
 
-  tab("전체", null);
+  tab("홈", null);   // the top level, not "everything" — see shown()
   for (const name of shelf.folders) tab(name, name);
 
   const add = document.createElement("button");
@@ -449,8 +449,11 @@ function askFolderName() {
 }
 
 function shown() {
+  // The home view (no folder chosen) shows only the TOP LEVEL — files not inside any
+  // folder — the way the phone does it, not every file at once. A chosen folder shows
+  // just its own files.
   return shelf.folder === null
-    ? shelf.items
+    ? shelf.items.filter((i) => !i.folder)
     : shelf.items.filter((i) => i.folder === shelf.folder);
 }
 

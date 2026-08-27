@@ -481,9 +481,9 @@ button svg { display: block; }
 .folder {
   padding: 5px 15px;
   font-size: 11.5px;
-  /* The name in the list's own colour, so a folder tab is drawn in the same
-     ink the list is filled with. */
-  color: var(--surface);
+  /* White so an unselected folder name reads on the dark background — the list's
+     own ink was too dark to see against it. */
+  color: #fff;
   background: transparent;
   border: 1px solid var(--surface);
   border-radius: var(--r-sm);
