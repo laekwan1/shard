@@ -448,6 +448,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         media.addOption(":file-caching=800")
         media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
         media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
+        // Our AVAudioEngine buffers the audio (~the prime cushion) before it reaches the
+        // speaker, but libVLC draws the VIDEO on its own clock — with no way to tell
+        // libVLC that latency, video ran ahead and the sound lagged. Advance libVLC's
+        // audio by roughly that buffer so, after our delay, it lands back in sync.
+        // (Only when our engine carries the audio; libVLC's own output has no such lag.)
+        if audioRouted { media.addOption(":audio-desync=-110") }
         return media
     }
 
