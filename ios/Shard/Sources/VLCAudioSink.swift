@@ -22,12 +22,17 @@ final class VLCAudioSink {
     private var filled = 0                 // valid floats in the ring
     private var lock = os_unfair_lock()
 
-    /// Output silence until this many frames are buffered, so playback starts with a
-    /// cushion that absorbs the link's jitter instead of underrunning. Reset by a flush
-    /// (a seek) so the cushion is rebuilt before sound resumes.
-    private let primeFrames = 48000 / 5     // ~200ms
+    /// Output silence until this many frames are buffered, JUST enough to avoid an
+    /// underrun on the very first render pulls. Kept small (~20ms): AVAudioEngine does
+    /// its own buffering, and libVLC decodes ahead of realtime, so the ring fills on its
+    /// own for steady-state jitter. A big cushion here only delayed the audio start,
+    /// desyncing it behind the (immediately-shown) video. Reset by a flush (a seek).
+    private let primeFrames = 1024          // ~21ms
     private var primed = false
     private var running = false
+    /// Silence the output at once (a user mute) without waiting for the buffered audio
+    /// to drain — the ring is still consumed so unmuting resumes in sync.
+    private var muted = false
 
     init() {
         let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
@@ -63,6 +68,13 @@ final class VLCAudioSink {
         os_unfair_lock_unlock(&lock)
     }
 
+    /// Silence (or unsilence) the output instantly.
+    func setMuted(_ m: Bool) {
+        os_unfair_lock_lock(&lock)
+        muted = m
+        os_unfair_lock_unlock(&lock)
+    }
+
     /// Drop everything buffered (a seek/flush) and re-arm the prime cushion.
     func flush() {
         os_unfair_lock_lock(&lock)
@@ -80,10 +92,13 @@ final class VLCAudioSink {
             return
         }
         let cap = ring.count
+        let silent = muted
         var given = 0
         while given < frames && filled >= 2 {
-            left?[given] = ring[readIndex]
-            right?[given] = ring[(readIndex + 1) % cap]
+            // Consume the ring even when muted, so the timeline keeps advancing and
+            // unmuting picks up in sync — just write silence to the output.
+            left?[given] = silent ? 0 : ring[readIndex]
+            right?[given] = silent ? 0 : ring[(readIndex + 1) % cap]
             readIndex = (readIndex + 2) % cap
             filled -= 2
             given += 1

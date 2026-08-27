@@ -96,6 +96,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         muted.toggle()
         player.audio?.isMuted = muted
         av.isMuted = muted
+        audioSink.setMuted(muted)   // our engine mutes instantly, not a buffer later
     }
 
     /// The one surface VLC draws into, reparented between windowed and full
