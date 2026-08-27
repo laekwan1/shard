@@ -383,18 +383,42 @@ pub const RECORDER: &str = r#"
 pub const ASK: &str = r#"
 (function () {
   function player() {
-    var byId = document.querySelector('#movie_player') ||
-               document.querySelector('.html5-video-player');
-    if (byId && typeof byId.getPlayerResponse === 'function') return byId;
+    // Gather EVERY element exposing getPlayerResponse, not the first match.
+    // Shorts uses `#shorts-player` (not `#movie_player`) AND pre-renders the
+    // neighbouring shorts, so several players exist at once — grabbing the first
+    // one gave the wrong (off-screen) short, or none, and the download failed.
+    var seen = [], out = [];
+    function add(el) {
+      if (el && typeof el.getPlayerResponse === 'function' && seen.indexOf(el) < 0) {
+        seen.push(el); out.push(el);
+      }
+    }
+    var named = document.querySelectorAll('#movie_player, #shorts-player, .html5-video-player');
+    for (var i = 0; i < named.length; i++) add(named[i]);
     var videos = document.getElementsByTagName('video');
     for (var i = 0; i < videos.length; i++) {
       var node = videos[i], depth = 0;
       while (node && depth++ < 12) {
-        if (typeof node.getPlayerResponse === 'function') return node;
+        if (typeof node.getPlayerResponse === 'function') { add(node); break; }
         node = node.parentElement;
       }
     }
-    return byId || null;
+    if (out.length <= 1) return out[0] || null;
+    // More than one: pick the player the user is actually watching — the one
+    // most in view, and among those the one that is playing (a paused neighbour
+    // scores lower). This is what makes swiping between shorts download the RIGHT
+    // short rather than whichever happened to render first.
+    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    var best = null, bestScore = -1;
+    for (var i = 0; i < out.length; i++) {
+      var el = out[i];
+      var vid = el.tagName === 'VIDEO' ? el : el.querySelector('video');
+      var r = (vid || el).getBoundingClientRect();
+      var visible = Math.max(0, Math.min(r.bottom, vh) - Math.max(r.top, 0));
+      var score = visible + (vid && !vid.paused && vid.readyState >= 2 ? 1e7 : 0);
+      if (score > bestScore) { bestScore = score; best = el; }
+    }
+    return best;
   }
 
   // The player is asked first and the global is only the fallback: that global
