@@ -47,7 +47,7 @@ pub fn write(demuxed: &Demuxed, out: &mut impl Write) -> Result<()> {
     // The sample bytes go down first, so their offsets are known before the
     // moov that points at them is built. ftyp has a fixed size; mdat's payload
     // begins 8 bytes into the box.
-    let ftyp = ftyp_box();
+    let ftyp = ftyp_box(demuxed.video_av1);
     let mut mdat_payload: Vec<u8> = Vec::new();
     let data_start = ftyp.len() as u32 + 8; // after mdat's size+type
 
@@ -57,7 +57,7 @@ pub fn write(demuxed: &Demuxed, out: &mut impl Write) -> Result<()> {
         for s in &demuxed.video {
             mdat_payload.extend_from_slice(&s.data);
         }
-        video_track = Some(video_track_tables(&demuxed.video, offset));
+        video_track = Some(video_track_tables(&demuxed.video, offset, demuxed.video_timescale.max(1)));
     }
 
     let mut audio_track = None;
@@ -91,8 +91,10 @@ pub fn write(demuxed: &Demuxed, out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
-/// Build the video track's tables from its samples (decode order).
-fn video_track_tables(samples: &[Sample], chunk_offset: u32) -> Track {
+/// Build the video track's tables from its samples (decode order). `timescale` is the
+/// unit of the samples' decode_ms/time_ms — milliseconds for a transport stream, but the
+/// source timescale for a YouTube remux so frame durations are exact (no drift).
+fn video_track_tables(samples: &[Sample], chunk_offset: u32, timescale: u32) -> Track {
     let sizes: Vec<u32> = samples.iter().map(|s| s.data.len() as u32).collect();
 
     // Decode durations: the gap to the next frame's decode time. The last frame
@@ -138,7 +140,7 @@ fn video_track_tables(samples: &[Sample], chunk_offset: u32) -> Track {
         // If every frame is a keyframe, an stss listing all of them is the same
         // as none; leave it out so the player treats all as sync.
         sync: if sync.len() == samples.len() { Vec::new() } else { sync },
-        timescale: MOVIE_TIMESCALE,
+        timescale,
         duration,
     }
 }
@@ -193,13 +195,17 @@ fn full(kind: &[u8; 4], version: u8, flags: u32, payload: &[u8]) -> Vec<u8> {
     atom(kind, &body)
 }
 
-fn ftyp_box() -> Vec<u8> {
+fn ftyp_box(video_av1: bool) -> Vec<u8> {
     let mut p = Vec::new();
     p.extend_from_slice(b"isom");
     p.extend_from_slice(&0x200u32.to_be_bytes());
-    for brand in [b"isom", b"iso2", b"avc1", b"mp41"] {
-        p.extend_from_slice(brand);
-    }
+    // Name the video codec's brand among the compatible ones — some parsers (and
+    // AVPlayer for AV1) gate on it. 'av01' for AV1, 'avc1' for H.264.
+    let codec_brand: &[u8; 4] = if video_av1 { b"av01" } else { b"avc1" };
+    p.extend_from_slice(b"isom");
+    p.extend_from_slice(b"iso2");
+    p.extend_from_slice(codec_brand);
+    p.extend_from_slice(b"mp41");
     atom(b"ftyp", &p)
 }
 
@@ -497,6 +503,7 @@ mod tests {
         Demuxed {
             avcc: vec![1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, 4, 0x67, 0x64, 0, 0x1f, 1, 0, 4, 0x68],
             video_av1: false,
+            video_timescale: 1000,
             width: 320,
             height: 240,
             video: vec![
@@ -542,7 +549,7 @@ mod tests {
     fn a_reordered_stream_gets_a_ctts_and_a_plain_one_does_not() {
         // With B-frames, offsets differ from zero → ctts present.
         let d = demuxed();
-        let track = video_track_tables(&d.video, 40);
+        let track = video_track_tables(&d.video, 40, 1000);
         assert!(!track.ctts.is_empty());
         // Audio is all-sync, in-order → no ctts, no stss.
         let audio = audio_track_tables(&d.audio, 0, 44100);

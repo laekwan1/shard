@@ -284,6 +284,7 @@ fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf
     let demuxed = ts::Demuxed {
         avcc: Vec::new(),
         video_av1: false,
+        video_timescale: 1000,   // no video track here
         width: 0,
         height: 0,
         video: Vec::new(),
@@ -305,7 +306,11 @@ fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf
 /// av01 box; VP9 never can — AVPlayer has no VP9 decoder — so it stays WebM/libVLC.)
 fn save_video_mp4(video_path: &Path, audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf> {
     use crate::download::{mp4mux, ts};
-    fn samples_of(bytes: &[u8], timescale: u32) -> Result<Vec<ts::Sample>> {
+    // Keep each sample's time in its stream's OWN timescale (raw ticks), not milliseconds
+    // — mp4mux writes the video track at that timescale, so frame durations are exact and
+    // do not drift against the audio over a long video. (Audio ignores this timing: every
+    // AAC frame is a fixed 1024 samples.)
+    fn samples_of(bytes: &[u8]) -> Result<Vec<ts::Sample>> {
         let mut out = Vec::new();
         for s in mp4::samples(bytes, 0) {
             let at = s.at as usize;
@@ -315,8 +320,8 @@ fn save_video_mp4(video_path: &Path, audio_path: &Path, into: &Path, stem: &str)
                 .ok_or_else(|| anyhow!("조각이 파일 밖을 가리킵니다"))?;
             out.push(ts::Sample {
                 data: bytes[at..end].to_vec(),
-                time_ms: s.show_ms(timescale),
-                decode_ms: s.time_ms(timescale),
+                time_ms: (s.time as i64 + s.offset as i64).max(0) as u64,   // presentation ticks
+                decode_ms: s.time,                                          // decode ticks
                 keyframe: s.keyframe,
             });
         }
@@ -326,14 +331,15 @@ fn save_video_mp4(video_path: &Path, audio_path: &Path, into: &Path, stem: &str)
     let abytes = std::fs::read(audio_path).context("음성 파일을 읽을 수 없습니다")?;
     let vstream = mp4::stream(&vbytes).context("영상")?;
     let astream = mp4::stream(&abytes).context("음성")?;
-    let video = samples_of(&vbytes, vstream.timescale)?;
-    let audio = samples_of(&abytes, astream.timescale)?;
+    let video = samples_of(&vbytes)?;
+    let audio = samples_of(&abytes)?;
     if video.is_empty() || audio.is_empty() {
         bail!("영상/음성 프레임을 찾지 못했습니다");
     }
     let demuxed = ts::Demuxed {
         avcc: vstream.codec_private.clone(),
         video_av1: vstream.codec_id == "V_AV1",
+        video_timescale: vstream.timescale,
         width: vstream.width,
         height: vstream.height,
         video,
@@ -826,10 +832,10 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
         if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) }
     };
-    // resolution -> best (rank, itag, label, size); and a separate H.264 row kept as a
-    // safety fallback (in case a device cannot play our AV1 MP4).
+    // One row per resolution: the best codec (AV1 > H.264 > VP9). No separate H.264 row —
+    // AV1 already covers the AVPlayer path, and H.264 is picked automatically for a
+    // resolution that has no AV1.
     let mut best: std::collections::HashMap<String, (u8, u32, String, String)> = std::collections::HashMap::new();
-    let mut h264: std::collections::HashMap<String, (u32, String, String)> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
         // Drop 60fps ("1080p60") — much heavier for little gain, and the user asked to
@@ -841,22 +847,12 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
         let better = best.get(&video.quality).map_or(true, |(cr, ..)| codec_rank(codec) < *cr);
         if better {
             best.insert(video.quality.clone(),
-                        (codec_rank(codec), video.itag, label.clone(), size_of(video, audio_for(codec))));
-        }
-        if codec == "H.264" {
-            h264.entry(video.quality.clone())
-                .or_insert((video.itag, label, size_of(video, aac_audio)));
+                        (codec_rank(codec), video.itag, label, size_of(video, audio_for(codec))));
         }
     }
     for q in &order {
         if let Some((_, itag, label, size)) = best.get(q) {
             rows.push((*itag, label.clone(), size.clone()));
-        }
-        // Add the H.264 row too, unless the best pick already IS that H.264 track.
-        if let Some((itag, label, size)) = h264.get(q) {
-            if best.get(q).map_or(true, |(_, bitag, ..)| bitag != itag) {
-                rows.push((*itag, label.clone(), size.clone()));
-            }
         }
     }
     Ok(rows)

@@ -36,6 +36,11 @@ pub struct Demuxed {
     /// True when the video track is AV1 — mp4mux then writes an av01/av1C sample entry
     /// instead of avc1/avcC. A transport stream is always H.264, so ts::demux sets false.
     pub video_av1: bool,
+    /// The unit of the video samples' `time_ms`/`decode_ms`. The TS path times in
+    /// milliseconds (1000); the YouTube remux keeps the SOURCE timescale so the video's
+    /// frame durations are exact — a millisecond clock rounds each frame and the sum
+    /// drifts against the (exact) audio over a long video.
+    pub video_timescale: u32,
     pub width: u32,
     pub height: u32,
     pub video: Vec<Sample>,
@@ -231,6 +236,7 @@ pub fn demux(data: &[u8]) -> Result<Demuxed> {
     Ok(Demuxed {
         avcc,
         video_av1: false,   // a transport stream only ever carries H.264
+        video_timescale: 1000,   // TS samples are timed in milliseconds
         width,
         height,
         video: video_samples,
