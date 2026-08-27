@@ -672,11 +672,10 @@ struct LibraryScreen: View {
                     // A gap opens above the row the finger is hovering, so the drop
                     // point is visible before the finger lifts.
                     if dragging != nil, dropTarget?.url == item.url, dragging?.url != item.url {
-                        // Sit on the row boundary like the divider between items: full
-                        // width (no side inset) and translucent, so it reads as "insert
-                        // here" rather than a floating bar.
+                        // Sit right on the row boundary (where the divider is): full
+                        // width, no vertical padding — any gap pushed the line below the
+                        // boundary line — and translucent so it reads as "insert here".
                         Rectangle().fill(Color.accent.opacity(0.55)).frame(height: 2)
-                            .padding(.vertical, 1)
                             .transition(.opacity)
                     }
                     row(item)

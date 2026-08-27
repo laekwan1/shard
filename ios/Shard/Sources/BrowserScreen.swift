@@ -528,8 +528,9 @@ struct BrowserScreen: View {
         .onLongPressGesture { withAnimation { editingTiles = true } }
     }
 
-    /// A most-visited tile — same look as a favorite, but no edit/delete (it is
-    /// derived from history, not user-managed).
+    /// A most-visited tile — same look and edit behaviour as a favorite. Long-press
+    /// jiggles; the delete badge removes it from "자주 방문" (a hidden host, so it does
+    /// not come back on the next visit).
     private func frequentTile(host: String, url: String) -> some View {
         VStack(spacing: 5) {
             favicon(host)
@@ -540,7 +541,22 @@ struct BrowserScreen: View {
         }
         .frame(width: 68)
         .contentShape(Rectangle())
-        .onTapGesture { model.load(url); showStart = false; showAddress = false }
+        .onTapGesture {
+            if editingTiles { return }   // in edit mode a tap must not open the site
+            model.load(url); showStart = false; showAddress = false
+        }
+        .rotationEffect(.degrees(editingTiles ? (jiggle ? 2 : -2) : 0))
+        .overlay(alignment: .topLeading) {
+            if editingTiles {
+                Button { withAnimation { bookmarks.hideFrequent(host) } } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.system(size: 20)).symbolRenderingMode(.palette)
+                        .foregroundStyle(.white, .black.opacity(0.6))
+                }
+                .offset(x: -4, y: -4)
+            }
+        }
+        .onLongPressGesture { withAnimation { editingTiles = true } }
     }
 
     /// One history row: opens on tap; the trailing ✕ removes just that entry.

@@ -89,6 +89,17 @@ final class LibraryStore: ObservableObject {
         }
         // Newest first: what was just downloaded should sit at the top.
         items = found.sorted { Self.modified($0.url) > Self.modified($1.url) }
+        // A file not yet in the manual order is new — put it at the TOP (it is the
+        // newest). Without this, once the list had been hand-reordered every existing
+        // file was "placed" and a fresh download fell to the bottom instead of the top.
+        // `items` is newest-first, so inserting the new keys at the front in that order
+        // keeps the newest at the very top.
+        let known = Set(manualOrder)
+        let fresh = items.map { orderKey($0) }.filter { !known.contains($0) }
+        if !fresh.isEmpty {
+            manualOrder.insert(contentsOf: fresh, at: 0)
+            UserDefaults.standard.set(manualOrder, forKey: "shard.itemOrder")
+        }
     }
 
     private static func modified(_ url: URL) -> Date {

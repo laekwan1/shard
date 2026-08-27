@@ -15,11 +15,16 @@ final class BookmarksStore: ObservableObject {
     @Published private(set) var bookmarks: [Bookmark] = []
     /// host → visit count, for the "자주 방문" tiles.
     @Published private(set) var visits: [String: Int] = [:]
+    /// Hosts the user removed from "자주 방문" — kept so a deleted tile does not come
+    /// back on the next visit. A separate set (not a visits reset) because the count
+    /// still matters if it is ever bookmarked.
+    @Published private(set) var hiddenFrequent: Set<String> = []
     /// Recently visited pages, newest first, for the "방문기록" section.
     @Published private(set) var history: [Bookmark] = []
 
     private let bookmarksKey = "shard.bookmarks"
     private let visitsKey = "shard.visits"
+    private let hiddenFrequentKey = "shard.hiddenFrequent"
     private let historyKey = "shard.history"
 
     init() { load() }
@@ -71,12 +76,19 @@ final class BookmarksStore: ObservableObject {
         save()
     }
 
+    /// Drop a host from "자주 방문" (the user deleted its tile). Persists so it stays
+    /// gone across visits.
+    func hideFrequent(_ h: String) {
+        hiddenFrequent.insert(h)
+        save()
+    }
+
     /// The most-visited hosts, minus any already bookmarked (a bookmark tile already
-    /// covers it), newest-weighted only by count.
+    /// covers it) or the user removed, newest-weighted only by count.
     func frequent(limit: Int) -> [(host: String, url: String)] {
         let pinned = Set(bookmarks.map { host($0.url) })
         return visits
-            .filter { $0.value >= 2 && !pinned.contains($0.key) }
+            .filter { $0.value >= 2 && !pinned.contains($0.key) && !hiddenFrequent.contains($0.key) }
             // Break count ties by host name so the order is STABLE — a dictionary's
             // own order shuffles between renders, which made the tiles jump around.
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
@@ -92,6 +104,7 @@ final class BookmarksStore: ObservableObject {
         let d = UserDefaults.standard
         if let b = try? JSONEncoder().encode(bookmarks) { d.set(b, forKey: bookmarksKey) }
         if let v = try? JSONEncoder().encode(visits) { d.set(v, forKey: visitsKey) }
+        if let hf = try? JSONEncoder().encode(Array(hiddenFrequent)) { d.set(hf, forKey: hiddenFrequentKey) }
         if let h = try? JSONEncoder().encode(history) { d.set(h, forKey: historyKey) }
     }
 
@@ -102,6 +115,9 @@ final class BookmarksStore: ObservableObject {
         }
         if let v = d.data(forKey: visitsKey), let map = try? JSONDecoder().decode([String: Int].self, from: v) {
             visits = map
+        }
+        if let hf = d.data(forKey: hiddenFrequentKey), let list = try? JSONDecoder().decode([String].self, from: hf) {
+            hiddenFrequent = Set(list)
         }
         if let h = d.data(forKey: historyKey), let list = try? JSONDecoder().decode([Bookmark].self, from: h) {
             history = list
