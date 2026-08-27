@@ -68,6 +68,30 @@ impl Default for Doh {
 /// exact problem the change fixes would keep hitting it.
 pub const CURRENT_VERSION: u32 = 3;
 
+/// A saved site — the shape the browser's home page (bookmarks, history) is built
+/// from, mirroring the phone's `Bookmark`.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub struct Bookmark {
+    pub url: String,
+    pub title: String,
+}
+
+/// The browser's home page: what the user pinned, where they have been, and the page
+/// the home button opens — the desktop half of the phone's home/favorites.
+#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Browser {
+    /// The page the home button opens; empty means the start page (bookmarks).
+    pub homepage: String,
+    pub bookmarks: Vec<Bookmark>,
+    /// Recently visited pages, newest first, capped.
+    pub history: Vec<Bookmark>,
+    /// host → visit count, for the "자주 방문" tiles.
+    pub visits: BTreeMap<String, u32>,
+    /// Hosts removed from "자주 방문", so a deleted tile does not return.
+    pub hidden_frequent: Vec<String>,
+}
+
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -113,6 +137,9 @@ pub struct Config {
     pub doh: Doh,
     /// Global hotkey for toggling the engine, in `global-hotkey` syntax.
     pub hotkey: String,
+    /// The browser's home page — bookmarks, history, homepage.
+    #[serde(default)]
+    pub browser: Browser,
 }
 
 impl Default for Config {
@@ -137,6 +164,7 @@ impl Default for Config {
             detect_silent_drops: true,
             doh: Doh::default(),
             hotkey: "Ctrl+Shift+KeyS".to_string(),
+            browser: Browser::default(),
         }
     }
 }
