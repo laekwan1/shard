@@ -16,7 +16,12 @@ final class PlayerUI: ObservableObject {
 }
 
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    let player = VLCMediaPlayer()
+    // Force the high-quality SoXR resampler. Our music is opus (always 48kHz); over a
+    // 44.1kHz Bluetooth A2DP link libVLC must resample 48k→44.1k, and its DEFAULT
+    // resampler crackled on every fresh track. SoXR is clean. (If a given MobileVLCKit
+    // build lacks SoXR the option is simply ignored — no harm.) `--audio-time-stretch`
+    // stays off so the resampler, not the stretcher, owns the rate conversion.
+    let player = VLCMediaPlayer(options: ["--audio-resampler=soxr"])
     let ui = PlayerUI()
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
@@ -154,12 +159,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // cannot remove — but at least we stop adding our own glitch on top.)
         if configuredForBluetooth == onBluetooth { return }
         configuredForBluetooth = onBluetooth
-        // On BT, `sampleRate` already reflects the negotiated link rate — request it so
-        // the next reinit matches instead of fighting it; elsewhere pin 48k as before.
-        try? session.setPreferredSampleRate(onBluetooth ? session.sampleRate : 48000)
-        // A jittery BT link (worst when relayed via the Watch) underran a 20ms buffer
+        // Always request 48kHz — NOT the BT link's 44.1kHz. Our music is opus, which
+        // ALWAYS decodes at 48kHz; if the session runs at 44.1k, libVLC opens its audio
+        // unit at 44.1k and does its own 48k→44.1k resample, whose default resampler
+        // crackled over Bluetooth on every fresh track. At 48k libVLC needs no resample
+        // and CoreAudio converts 48k→the BT link cleanly. (This is why a song already
+        // playing when the earbuds connect stayed clean — its unit was built at 48k —
+        // while the next track, rebuilt at the 44.1k I had adopted, crackled.)
+        try? session.setPreferredSampleRate(48000)
+        // A jittery BT link (worst when relayed via the Watch) underran a tight buffer
         // and crackled; give BT a roomier buffer, keep the tight one for wired/built-in.
-        try? session.setPreferredIOBufferDuration(onBluetooth ? 0.05 : 0.02)
+        try? session.setPreferredIOBufferDuration(onBluetooth ? 0.04 : 0.02)
     }
 
     @objc private func handleRouteChange(_ note: Notification) {
@@ -446,6 +456,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func makeMedia(_ url: URL) -> VLCMedia {
         let media = VLCMedia(url: url)
         media.addOption(":file-caching=100")   // shorter startup buffer → faster start
+        media.addOption(":audio-resampler=soxr")  // clean 48k→44.1k over BT (see player init)
         return media
     }
 
