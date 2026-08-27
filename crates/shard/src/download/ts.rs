@@ -31,7 +31,11 @@ pub struct Sample {
 
 /// The two tracks pulled out of a transport stream.
 pub struct Demuxed {
+    /// The video codec's config record: an avcC (H.264) or, when `video_av1`, an av1C.
     pub avcc: Vec<u8>,
+    /// True when the video track is AV1 — mp4mux then writes an av01/av1C sample entry
+    /// instead of avc1/avcC. A transport stream is always H.264, so ts::demux sets false.
+    pub video_av1: bool,
     pub width: u32,
     pub height: u32,
     pub video: Vec<Sample>,
@@ -226,6 +230,7 @@ pub fn demux(data: &[u8]) -> Result<Demuxed> {
     }
     Ok(Demuxed {
         avcc,
+        video_av1: false,   // a transport stream only ever carries H.264
         width,
         height,
         video: video_samples,

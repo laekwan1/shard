@@ -379,6 +379,7 @@ impl Downloads {
             into: if audio_only { music_folder() } else { videos_folder() },
             cover: offer.thumb.clone(),
             audio_only,
+            mp4: false,   // desktop plays through the WebView, which opens MKV/WebM too
         };
         let expected = job.video.bytes + job.audio.bytes;
         let title = offer.title.clone();

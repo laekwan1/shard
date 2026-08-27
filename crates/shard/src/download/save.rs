@@ -53,6 +53,9 @@ pub struct Job {
     /// measured at four hundred kilobytes against fifty megabytes. It is
     /// thrown away.
     pub audio_only: bool,
+    /// Mux into a plain MP4 (H.264 + AAC) instead of Matroska. Set for an H.264 pick,
+    /// so iOS plays it through AVPlayer — clean over Bluetooth, no libVLC engine needed.
+    pub mp4: bool,
 }
 
 /// Fetch both streams and join them. Returns where the file landed.
@@ -125,6 +128,8 @@ pub fn run(
         let stem = free_stem(&job.into, &safe_name(&job.title));
         let saved = if job.audio_only {
             save_audio_only(&audio_path, &job.into, &stem)?
+        } else if job.mp4 {
+            save_video_mp4(&video_path, &audio_path, &job.into, &stem)?
         } else {
             join_into(&video_path, &audio_path, &job.into, &stem)?
         };
@@ -278,6 +283,7 @@ fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf
     }
     let demuxed = ts::Demuxed {
         avcc: Vec::new(),
+        video_av1: false,
         width: 0,
         height: 0,
         video: Vec::new(),
@@ -287,6 +293,56 @@ fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf
         audio,
     };
     let output = into.join(format!("{stem}.m4a"));
+    let mut file = File::create(&output)?;
+    mp4mux::write(&demuxed, &mut file)?;
+    Ok(output)
+}
+
+/// Mux an H.264 video + AAC audio pair (both fragmented MP4 from YouTube) into a plain
+/// MP4, so iOS plays it through AVPlayer — clean over Bluetooth, no libVLC engine, no
+/// A/V start lag. The tables are rebuilt from the frames (mp4mux), so the container is
+/// standard and the duration is right. (AV1 will join this path once mp4mux writes the
+/// av01 box; VP9 never can — AVPlayer has no VP9 decoder — so it stays WebM/libVLC.)
+fn save_video_mp4(video_path: &Path, audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf> {
+    use crate::download::{mp4mux, ts};
+    fn samples_of(bytes: &[u8], timescale: u32) -> Result<Vec<ts::Sample>> {
+        let mut out = Vec::new();
+        for s in mp4::samples(bytes, 0) {
+            let at = s.at as usize;
+            let end = at
+                .checked_add(s.len)
+                .filter(|e| *e <= bytes.len())
+                .ok_or_else(|| anyhow!("조각이 파일 밖을 가리킵니다"))?;
+            out.push(ts::Sample {
+                data: bytes[at..end].to_vec(),
+                time_ms: s.show_ms(timescale),
+                decode_ms: s.time_ms(timescale),
+                keyframe: s.keyframe,
+            });
+        }
+        Ok(out)
+    }
+    let vbytes = std::fs::read(video_path).context("영상 파일을 읽을 수 없습니다")?;
+    let abytes = std::fs::read(audio_path).context("음성 파일을 읽을 수 없습니다")?;
+    let vstream = mp4::stream(&vbytes).context("영상")?;
+    let astream = mp4::stream(&abytes).context("음성")?;
+    let video = samples_of(&vbytes, vstream.timescale)?;
+    let audio = samples_of(&abytes, astream.timescale)?;
+    if video.is_empty() || audio.is_empty() {
+        bail!("영상/음성 프레임을 찾지 못했습니다");
+    }
+    let demuxed = ts::Demuxed {
+        avcc: vstream.codec_private.clone(),
+        video_av1: vstream.codec_id == "V_AV1",
+        width: vstream.width,
+        height: vstream.height,
+        video,
+        asc: astream.codec_private.clone(),
+        sample_rate: astream.sample_rate as u32,
+        channels: astream.channels,
+        audio,
+    };
+    let output = into.join(format!("{stem}.mp4"));
     let mut file = File::create(&output)?;
     mp4mux::write(&demuxed, &mut file)?;
     Ok(output)
@@ -750,36 +806,57 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
             format!("{} · {} {}k", human(audio.size()), audio.codec(), audio.bitrate / 1000),
         ));
     }
-    // Best audio for the video rows may differ (Opus is fine inside a video).
-    let video_wish =
-        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
-    let audio = offer.best_audio(&video_wish);
-    // One row per resolution, choosing the codec by preference: AV1 > VP9 > H.264
-    // (smallest first; H.264 last because of its AVPlayer playback glitch). The
-    // codec is shown in the label so a fallback to H.264 is visible.
+    // Two audios pair with the video rows: AV1/VP9 take Opus (fine inside a WebM the
+    // library plays through libVLC); an H.264 row takes AAC (paired into an MP4 that
+    // iOS plays through AVPlayer — clean over Bluetooth, no engine). Sizes shown to match.
+    let opus_audio = offer.best_audio(&AudioWish {
+        language: String::new(), quality: AudioQuality::Best, portable: false });
+    let aac_audio = offer.best_audio(&AudioWish {
+        language: String::new(), quality: AudioQuality::Best, portable: true });
+    // AV1 > H.264 > VP9. AV1 and H.264 both play through AVPlayer (AV1 on iPhone 15 Pro+)
+    // as an MP4 with AAC — clean over Bluetooth, no engine; VP9 has no AVPlayer decoder
+    // so it is the last resort (WebM/Opus/libVLC). AV1 is also the smallest at a given
+    // resolution, so it wins on quality-per-size too.
     fn codec_rank(c: &str) -> u8 {
-        match c { "AV1" => 0, "VP9" => 1, "H.264" => 2, _ => 3 }
+        match c { "AV1" => 0, "H.264" => 1, "VP9" => 2, _ => 3 }
     }
-    // quality -> (rank, itag, label, size), preserving first-seen resolution order.
+    // The audio paired with a video row: AAC for AV1/H.264 (into an MP4), Opus for VP9.
+    let audio_for = |codec: &str| if matches!(codec, "AV1" | "H.264") { aac_audio } else { opus_audio };
+    let size_of = |video: &crate::download::youtube::Format, audio: Option<&crate::download::youtube::Format>| {
+        let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
+        if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) }
+    };
+    // resolution -> best (rank, itag, label, size); and a separate H.264 row kept as a
+    // safety fallback (in case a device cannot play our AV1 MP4).
     let mut best: std::collections::HashMap<String, (u8, u32, String, String)> = std::collections::HashMap::new();
+    let mut h264: std::collections::HashMap<String, (u32, String, String)> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for video in offer.video_tracks() {
-        // Drop 60fps ("1080p60") — it is much heavier for little gain here, and the
-        // user asked to exclude it. A resolution left with only 60fps falls away;
-        // AV1-only-at-60 then yields to the same resolution's 30fps VP9/H.264.
+        // Drop 60fps ("1080p60") — much heavier for little gain, and the user asked to
+        // exclude it. A resolution left with only 60fps falls away.
         if video.quality.ends_with("60") { continue; }
         let codec = video.codec();
-        let r = codec_rank(codec);
-        let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
-        let size = if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) };
         let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
         if !order.contains(&video.quality) { order.push(video.quality.clone()); }
-        let better = best.get(&video.quality).map_or(true, |(cr, ..)| r < *cr);
-        if better { best.insert(video.quality.clone(), (r, video.itag, label, size)); }
+        let better = best.get(&video.quality).map_or(true, |(cr, ..)| codec_rank(codec) < *cr);
+        if better {
+            best.insert(video.quality.clone(),
+                        (codec_rank(codec), video.itag, label.clone(), size_of(video, audio_for(codec))));
+        }
+        if codec == "H.264" {
+            h264.entry(video.quality.clone())
+                .or_insert((video.itag, label, size_of(video, aac_audio)));
+        }
     }
-    for q in order {
-        if let Some((_, itag, label, size)) = best.get(&q) {
+    for q in &order {
+        if let Some((_, itag, label, size)) = best.get(q) {
             rows.push((*itag, label.clone(), size.clone()));
+        }
+        // Add the H.264 row too, unless the best pick already IS that H.264 track.
+        if let Some((itag, label, size)) = h264.get(q) {
+            if best.get(q).map_or(true, |(_, bitag, ..)| bitag != itag) {
+                rows.push((*itag, label.clone(), size.clone()));
+            }
         }
     }
     Ok(rows)
@@ -820,20 +897,23 @@ pub fn run_youtube(
     let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
 
     let audio_only = itag == MUSIC_ITAG;
-    // portable=true for MUSIC (audio-only): take AAC (an .m4a), not Opus (a .weba).
-    // iOS plays .m4a through AVPlayer, whose Bluetooth handling is robust; Opus only
-    // plays through libVLC, whose fresh audio output crackled over an A2DP link that
-    // an Apple Watch workout was jittering (see 결함-기록). A video's own soundtrack
-    // stays Opus (portable=false) — it plays muxed and never hits that path.
-    let wish =
-        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: audio_only };
-    let audio = offer.best_audio(&wish).ok_or_else(|| anyhow!("음성을 찾지 못했습니다"))?;
     let video = if audio_only {
         offer.video_tracks().into_iter().last()
     } else {
         offer.formats.iter().find(|f| f.itag == itag)
     }
     .ok_or_else(|| anyhow!("고른 화질을 찾지 못했습니다"))?;
+
+    // AV1 and H.264 are muxed into a plain MP4 with AAC, which iOS plays through
+    // AVPlayer — clean over Bluetooth, no libVLC engine, no A/V start lag. (AVPlayer
+    // decodes AV1 on iPhone 15 Pro+, and H.264 everywhere.) VP9 cannot be played by
+    // AVPlayer at all, so it stays WebM/Opus for libVLC.
+    let avplayer = !audio_only && matches!(video.codec(), "AV1" | "H.264");
+    // portable=true (AAC) for MUSIC and for an AVPlayer video; Opus otherwise (a VP9
+    // soundtrack, played muxed through libVLC). See 결함-기록.
+    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best,
+                           portable: audio_only || avplayer };
+    let audio = offer.best_audio(&wish).ok_or_else(|| anyhow!("음성을 찾지 못했습니다"))?;
 
     // Name a format other than the wanted one as "already playing", so the wire
     // is not primed for the bytes we are about to ask for.
@@ -853,6 +933,7 @@ pub fn run_youtube(
         into: into.to_path_buf(),
         cover: offer.thumb.clone(),
         audio_only,
+        mp4: avplayer,
     };
     let expected = job.video.bytes + job.audio.bytes;
     let mut progress = |p: Progress| on_progress(p.video + p.audio, expected);

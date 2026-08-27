@@ -255,8 +255,15 @@ fn video_trak(demuxed: &Demuxed, t: &Track, id: u32) -> Vec<u8> {
     let h = demuxed.height.max(1);
     let movie_dur = (t.duration as u64 * MOVIE_TIMESCALE as u64 / t.timescale as u64) as u32;
     let tkhd = tkhd(id, movie_dur, w, h, 0);
-    let avcc = atom(b"avcC", &demuxed.avcc);
-    let entry = avc1_entry(w as u16, h as u16, &avcc);
+    // AV1 is 'av01' with an 'av1C' config box; H.264 is 'avc1' with 'avcC'. Both are
+    // the same VisualSampleEntry otherwise. AVPlayer plays AV1 on devices with an AV1
+    // decoder (iPhone 15 Pro+); H.264 plays everywhere.
+    let (fourcc, config): (&[u8; 4], Vec<u8>) = if demuxed.video_av1 {
+        (b"av01", atom(b"av1C", &demuxed.avcc))
+    } else {
+        (b"avc1", atom(b"avcC", &demuxed.avcc))
+    };
+    let entry = visual_entry(fourcc, w as u16, h as u16, &config);
     let stbl = stbl(&entry, t);
     let minf = atom(b"minf", &[vmhd(), dinf(), stbl].concat());
     let mdia = atom(
@@ -394,7 +401,10 @@ fn table<T: Copy>(kind: &[u8; 4], entries: &[T], each: impl Fn(T) -> Vec<u8>) ->
     full(kind, 0, 0, &p)
 }
 
-fn avc1_entry(width: u16, height: u16, avcc: &[u8]) -> Vec<u8> {
+/// A VisualSampleEntry (`avc1`/`av01`/…) — same layout for every video codec; only the
+/// fourcc and the trailing config box (`avcC`/`av1C`) differ. `config` is the already-
+/// boxed config record.
+fn visual_entry(fourcc: &[u8; 4], width: u16, height: u16, config: &[u8]) -> Vec<u8> {
     let mut p = Vec::new();
     p.extend_from_slice(&[0u8; 6]); // reserved
     p.extend_from_slice(&1u16.to_be_bytes()); // data_reference_index
@@ -408,8 +418,8 @@ fn avc1_entry(width: u16, height: u16, avcc: &[u8]) -> Vec<u8> {
     p.extend_from_slice(&[0u8; 32]); // compressorname
     p.extend_from_slice(&0x0018u16.to_be_bytes()); // depth
     p.extend_from_slice(&0xffffu16.to_be_bytes()); // pre_defined -1
-    p.extend_from_slice(avcc);
-    atom(b"avc1", &p)
+    p.extend_from_slice(config);
+    atom(fourcc, &p)
 }
 
 fn mp4a_entry(channels: u16, sample_rate: u32, esds: &[u8]) -> Vec<u8> {
@@ -486,6 +496,7 @@ mod tests {
         // decoded frame is shown last, so it needs a composition offset.
         Demuxed {
             avcc: vec![1, 0x64, 0, 0x1f, 0xff, 0xe1, 0, 4, 0x67, 0x64, 0, 0x1f, 1, 0, 4, 0x68],
+            video_av1: false,
             width: 320,
             height: 240,
             video: vec![
