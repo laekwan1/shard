@@ -412,7 +412,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     private func makeMedia(_ url: URL) -> VLCMedia {
         let media = VLCMedia(url: url)
-        media.addOption(":file-caching=100")   // shorter startup buffer → faster start
+        // Audio-only files (existing opus/.weba music) get a LARGER input cache so the
+        // output buffer has slack to ride the Bluetooth link jitter an Apple Watch
+        // workout adds; video keeps the short cache for a fast start. New music is now
+        // AAC/.m4a → AVPlayer, which never reaches libVLC, so this only softens the old
+        // opus files that were downloaded before the switch.
+        let audioOnly = ["weba", "opus", "oga", "ogg"].contains(url.pathExtension.lowercased())
+        media.addOption(audioOnly ? ":file-caching=800" : ":file-caching=100")
         media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
         media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
         return media

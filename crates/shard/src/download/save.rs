@@ -702,9 +702,10 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     use crate::config::AudioQuality;
     use crate::download::youtube::{AudioWish, Offer};
     let offer = Offer::parse(offer_json)?;
-    // portable=false so music comes out as Opus (in WebM): it is smaller and
-    // better than AAC, and the phone's library plays WebM through VLCKit now.
-    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
+    // portable=true so the "음악만 저장" row shows the AAC (.m4a) track that
+    // run_youtube will actually take — iOS plays .m4a through AVPlayer (clean over
+    // Bluetooth), unlike Opus/libVLC. The label's codec/bitrate then match the file.
+    let wish = AudioWish { language: String::new(), quality: AudioQuality::Best, portable: true };
     let mut rows = Vec::new();
     if let Some(audio) = offer.best_audio(&wish) {
         rows.push((
@@ -783,10 +784,13 @@ pub fn run_youtube(
     let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
 
     let audio_only = itag == MUSIC_ITAG;
-    // portable=false: prefer Opus (in WebM) even for audio-only music. VLCKit
-    // plays WebM on the phone now, and Opus is smaller and better than AAC.
+    // portable=true for MUSIC (audio-only): take AAC (an .m4a), not Opus (a .weba).
+    // iOS plays .m4a through AVPlayer, whose Bluetooth handling is robust; Opus only
+    // plays through libVLC, whose fresh audio output crackled over an A2DP link that
+    // an Apple Watch workout was jittering (see 결함-기록). A video's own soundtrack
+    // stays Opus (portable=false) — it plays muxed and never hits that path.
     let wish =
-        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: false };
+        AudioWish { language: String::new(), quality: AudioQuality::Best, portable: audio_only };
     let audio = offer.best_audio(&wish).ok_or_else(|| anyhow!("음성을 찾지 못했습니다"))?;
     let video = if audio_only {
         offer.video_tracks().into_iter().last()
