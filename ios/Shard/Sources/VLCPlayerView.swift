@@ -18,13 +18,12 @@ final class PlayerUI: ObservableObject {
 // libVLC's C audio callbacks (see VLCAudioBridge). @convention(c), so they cannot
 // capture — the sink is reached through the `ctx` opaque pointer instead. They run on
 // libVLC's audio thread and just hand PCM to (or flush) the sink.
+// The bridge header marks these pointers nonnull, so Swift imports them non-optional.
 private let shardAudioSetup: ShardAudioSetupCb = { _, _, _ in }
 private let shardAudioPlay: ShardAudioPlayCb = { ctx, samples, count, _ in
-    guard let ctx = ctx, let samples = samples else { return }
     Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().push(samples, frames: count)
 }
 private let shardAudioFlush: ShardAudioFlushCb = { ctx in
-    guard let ctx = ctx else { return }
     Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().flush()
 }
 
