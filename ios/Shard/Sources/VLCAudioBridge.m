@@ -54,7 +54,10 @@ static void shard_drain(void *data) {
 // NULL and we fall back to libVLC's own audio (no crash, just the old behaviour).
 static libvlc_media_player_t *handle_of(VLCMediaPlayer *player) {
     if (!player) return NULL;
-    Ivar iv = class_getInstanceVariable([player class], "_playerInstance");
+    // object_getClass, not [player class]: VLCMediaPlayer is only forward-declared here
+    // (we avoid importing MobileVLCKit's headers), so we cannot send it messages — the
+    // runtime reads its class without the interface.
+    Ivar iv = class_getInstanceVariable(object_getClass(player), "_playerInstance");
     if (!iv) return NULL;
     ptrdiff_t off = ivar_getOffset(iv);
     void *self_ptr = (__bridge void *)player;
