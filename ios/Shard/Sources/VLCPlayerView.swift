@@ -109,10 +109,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
         // HFP is more likely to fall back to A2DP for us rather than stay crackly.
         try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-        // Match the hardware sample rate to the OUTPUT device (see the method) instead
-        // of always pinning 48k — the pin crackled over Bluetooth.
+        // Match the hardware sample rate AND the IO buffer to the OUTPUT device (see
+        // the method) instead of always pinning 48k / a tight buffer — the pin crackled
+        // over Bluetooth and the tight buffer underran over a jittery BT link.
         configureForCurrentRoute()
-        try? session.setPreferredIOBufferDuration(0.02)
         try? session.setActive(true)
         setupRemoteCommands()
         // Re-match the rate whenever the route changes — the moment earbuds connect is
@@ -137,13 +137,29 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// renegotiated 48k against the BT link and glitched. On a BT route we instead
     /// adopt the rate the link already settled on. This is why starting a song and
     /// THEN connecting the earbuds sounded clean — now later tracks keep that rate too.
+    /// Whether the last configure saw a Bluetooth output. Used to skip touching the
+    /// LIVE session when nothing relevant changed.
+    private var configuredForBluetooth: Bool?
+
     private func configureForCurrentRoute() {
         let session = AVAudioSession.sharedInstance()
         let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
         let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
+        // Only reconfigure when the output actually crossed the BT boundary. An Apple
+        // Watch connecting to CONTROL playback — and, worse, a Watch workout — fires a
+        // storm of route-change pings that do NOT change the output; setting the
+        // preferred rate/buffer on the running session for each one glitched the audio.
+        // (The 지지직 during a workout is mostly the Watch↔phone link saturating the one
+        // shared Bluetooth radio that A2DP earbuds also use — RF contention the app
+        // cannot remove — but at least we stop adding our own glitch on top.)
+        if configuredForBluetooth == onBluetooth { return }
+        configuredForBluetooth = onBluetooth
         // On BT, `sampleRate` already reflects the negotiated link rate — request it so
         // the next reinit matches instead of fighting it; elsewhere pin 48k as before.
         try? session.setPreferredSampleRate(onBluetooth ? session.sampleRate : 48000)
+        // A jittery BT link (worst when relayed via the Watch) underran a 20ms buffer
+        // and crackled; give BT a roomier buffer, keep the tight one for wired/built-in.
+        try? session.setPreferredIOBufferDuration(onBluetooth ? 0.05 : 0.02)
     }
 
     @objc private func handleRouteChange(_ note: Notification) {
