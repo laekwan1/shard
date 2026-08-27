@@ -1,17 +1,19 @@
 import AVFoundation
 
-/// Plays libVLC's decoded PCM through AVAudioEngine — Apple's own audio output,
-/// which rides Bluetooth link jitter (worst during an Apple Watch workout) cleanly,
-/// the way AVPlayer does. libVLC hands us S16 interleaved stereo at 48kHz through its
-/// C audio callbacks (see VLCAudioBridge); we buffer it and an AVAudioSourceNode
-/// drains it at the output rate. This replaces libVLC's own iOS audio output, which
-/// crackled over that link and added start/seek latency — so Opus/VP9/AV1 keep best
-/// quality AND play clean, without falling back to AAC.
+/// Plays libVLC's decoded PCM through AVAudioEngine — Apple's own audio output, which
+/// rides Bluetooth link jitter (worst during an Apple Watch workout) cleanly, the way
+/// AVPlayer does. libVLC hands us S16 interleaved stereo at 48kHz through its C audio
+/// callbacks (see VLCAudioBridge); we buffer it and an AVAudioSourceNode drains it at
+/// the output rate. This replaces libVLC's own iOS output, which crackled over that
+/// link and added start/seek latency — so Opus/VP9/AV1 keep best quality AND play clean.
 final class VLCAudioSink {
     private let engine = AVAudioEngine()
     private var source: AVAudioSourceNode?
-    private let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                       sampleRate: 48000, channels: 2, interleaved: true)!
+    // The engine graph MUST use a non-interleaved (standard) format — AVAudioEngine
+    // rejects an interleaved format on an internal connection (that crashed at launch).
+    // libVLC still gives us interleaved S16; we de-interleave into the L/R buffers in
+    // the render block.
+    private let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
 
     // Interleaved Float32 ring [L,R,L,R,…]. ~2s at 48k stereo.
     private var ring = [Float](repeating: 0, count: 48000 * 2 * 2)
@@ -20,9 +22,9 @@ final class VLCAudioSink {
     private var filled = 0                 // valid floats in the ring
     private var lock = os_unfair_lock()
 
-    /// Output silence until this many frames have been buffered, so playback starts
-    /// with a cushion that absorbs the link's jitter instead of underrunning. Reset by
-    /// a flush (a seek) so the cushion is rebuilt before sound resumes.
+    /// Output silence until this many frames are buffered, so playback starts with a
+    /// cushion that absorbs the link's jitter instead of underrunning. Reset by a flush
+    /// (a seek) so the cushion is rebuilt before sound resumes.
     private let primeFrames = 48000 / 5     // ~200ms
     private var primed = false
     private var running = false
@@ -30,10 +32,9 @@ final class VLCAudioSink {
     init() {
         let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
             let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            guard let buffer = abl.first,
-                  let out = buffer.mData?.assumingMemoryBound(to: Float.self) else { return noErr }
-            let wanted = Int(frameCount) * 2         // interleaved stereo
-            self?.pull(into: out, count: wanted)
+            let left = abl.count > 0 ? abl[0].mData?.assumingMemoryBound(to: Float.self) : nil
+            let right = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : left
+            self?.pull(left: left, right: right, frames: Int(frameCount))
             return noErr
         }
         source = node
@@ -71,24 +72,25 @@ final class VLCAudioSink {
 
     // MARK: called from the audio render thread
 
-    private func pull(into out: UnsafeMutablePointer<Float>, count: Int) {
+    private func pull(left: UnsafeMutablePointer<Float>?, right: UnsafeMutablePointer<Float>?, frames: Int) {
         os_unfair_lock_lock(&lock)
         guard primed else {
             os_unfair_lock_unlock(&lock)
-            for i in 0..<count { out[i] = 0 }       // still filling the cushion
+            for i in 0..<frames { left?[i] = 0; right?[i] = 0 }   // still filling the cushion
             return
         }
         let cap = ring.count
         var given = 0
-        while given < count && filled > 0 {
-            out[given] = ring[readIndex]
-            readIndex = (readIndex + 1) % cap
-            filled -= 1
+        while given < frames && filled >= 2 {
+            left?[given] = ring[readIndex]
+            right?[given] = ring[(readIndex + 1) % cap]
+            readIndex = (readIndex + 2) % cap
+            filled -= 2
             given += 1
         }
-        if filled == 0 { primed = false }           // underran: rebuild the cushion
+        if filled < 2 { primed = false }            // underran: rebuild the cushion
         os_unfair_lock_unlock(&lock)
-        for i in given..<count { out[i] = 0 }        // pad any shortfall with silence
+        for i in given..<frames { left?[i] = 0; right?[i] = 0 }   // pad the shortfall
     }
 
     // MARK: lifecycle (main thread)
