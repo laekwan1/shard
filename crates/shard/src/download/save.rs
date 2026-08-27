@@ -746,7 +746,7 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     if let Some(audio) = offer.best_audio(&wish) {
         rows.push((
             MUSIC_ITAG,
-            "음악만 저장".to_string(),
+            "음악".to_string(),
             format!("{} · {} {}k", human(audio.size()), audio.codec(), audio.bitrate / 1000),
         ));
     }
