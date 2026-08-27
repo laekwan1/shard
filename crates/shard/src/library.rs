@@ -139,13 +139,19 @@ fn sweep(dir: &Path, folder: &str, kind: Kind, out: &mut Vec<Item>) {
 /// least useful.
 pub fn folders(kind: Kind) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(kind.folder()) else { return Vec::new() };
-    let mut names: Vec<String> = entries
+    // Oldest first, so a newly made folder appears at the END rather than jumping into
+    // alphabetical order — the phone does the same. Fall back to the name when a
+    // directory has no creation time.
+    let mut dirs: Vec<(std::time::SystemTime, String)> = entries
         .flatten()
         .filter(|e| e.metadata().map(|m| m.is_dir()).unwrap_or(false))
-        .map(|e| e.file_name().to_string_lossy().to_string())
+        .map(|e| {
+            let when = e.metadata().and_then(|m| m.created()).unwrap_or(std::time::UNIX_EPOCH);
+            (when, e.file_name().to_string_lossy().to_string())
+        })
         .collect();
-    names.sort();
-    names
+    dirs.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    dirs.into_iter().map(|(_, name)| name).collect()
 }
 
 /// Make a folder on a shelf. Returns false when the name is unusable or the

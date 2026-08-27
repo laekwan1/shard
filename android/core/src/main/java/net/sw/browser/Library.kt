@@ -113,15 +113,21 @@ object Library {
      * once something is in them, because by then the folder speaks for itself.
      */
     fun folders(context: Context, items: List<Item>, kind: Kind): List<String> {
-        val used = items.filter { it.kind == kind && it.folder.isNotBlank() }.map { it.folder }.toSet()
-        return (used + remembered(context, kind)).sorted()
+        // Creation order (remembered), then any folder that has files but was never
+        // remembered, appended — not alphabetical, so a new folder sits at the end.
+        val ordered = remembered(context, kind).toMutableList()
+        for (name in items.filter { it.kind == kind && it.folder.isNotBlank() }.map { it.folder }) {
+            if (!ordered.contains(name)) ordered.add(name)
+        }
+        return ordered
     }
 
-    /** Remember a folder name so it can be shown before anything is in it. */
+    /** Remember a folder name so it can be shown before anything is in it — at the end. */
     fun addFolder(context: Context, name: String, kind: Kind) {
         val clean = clean(name)
         if (clean.isBlank()) return
-        prefs(context).edit().putStringSet(emptyKey(kind), remembered(context, kind) + clean).apply()
+        val list = remembered(context, kind)
+        if (!list.contains(clean)) saveRemembered(context, kind, list + clean)
     }
 
     /**
@@ -147,15 +153,16 @@ object Library {
             if (!move(context, it, clean)) all = false
         }
         val kept = remembered(context, kind)
-        prefs(context).edit()
-            .putStringSet(emptyKey(kind), if (all) kept - from + clean else kept + clean)
-            .apply()
+        // On a full rename, put the new name where the old one sat (keep its order);
+        // on a partial one, keep the old and add the new at the end.
+        val updated = (if (all) kept.map { if (it == from) clean else it } else kept + clean).distinct()
+        saveRemembered(context, kind, updated)
         return all
     }
 
     fun removeFolder(context: Context, name: String, items: List<Item>, kind: Kind) {
         items.filter { it.kind == kind && it.folder == name }.forEach { move(context, it, "") }
-        prefs(context).edit().putStringSet(emptyKey(kind), remembered(context, kind) - name).apply()
+        saveRemembered(context, kind, remembered(context, kind) - name)
     }
 
     // ---- changing ----------------------------------------------------------
@@ -378,8 +385,22 @@ object Library {
         prefs(context).edit().putString(END_ACTION, value.name).apply()
     }
 
-    private fun remembered(context: Context, kind: Kind): Set<String> =
-        prefs(context).getStringSet(emptyKey(kind), emptySet()) ?: emptySet()
+    /** Remembered folders in CREATION order, so a new one lands at the end (not sorted).
+     *  Migrates the old unordered set once. */
+    private fun remembered(context: Context, kind: Kind): List<String> {
+        val p = prefs(context)
+        p.getString(folderOrderKey(kind), null)?.let { return it.split("\n").filter { s -> s.isNotBlank() } }
+        val legacy = p.getStringSet(emptyKey(kind), emptySet())?.sorted() ?: emptyList()
+        if (legacy.isNotEmpty()) saveRemembered(context, kind, legacy)
+        return legacy
+    }
+
+    private fun saveRemembered(context: Context, kind: Kind, list: List<String>) {
+        prefs(context).edit().putString(folderOrderKey(kind), list.joinToString("\n")).apply()
+    }
+
+    private fun folderOrderKey(kind: Kind) =
+        if (kind == Kind.MUSIC) "folder-order-music" else "folder-order"
 
     private fun emptyKey(kind: Kind) =
         if (kind == Kind.MUSIC) EMPTY_FOLDERS_MUSIC else EMPTY_FOLDERS

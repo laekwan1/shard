@@ -48,17 +48,28 @@ final class LibraryStore: ObservableObject {
     /// so a folder made on one does not appear on the other. A folder is listed
     /// if it holds a file of this kind or was created for this kind.
     var folders: [String] {
-        let withFiles = Set(items.filter { $0.kind == kind && $0.folder != nil }.compactMap { $0.folder })
-        return Array(withFiles.union(remembered(kind))).sorted()
+        // Creation order, so a folder just made sits at the END rather than jumping into
+        // alphabetical order. `remembered` keeps that order; append any folder that has
+        // files but was somehow never remembered.
+        var ordered = remembered(kind)
+        for name in items.filter({ $0.kind == kind && $0.folder != nil }).compactMap({ $0.folder })
+        where !ordered.contains(name) {
+            ordered.append(name)
+        }
+        return ordered
     }
 
-    private func remembered(_ kind: MediaKind) -> Set<String> {
-        Set(UserDefaults.standard.stringArray(forKey: "folders_\(kind.rawValue)") ?? [])
+    private func remembered(_ kind: MediaKind) -> [String] {
+        UserDefaults.standard.stringArray(forKey: "folders_\(kind.rawValue)") ?? []
     }
     private func remember(_ name: String, _ kind: MediaKind, add: Bool) {
-        var set = remembered(kind)
-        if add { set.insert(name) } else { set.remove(name) }
-        UserDefaults.standard.set(Array(set), forKey: "folders_\(kind.rawValue)")
+        var list = remembered(kind)
+        if add {
+            if !list.contains(name) { list.append(name) }   // new folder goes to the end
+        } else {
+            list.removeAll { $0 == name }
+        }
+        UserDefaults.standard.set(list, forKey: "folders_\(kind.rawValue)")
     }
 
     private var root: URL {

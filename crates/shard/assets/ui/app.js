@@ -699,6 +699,12 @@ function openMenu(x, y, on) {
   if (menuFor) {
     menu.querySelector('[data-do="unfile"]').hidden = !menuFor.folder;
   }
+  if (menuFolder) {
+    // 전체삭제 only when the folder actually holds files of this shelf; an empty
+    // folder has nothing to delete-all, so it shows only 폴더삭제.
+    const hasFiles = shelf.items.some((i) => i.folder === menuFolder);
+    menu.querySelector('[data-do="deleteFolderAll"]').hidden = !hasFiles;
+  }
   menu.hidden = false;
   // Kept inside the window: a menu opened near the edge would otherwise run off.
   const box = menu.getBoundingClientRect();
