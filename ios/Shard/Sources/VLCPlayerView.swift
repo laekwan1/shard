@@ -119,11 +119,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
         // HFP is more likely to fall back to A2DP for us rather than stay crackly.
         try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-        // Match the hardware sample rate AND the IO buffer to the OUTPUT device (see
-        // the method) instead of always pinning 48k / a tight buffer — the pin crackled
-        // over Bluetooth and the tight buffer underran over a jittery BT link.
-        configureForCurrentRoute()
-        try? session.setActive(true)
+        // Only DECLARE the category here; do NOT activate the session yet. Activating at
+        // launch made Shard grab the audio session — interrupting Apple Music and binding
+        // the Bluetooth route — the moment the app opened, even with nothing playing. That
+        // disturbed the Watch/earbud pairing and left Music unable to play. Like Apple
+        // Music, we now activate the session only when playback starts (open()/resume())
+        // and release it on stop(). Rate/buffer are matched at that point too.
         setupRemoteCommands()
         // Re-match the rate whenever the route changes — the moment earbuds connect is
         // when we must adopt their rate, or the next track restart crackles.
@@ -178,53 +179,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
 
     @objc private func handleRouteChange(_ note: Notification) {
-        routeChangeCount += 1
         configureForCurrentRoute()
-        updateDiagnostics()
-    }
-
-    // MARK: audio diagnostics (temporary, on-screen readout)
-    // A live readout of the audio session so a crackle can be diagnosed on the device
-    // without a Mac console: what route is in use, at what rate/buffer, how many
-    // channels, which backend, whether another app holds audio, and how many
-    // route-change / interruption events fired.
-    @Published var diagRoute = ""
-    @Published var diagDetail = ""
-    private var routeChangeCount = 0
-    private var interruptionCount = 0
-
-    func updateDiagnostics() {
-        let s = AVAudioSession.sharedInstance()
-        let out = s.currentRoute.outputs.first
-        let name: String
-        switch out?.portType {
-        case .some(.bluetoothA2DP): name = "BT-A2DP"
-        case .some(.bluetoothHFP):  name = "BT-HFP"
-        case .some(.bluetoothLE):   name = "BT-LE"
-        case .some(.headphones):    name = "Wired"
-        case .some(.builtInSpeaker): name = "Speaker"
-        case .some(.airPlay):       name = "AirPlay"
-        case .some(.carAudio):      name = "Car"
-        default: name = out?.portType.rawValue ?? "?"
-        }
-        // Assign only on change — these are observed by the whole library, and a
-        // 4×/sec publish would re-render it (the flicker we work to avoid elsewhere).
-        let r = "\(name)  \(Int(s.sampleRate))Hz  \(Int(s.ioBufferDuration * 1000))ms  ch\(s.outputNumberOfChannels)"
-        let d = "\(backend == .av ? "AV" : "VLC")  other:\(s.isOtherAudioPlaying ? "Y" : "N")  rc:\(routeChangeCount)  int:\(interruptionCount)"
-        if r != diagRoute { diagRoute = r }
-        if d != diagDetail { diagDetail = d }
     }
 
     @objc private func handleInterruption(_ note: Notification) {
         guard let info = note.userInfo,
               let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
-        interruptionCount += 1
         switch type {
         case .began:
             interruptedAt = player.position
             wasPlayingAtInterruption = isPlaying && !userPaused
-            updateDiagnostics()
         case .ended:
             let session = AVAudioSession.sharedInstance()
             // Only the post-phone-CALL case needs the heavy renegotiation: a call can
@@ -243,7 +208,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 configureForCurrentRoute()
             }
             try? session.setActive(true)
-            updateDiagnostics()
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then
@@ -330,10 +294,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // an Apple Watch keeps bound as the Now Playing app. Activating our non-mixing
         // .playback session interrupts it so we OWN the output outright; playing while
         // Music merely sat paused left two sessions coexisting and the Bluetooth output
-        // crackled. Re-match the route's rate/buffer right after, then read diagnostics.
+        // crackled. Re-match the route's rate/buffer right after.
         try? AVAudioSession.sharedInstance().setActive(true)
         configureForCurrentRoute()
-        updateDiagnostics()
 
         if prefersAV(url) {
             backend = .av
@@ -439,7 +402,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // flip back to play for a beat right after a tap.
         let playing = av.timeControlStatus != .paused
         if isPlaying != playing { isPlaying = playing }
-        updateDiagnostics()   // publishes only on change; keeps the readout live
         updateNowPlayingAV(cur: cur, dur: dur)
     }
 
@@ -637,7 +599,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if abs(p - position) > 0.0008 { position = p }
         }
         if isPlaying != player.isPlaying { isPlaying = player.isPlaying }
-        if tick % 4 == 0 { updateDiagnostics() }   // ~2×/sec; publishes only on change
         let e = Self.clock(player.time.intValue)
         if e != elapsed { elapsed = e }
         if let length = player.media?.length.intValue, length > 0 {
@@ -904,22 +865,6 @@ struct PlayerStage: View {
             // were seen jumping from the windowed/portrait insets to the landscape
             // ones as the black cover cleared. They reappear already in place.
             if showControls && !controller.settling { controlsOverlay.transition(.opacity) }
-            // TEMP audio diagnostics — a live readout of the route/rate/buffer so a
-            // Bluetooth crackle can be pinned down on the device. Always visible (not
-            // gated by the controls) so it can be read while a song plays. Remove once
-            // the crackle is understood.
-            VStack(alignment: .leading, spacing: 1) {
-                Text(controller.diagRoute)
-                Text(controller.diagDetail)
-            }
-            .font(.system(size: 10, weight: .semibold, design: .monospaced))
-            .foregroundColor(.yellow)
-            .padding(5)
-            .background(Color.black.opacity(0.6))
-            .cornerRadius(5)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(.top, fullscreen ? topInset + 8 : 44).padding(.leading, 10)
-            .allowsHitTesting(false)
             // Above the controls: the popup + its full-screen dismiss catcher.
             pickerLayer
         }
