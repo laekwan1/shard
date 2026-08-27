@@ -124,13 +124,7 @@ pub fn run(
         // first (append a trailing '.'), instead of the plain title every time.
         let stem = free_stem(&job.into, &safe_name(&job.title));
         let saved = if job.audio_only {
-            // The stream is already a container a player will open, so it is
-            // moved rather than rebuilt — nothing is re-encoded and nothing is
-            // repackaged.
-            let extension = audio_extension(&std::fs::read(&audio_path)?);
-            let output = job.into.join(format!("{stem}.{extension}"));
-            std::fs::copy(&audio_path, &output)?;
-            output
+            save_audio_only(&audio_path, &job.into, &stem)?
         } else {
             join_into(&video_path, &audio_path, &job.into, &stem)?
         };
@@ -243,17 +237,59 @@ pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
     None
 }
 
-/// What to call an audio stream, judged by what it turns out to be.
-fn audio_extension(bytes: &[u8]) -> &'static str {
+/// Save an audio-only stream, choosing the container by what it turns out to be.
+///
+/// Opus arrives as a WebM and plays fine as-is, so it is written whole under `.weba`
+/// (the WebM-audio extension — it marks the file as audio without renaming the
+/// container it really is). AAC arrives as a FRAGMENTED MP4; written whole and handed
+/// to iOS AVPlayer its duration read as DOUBLE — silence played past the real end —
+/// because YouTube's fragment timing does not survive a bare concat. So AAC is demuxed
+/// and re-muxed into a PLAIN MP4 whose sample table is rebuilt from the actual AAC
+/// frames (each a fixed 1024 samples), which states the correct duration. Rebuilding
+/// (not copying) is what keeps the .m4a — the AVPlayer path that plays clean over
+/// Bluetooth — usable; see 결함-기록.
+fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf> {
+    use crate::download::{mp4mux, ts};
+    let bytes = std::fs::read(audio_path)?;
+    // WebM (Opus): keep the container it came in.
     if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
-        // Opus lives in a WebM here, but with no video track — so `.weba`, the
-        // WebM-audio extension. It marks the file as audio (the phone's library
-        // sorts music from video by extension, and players show it as a song)
-        // without renaming the container it actually is.
-        "weba"
-    } else {
-        "m4a"
+        let output = into.join(format!("{stem}.weba"));
+        std::fs::write(&output, &bytes)?;
+        return Ok(output);
     }
+    // MP4 (AAC): rebuild a plain MP4 so the stated duration matches the audio.
+    let stream = mp4::stream(&bytes)?;
+    let mut audio = Vec::new();
+    for sample in mp4::samples(&bytes, 0) {
+        let at = sample.at as usize;
+        let end = at
+            .checked_add(sample.len)
+            .filter(|e| *e <= bytes.len())
+            .ok_or_else(|| anyhow!("조각이 파일 밖을 가리킵니다"))?;
+        audio.push(ts::Sample {
+            data: bytes[at..end].to_vec(),
+            time_ms: sample.show_ms(stream.timescale),
+            decode_ms: sample.time_ms(stream.timescale),
+            keyframe: sample.keyframe,
+        });
+    }
+    if audio.is_empty() {
+        bail!("음성 프레임을 찾지 못했습니다");
+    }
+    let demuxed = ts::Demuxed {
+        avcc: Vec::new(),
+        width: 0,
+        height: 0,
+        video: Vec::new(),
+        asc: stream.codec_private.clone(),
+        sample_rate: stream.sample_rate as u32,
+        channels: stream.channels,
+        audio,
+    };
+    let output = into.join(format!("{stem}.m4a"));
+    let mut file = File::create(&output)?;
+    mp4mux::write(&demuxed, &mut file)?;
+    Ok(output)
 }
 
 fn whole(what: &str, got: u64, expected: u64) -> Result<()> {
