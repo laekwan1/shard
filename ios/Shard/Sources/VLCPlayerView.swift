@@ -140,42 +140,32 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             name: AVAudioSession.interruptionNotification, object: nil)
     }
 
-    /// Match the audio session's preferred rate to the OUTPUT device so a per-track
-    /// audio-unit restart never resamples. Forcing 48kHz is right for the built-in
-    /// speaker and wired output — it stops the 44.1k↔48k route "텁" between tracks —
-    /// but a Bluetooth A2DP link runs at its own rate (often 44.1kHz), and that same
-    /// pin made every track change / stop-restart crackle (지지직): the restart
-    /// renegotiated 48k against the BT link and glitched. On a BT route we instead
-    /// adopt the rate the link already settled on. This is why starting a song and
-    /// THEN connecting the earbuds sounded clean — now later tracks keep that rate too.
     /// Whether the last configure saw a Bluetooth output. Used to skip touching the
     /// LIVE session when nothing relevant changed.
     private var configuredForBluetooth: Bool?
 
+    /// Pin the hardware sample rate + a tight IO buffer — but ONLY on the built-in
+    /// speaker / wired output, where switching between 44.1k and 48k tracks otherwise
+    /// reconfigures the route (the "텁" pop). On a Bluetooth route we do the OPPOSITE:
+    /// touch NOTHING. Forcing a preferred rate/buffer over Bluetooth reconfigures the
+    /// A2DP hardware, and doing that when a fresh Shard launch lands on a session an
+    /// Apple Watch workout already holds made playback crackle (지지직) for the rest of
+    /// the session — whereas continuous use (Shard already the session's owner) was
+    /// clean. The OS manages the A2DP link's rate/latency fine on its own, and BT has
+    /// no "텁" route-pop to avoid, so there is nothing to gain by pinning and a crackle
+    /// to lose. See 결함-기록.
     private func configureForCurrentRoute() {
         let session = AVAudioSession.sharedInstance()
         let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
         let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
-        // Only reconfigure when the output actually crossed the BT boundary. An Apple
-        // Watch connecting to CONTROL playback — and, worse, a Watch workout — fires a
-        // storm of route-change pings that do NOT change the output; setting the
-        // preferred rate/buffer on the running session for each one glitched the audio.
-        // (The 지지직 during a workout is mostly the Watch↔phone link saturating the one
-        // shared Bluetooth radio that A2DP earbuds also use — RF contention the app
-        // cannot remove — but at least we stop adding our own glitch on top.)
+        // Act only when the output actually crossed the BT boundary — a Watch workout
+        // fires a storm of route-change pings that do not change the output, and
+        // reconfiguring the live session on each one glitched the audio.
         if configuredForBluetooth == onBluetooth { return }
         configuredForBluetooth = onBluetooth
-        // Always request 48kHz — NOT the BT link's 44.1kHz. Our music is opus, which
-        // ALWAYS decodes at 48kHz; if the session runs at 44.1k, libVLC opens its audio
-        // unit at 44.1k and does its own 48k→44.1k resample, whose default resampler
-        // crackled over Bluetooth on every fresh track. At 48k libVLC needs no resample
-        // and CoreAudio converts 48k→the BT link cleanly. (This is why a song already
-        // playing when the earbuds connect stayed clean — its unit was built at 48k —
-        // while the next track, rebuilt at the 44.1k I had adopted, crackled.)
+        guard !onBluetooth else { return }   // Bluetooth: leave the OS's config alone
         try? session.setPreferredSampleRate(48000)
-        // A jittery BT link (worst when relayed via the Watch) underran a tight buffer
-        // and crackled; give BT a roomier buffer, keep the tight one for wired/built-in.
-        try? session.setPreferredIOBufferDuration(onBluetooth ? 0.04 : 0.02)
+        try? session.setPreferredIOBufferDuration(0.02)
     }
 
     @objc private func handleRouteChange(_ note: Notification) {
