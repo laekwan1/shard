@@ -27,9 +27,9 @@ final class VLCAudioSink {
     /// its own buffering, and libVLC decodes ahead of realtime, so the ring fills on its
     /// own for steady-state jitter. A big cushion here only delayed the audio start,
     /// desyncing it behind the (immediately-shown) video. Reset by a flush (a seek).
-    private let primeFrames = 4800          // ~100ms — enough that libVLC's bursty
-                                            // early feed does not underrun (the choppy
-                                            // start), small enough to keep latency low.
+    private let primeFrames = 1920          // ~40ms — small so the audio starts close to
+                                            // the video (less A/V lag); the choppy start
+                                            // was the mute clipping the front, not this.
     private var primed = false
     private var running = false
     /// Silence the output at once (a user mute) without waiting for the buffered audio

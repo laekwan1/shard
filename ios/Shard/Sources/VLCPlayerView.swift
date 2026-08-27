@@ -323,18 +323,18 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
         if audioRouted { audioSink.start() }   // our engine now carries libVLC's audio
-        // MUTE (not just volume-0) across the whole transition and hold it a beat
-        // into playback: the volume resets per media, but the mute flag is what
-        // actually silences the new stream's first buffer — the moment the "텁" pop
-        // fires. Unmuting too early (on the first frame) let the pop through, so it
-        // is released a short time after playback is up (see timeChanged).
+        // MUTE (not just volume-0) across the transition to hide the "텁" pop libVLC's
+        // OWN output makes on the first buffer — but ONLY when libVLC drives the output.
+        // Through our AVAudioEngine there is no such pop, and muting instead fed silence
+        // into the ring so the START of the sound was clipped. So skip it when routed.
+        let mask = !audioRouted
         let s = player.state
         let needStop = s == .ended || s == .error || s == .stopped
-        player.audio?.isMuted = true
+        if mask { player.audio?.isMuted = true }
         if needStop { player.stop() }
-        pendingUnmute = true
+        pendingUnmute = mask
         player.media = makeMedia(url)
-        player.audio?.isMuted = true
+        if mask { player.audio?.isMuted = true }
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -448,12 +448,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         media.addOption(":file-caching=800")
         media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
         media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
-        // Our AVAudioEngine buffers the audio (~the prime cushion) before it reaches the
-        // speaker, but libVLC draws the VIDEO on its own clock — with no way to tell
-        // libVLC that latency, video ran ahead and the sound lagged. Advance libVLC's
-        // audio by roughly that buffer so, after our delay, it lands back in sync.
-        // (Only when our engine carries the audio; libVLC's own output has no such lag.)
-        if audioRouted { media.addOption(":audio-desync=-110") }
         return media
     }
 
