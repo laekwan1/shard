@@ -109,14 +109,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
         // HFP is more likely to fall back to A2DP for us rather than stay crackly.
         try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-        // Pin the hardware sample rate so it does NOT reconfigure between tracks of
-        // different rates (44.1k ↔ 48k) — that route reconfiguration is the "텁"
-        // pop heard on every transition, for AVPlayer and libVLC alike. A fixed
-        // rate + a slightly larger buffer keeps the route stable across swaps.
-        try? session.setPreferredSampleRate(48000)
+        // Match the hardware sample rate to the OUTPUT device (see the method) instead
+        // of always pinning 48k — the pin crackled over Bluetooth.
+        configureForCurrentRoute()
         try? session.setPreferredIOBufferDuration(0.02)
         try? session.setActive(true)
         setupRemoteCommands()
+        // Re-match the rate whenever the route changes — the moment earbuds connect is
+        // when we must adopt their rate, or the next track restart crackles.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(handleRouteChange(_:)),
+            name: AVAudioSession.routeChangeNotification, object: nil)
         // A phone call (or any interruption) pauses us and, on iOS, tears the
         // audio route down. libVLC did not recover on its own — playback stayed
         // frozen and no later file would start — so on the interruption's end we
@@ -124,6 +127,27 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleInterruption(_:)),
             name: AVAudioSession.interruptionNotification, object: nil)
+    }
+
+    /// Match the audio session's preferred rate to the OUTPUT device so a per-track
+    /// audio-unit restart never resamples. Forcing 48kHz is right for the built-in
+    /// speaker and wired output — it stops the 44.1k↔48k route "텁" between tracks —
+    /// but a Bluetooth A2DP link runs at its own rate (often 44.1kHz), and that same
+    /// pin made every track change / stop-restart crackle (지지직): the restart
+    /// renegotiated 48k against the BT link and glitched. On a BT route we instead
+    /// adopt the rate the link already settled on. This is why starting a song and
+    /// THEN connecting the earbuds sounded clean — now later tracks keep that rate too.
+    private func configureForCurrentRoute() {
+        let session = AVAudioSession.sharedInstance()
+        let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
+        let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
+        // On BT, `sampleRate` already reflects the negotiated link rate — request it so
+        // the next reinit matches instead of fighting it; elsewhere pin 48k as before.
+        try? session.setPreferredSampleRate(onBluetooth ? session.sampleRate : 48000)
+    }
+
+    @objc private func handleRouteChange(_ note: Notification) {
+        configureForCurrentRoute()
     }
 
     @objc private func handleInterruption(_ note: Notification) {
@@ -150,7 +174,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // call profile (HFP), so a call that flipped the earbuds to HFP falls back to
             // A2DP for us rather than staying crackly.
             try? session.setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-            try? session.setPreferredSampleRate(48000)
+            configureForCurrentRoute()   // adopt the BT link's rate, not a forced 48k
             try? session.setActive(true)
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
