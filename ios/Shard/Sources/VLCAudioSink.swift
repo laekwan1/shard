@@ -27,12 +27,12 @@ final class VLCAudioSink {
     /// its own buffering, and libVLC decodes ahead of realtime, so the ring fills on its
     /// own for steady-state jitter. A big cushion here only delayed the audio start,
     /// desyncing it behind the (immediately-shown) video. Reset by a flush (a seek).
-    private let primeFrames = 480           // ~10ms — the cushion IS the amount the audio
-                                            // lags the video (we output the oldest sample
-                                            // once this much is buffered, while libVLC has
-                                            // already advanced its video clock by it), so
-                                            // keep it minimal. Just enough to not underrun
-                                            // on the first render before libVLC feeds ahead.
+    // The buffer B must equal the video's software-decode render lag R for A/V sync —
+    // libVLC cannot be told our output latency (amem has no time-get), so it assumes the
+    // audio plays immediately and matches video to that. At 10ms the sound led the video
+    // (B < R), so R is larger; set ~35ms and err toward audio a touch LATE (tolerable)
+    // rather than early (jarring). See the sync note in the commit / 결함-기록.
+    private let primeFrames = 1680          // ~35ms
     private var primed = false
     /// Whether playback WANTS the engine running — used to restart it after the OS stops
     /// it on a route change. The engine's own `isRunning` is the truth for start/stop, so
@@ -59,8 +59,11 @@ final class VLCAudioSink {
         configObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
-            guard let self = self, self.wantRunning else { return }
-            self.engine.stop()
+            // Restart ONLY if the change actually left it stopped, and only if playback
+            // still wants it. An unconditional stop→start on every change churned the
+            // engine — a Watch workout fires a storm of route changes — which risked a
+            // crash for no gain.
+            guard let self = self, self.wantRunning, !self.engine.isRunning else { return }
             try? self.engine.start()
         }
     }
