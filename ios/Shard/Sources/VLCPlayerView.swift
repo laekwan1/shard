@@ -15,6 +15,19 @@ final class PlayerUI: ObservableObject {
     @Published var duration = "0:00"
 }
 
+// libVLC's C audio callbacks (see VLCAudioBridge). @convention(c), so they cannot
+// capture — the sink is reached through the `ctx` opaque pointer instead. They run on
+// libVLC's audio thread and just hand PCM to (or flush) the sink.
+private let shardAudioSetup: ShardAudioSetupCb = { _, _, _ in }
+private let shardAudioPlay: ShardAudioPlayCb = { ctx, samples, count, _ in
+    guard let ctx = ctx, let samples = samples else { return }
+    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().push(samples, frames: count)
+}
+private let shardAudioFlush: ShardAudioFlushCb = { ctx in
+    guard let ctx = ctx else { return }
+    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().flush()
+}
+
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // Bluetooth crackle on every FRESH libVLC audio output (track change / seek /
     // replay) while an Apple Watch adds jitter to the A2DP link: a continuously-running
@@ -28,6 +41,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
                                           "--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
+
+    // Our AVAudioEngine output for libVLC's decoded audio — clean over Bluetooth,
+    // unlike libVLC's own output. `audioRouted` is false if the private libvlc handle
+    // could not be reached (then libVLC keeps its own output, the old behaviour).
+    private let audioSink = VLCAudioSink()
+    private var audioRouted = false
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
     // which — unlike libVLC — starts without the hardware "텁" pop; libVLC for
@@ -114,6 +133,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     override init() {
         super.init()
         player.delegate = self
+        // Route libVLC's decoded audio to our AVAudioEngine (clean over Bluetooth).
+        // Once, here, before any media — the callbacks apply to every stream after.
+        audioRouted = ShardRouteVLCAudio(player, Unmanaged.passUnretained(audioSink).toOpaque(),
+                                         shardAudioSetup, shardAudioPlay, shardAudioFlush)
         let session = AVAudioSession.sharedInstance()
         // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
@@ -225,6 +248,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the lock screen does not talk to a dead player.
         player.stop()
         teardownAV()
+        audioSink.stop()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -291,12 +315,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if prefersAV(url) {
             backend = .av
             player.stop()                 // make sure libVLC is not also sounding
+            audioSink.stop()              // AV uses AVPlayer, not our engine
             openAV(url)
             return
         }
 
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
+        if audioRouted { audioSink.start() }   // our engine now carries libVLC's audio
         // MUTE (not just volume-0) across the whole transition and hold it a beat
         // into playback: the volume resets per media, but the mute flag is what
         // actually silences the new stream's first buffer — the moment the "텁" pop
@@ -451,6 +477,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// the web video may have taken the audio route.
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
+        if backend == .vlc, audioRouted { audioSink.start() }
         backend == .av ? avPlay() : player.play()
         userPaused = false
     }
@@ -556,6 +583,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func stop() {
         player.stop()
         teardownAV()
+        audioSink.stop()
         currentURL = nil
         // Release the audio session so other devices/apps can take the Bluetooth route
         // back — holding it active kept the earbuds bound to us, which is why the Watch
