@@ -16,12 +16,17 @@ final class PlayerUI: ObservableObject {
 }
 
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    // Force the high-quality SoXR resampler. Our music is opus (always 48kHz); over a
-    // 44.1kHz Bluetooth A2DP link libVLC must resample 48k→44.1k, and its DEFAULT
-    // resampler crackled on every fresh track. SoXR is clean. (If a given MobileVLCKit
-    // build lacks SoXR the option is simply ignored — no harm.) `--audio-time-stretch`
-    // stays off so the resampler, not the stretcher, owns the rate conversion.
-    let player = VLCMediaPlayer(options: ["--audio-resampler=soxr"])
+    // Bluetooth crackle on every FRESH libVLC audio output (track change / seek /
+    // replay) while an Apple Watch adds jitter to the A2DP link: a continuously-running
+    // output stays clean, a re-primed one crackles as libVLC continuously micro-corrects
+    // its output clock. Two levers, both best-effort (ignored if a module is absent):
+    //   --no-audio-time-stretch : stop the pitch-preserving stretcher from continuously
+    //                             resampling to chase the jittery clock.
+    //   --audio-resampler=speex_resampler : a decent bundled resampler instead of the
+    //                             default "ugly" linear one (SoXR was ignored — likely
+    //                             not in this MobileVLCKit build).
+    let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
+                                          "--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
@@ -456,7 +461,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     private func makeMedia(_ url: URL) -> VLCMedia {
         let media = VLCMedia(url: url)
         media.addOption(":file-caching=100")   // shorter startup buffer → faster start
-        media.addOption(":audio-resampler=soxr")  // clean 48k→44.1k over BT (see player init)
+        media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
+        media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
         return media
     }
 
@@ -592,6 +598,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.stop()
         teardownAV()
         currentURL = nil
+        // Release the audio session so other devices/apps can take the Bluetooth route
+        // back — holding it active kept the earbuds bound to us, which is why the Watch
+        // could not grab them and Apple Music would not play while Shard was open.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func mediaPlayerTimeChanged(_ notification: Notification) {
