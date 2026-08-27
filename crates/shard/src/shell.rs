@@ -425,6 +425,8 @@ pub enum Ask {
     LibraryDelete(u64),
     LibraryNewFolder { kind: String, name: String },
     LibraryDropFolder { kind: String, name: String },
+    /// Delete a folder AND everything of this shelf inside it (전체삭제).
+    LibraryDeleteFolder { kind: String, name: String },
     /// The shelf, rearranged by hand: every file's key in its new order.
     LibraryOrder { kind: String, keys: String },
     /// Something is playing, or has stopped: the window keeps room along the
@@ -493,6 +495,10 @@ pub fn read_ask(body: &str) -> Ask {
             keys: field(body, "keys").unwrap_or_default(),
         },
         "library.dropFolder" => Ask::LibraryDropFolder {
+            kind: field(body, "kind").unwrap_or_else(|| "video".into()),
+            name: field(body, "name").unwrap_or_default(),
+        },
+        "library.deleteFolder" => Ask::LibraryDeleteFolder {
             kind: field(body, "kind").unwrap_or_else(|| "video".into()),
             name: field(body, "name").unwrap_or_default(),
         },
@@ -1260,6 +1266,14 @@ pub fn preview() -> Result<()> {
             match crate::library::drop_folder(shelf, &name) {
                 Ok(moved) => tracing::info!("folder {name} removed; {moved} file(s) came out of it"),
                 Err(e) => tracing::warn!("could not remove folder {name}: {e:#}"),
+            }
+            shell.say_library(shelf);
+        }
+        Ask::LibraryDeleteFolder { kind, name } => {
+            let shelf = shelf_of(&kind);
+            match crate::library::delete_folder(shelf, &name) {
+                Ok(gone) => tracing::info!("folder {name} deleted with {gone} file(s)"),
+                Err(e) => tracing::warn!("could not delete folder {name}: {e:#}"),
             }
             shell.say_library(shelf);
         }

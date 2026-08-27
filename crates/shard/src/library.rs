@@ -265,6 +265,26 @@ pub fn drop_folder(kind: Kind, name: &str) -> anyhow::Result<usize> {
     Ok(moved)
 }
 
+/// Delete a folder AND everything inside it (전체삭제) — the opposite of [`drop_folder`],
+/// which keeps the files. Each shelf has its own root directory, so a folder under the
+/// video (or music) root holds only that shelf's files; removing the directory is safe.
+pub fn delete_folder(kind: Kind, name: &str) -> anyhow::Result<usize> {
+    use anyhow::Context;
+    let clean = clean(name);
+    if clean.is_empty() {
+        anyhow::bail!("이름이 비어 있습니다");
+    }
+    let folder = kind.folder().join(&clean);
+    if !folder.is_dir() {
+        anyhow::bail!("{} 폴더가 없습니다", folder.display());
+    }
+    let gone = std::fs::read_dir(&folder)
+        .map(|d| d.filter_map(|e| e.ok()).filter(|e| e.path().is_file()).count())
+        .unwrap_or(0);
+    std::fs::remove_dir_all(&folder).with_context(|| format!("removing {}", folder.display()))?;
+    Ok(gone)
+}
+
 /// `name` inside `root`, with a number added if something is already there.
 fn free_name(root: &std::path::Path, name: &std::ffi::OsStr) -> std::path::PathBuf {
     let first = root.join(name);

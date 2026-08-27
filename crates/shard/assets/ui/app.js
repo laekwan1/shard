@@ -741,6 +741,11 @@ for (const button of menu.querySelectorAll("button")) {
       if (folder) send("library.dropFolder", { kind: shelf.kind, name: folder });
       return;
     }
+    if (button.dataset.do === "deleteFolderAll") {
+      // 전체삭제: the folder AND everything of this shelf inside it.
+      if (folder) send("library.deleteFolder", { kind: shelf.kind, name: folder });
+      return;
+    }
     if (!item) return;
     switch (button.dataset.do) {
       case "rename":
