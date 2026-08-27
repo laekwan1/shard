@@ -221,6 +221,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 configureForCurrentRoute()
             }
             try? session.setActive(true)
+            // The interruption stopped our AVAudioEngine; restart it or libVLC playback
+            // resumes to silence (the config-change note does not always fire for an
+            // interruption end).
+            if backend == .vlc, audioRouted { audioSink.start() }
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then

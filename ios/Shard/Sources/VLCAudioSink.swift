@@ -34,7 +34,10 @@ final class VLCAudioSink {
                                             // keep it minimal. Just enough to not underrun
                                             // on the first render before libVLC feeds ahead.
     private var primed = false
-    private var running = false
+    /// Whether playback WANTS the engine running — used to restart it after the OS stops
+    /// it on a route change. The engine's own `isRunning` is the truth for start/stop, so
+    /// our intent and the OS's state never drift apart (a stale flag left it silent).
+    private var wantRunning = false
     /// Silence the output at once (a user mute) without waiting for the buffered audio
     /// to drain — the ring is still consumed so unmuting resumes in sync.
     private var muted = false
@@ -50,7 +53,20 @@ final class VLCAudioSink {
         source = node
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: format)
+        // The OS stops/reconfigures the engine when the audio route changes (earbuds in
+        // or out) or an interruption ends — after which it stays STOPPED and playback
+        // goes silent. Restart it here when that happens, if playback still wants it.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.wantRunning else { return }
+            self.engine.stop()
+            try? self.engine.start()
+        }
     }
+
+    private var configObserver: NSObjectProtocol?
+    deinit { if let o = configObserver { NotificationCenter.default.removeObserver(o) } }
 
     // MARK: called from libVLC's audio thread
 
@@ -116,15 +132,13 @@ final class VLCAudioSink {
     // MARK: lifecycle (main thread)
 
     func start() {
-        guard !running else { return }
-        do { try engine.start(); running = true }
-        catch { running = false }
+        wantRunning = true
+        if !engine.isRunning { try? engine.start() }
     }
 
     func stop() {
-        guard running else { return }
-        engine.stop()
-        running = false
+        wantRunning = false
+        if engine.isRunning { engine.stop() }
         flush()
     }
 }
