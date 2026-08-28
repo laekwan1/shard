@@ -39,17 +39,14 @@ private let shardVideoFrame: ShardVideoFrameCb = { ctx, bgra, width, height, pit
 }
 
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    // Bluetooth crackle on every FRESH libVLC audio output (track change / seek /
-    // replay) while an Apple Watch adds jitter to the A2DP link: a continuously-running
-    // output stays clean, a re-primed one crackles as libVLC continuously micro-corrects
-    // its output clock. Two levers, both best-effort (ignored if a module is absent):
-    //   --no-audio-time-stretch : stop the pitch-preserving stretcher from continuously
-    //                             resampling to chase the jittery clock.
-    //   --audio-resampler=speex_resampler : a decent bundled resampler instead of the
-    //                             default "ugly" linear one (SoXR was ignored — likely
-    //                             not in this MobileVLCKit build).
-    let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
-                                          "--audio-resampler=speex_resampler"])
+    // Time-stretch is LEFT ON (no --no-audio-time-stretch) so a speed change keeps the pitch —
+    // 2× is faster, not chipmunked. It was disabled before to stop libVLC's own Bluetooth
+    // output from crackling as its clock chased the link; the audio now goes to our renderer
+    // (amem), not libVLC's BT output, so that reason is gone and pitch preservation is free.
+    //   --audio-resampler=speex_resampler : a decent bundled resampler to 48k instead of the
+    //                             default "ugly" linear one (SoXR was ignored — likely not in
+    //                             this MobileVLCKit build).
+    let player = VLCMediaPlayer(options: ["--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
 
     // Our AVAudioEngine output for libVLC's decoded audio — clean over Bluetooth,
@@ -175,7 +172,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             if videoRouted { synchronizer.addRenderer(videoSink.displayLayer) }
             // Video frames are stamped off the audio's real-time counter, so the two share
             // one clock (see VLCAudioSink / VLCVideoSink).
-            videoSink.ptsProvider = { [weak self] in self?.audioSink.currentPts ?? .zero }
+            videoSink.ptsProvider = { [weak self] mediaUs in
+                guard let self = self else { return .zero }
+                return self.audioSink.videoPts(mediaUs: mediaUs, rate: Double(self.rate))
+            }
             // The first decoded sample (render queue) starts the clock at its pts. The rate is
             // ALWAYS 1 here — speed is done by libVLC (player.rate), and the audio is stamped
             // real-time, so the synchronizer just plays it straight through.
@@ -522,8 +522,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // re-buffer; crackle-free playback over a contended radio is worth it. (New music
         // is AAC/.m4a → AVPlayer and never reaches libVLC at all.)
         media.addOption(":file-caching=800")
-        media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
-        media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
+        media.addOption(":audio-resampler=speex_resampler")  // decent resampler to 48k
         return media
     }
 

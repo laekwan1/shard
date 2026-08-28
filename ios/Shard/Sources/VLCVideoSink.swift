@@ -23,11 +23,10 @@ final class VLCVideoSink {
     private var poolWidth = 0
     private var poolHeight = 0
     private var lock = os_unfair_lock()
-    /// Where a frame's presentation time comes from: the audio's real-time counter (see
-    /// VLCAudioSink.currentPts). libVLC hands us audio and video in step, so the frame
-    /// arriving now belongs with the audio delivered now — stamping it off that one clock is
-    /// what keeps the two in sync at any playback rate, with the synchronizer at rate 1.
-    var ptsProvider: (() -> CMTime)?
+    /// Maps a frame's libVLC media time (µs) to its place on the audio's real-time timeline
+    /// (see VLCAudioSink.videoPts). Both share libVLC's media clock, so this puts the picture
+    /// exactly where its audio plays, at any rate, with the synchronizer at rate 1.
+    var ptsProvider: ((Int64) -> CMTime)?
     /// All AVSampleBufferDisplayLayer access (enqueue AND flush) runs here. The layer is
     /// NOT safe to touch from two threads, and a seek did exactly that — libVLC's video
     /// thread enqueuing while the main thread flushed — which crashed. Frames are copied
@@ -85,7 +84,7 @@ final class VLCVideoSink {
         guard CMVideoFormatDescriptionCreateForImageBuffer(
                 allocator: kCFAllocatorDefault, imageBuffer: buffer,
                 formatDescriptionOut: &fmt) == noErr, let fmt = fmt else { return }
-        let pts = ptsProvider?() ?? CMTime(value: timeMs, timescale: 1000)
+        let pts = ptsProvider?(timeMs * 1000) ?? CMTime(value: timeMs, timescale: 1000)
         var timing = CMSampleTimingInfo(
             duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?

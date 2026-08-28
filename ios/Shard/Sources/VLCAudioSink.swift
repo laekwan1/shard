@@ -15,7 +15,7 @@ import CoreMedia
 /// pts. That keeps the audio contiguous at any playback rate: libVLC does the speed-up and
 /// delivers rate-adjusted 48k audio at real time, so consecutive blocks abut, and the
 /// synchronizer runs at a constant rate 1. The video is stamped off the SAME counter (see
-/// `currentPts`), so a frame shows exactly when its audio is heard.
+/// `videoPts`), so a frame shows exactly when its audio is heard.
 final class VLCAudioSink {
     let renderer = AVSampleBufferAudioRenderer()
 
@@ -30,9 +30,19 @@ final class VLCAudioSink {
     private var pendingFrames = 0
     private static let maxPendingFrames = 48000 * 2   // ~2s cushion; drop oldest beyond it
 
-    /// Total frames handed in since the last flush — the real-time timeline both audio and
-    /// video are stamped against.
+    /// Total frames ever handed in — a MONOTONIC real-time timeline (never reset, not even on
+    /// a seek). Resetting it to 0 on every seek made the clock jump, which came out as a burst
+    /// of noise or a dropout; keeping it continuous means a seek just swaps the content under a
+    /// clock that keeps ticking.
     private var deliveredFrames = 0
+    /// The latest audio block's libVLC media pts (µs) paired with the real-time frame it
+    /// landed at — the map from libVLC's media clock to our real-time timeline. A video
+    /// frame's media time (get_time) is placed on the same timeline through this, so the
+    /// picture sits where its audio actually plays even though libVLC hands video slightly
+    /// ahead of the matching audio.
+    private var anchorMediaUs: Int64 = 0
+    private var anchorFrame = 0
+    private var haveAnchor = false
     /// Whether the next enqueued sample should (re)start the synchronizer's clock.
     private var needStart = true
     /// Called (on the render queue) with the first sample's pts after a start, so the
@@ -56,12 +66,17 @@ final class VLCAudioSink {
         }
     }
 
-    /// The media time (seconds, as CMTime) the video should stamp the frame arriving now:
-    /// the real-time position of the audio delivered so far. libVLC hands us audio and video
-    /// in step, so the frame arriving now belongs with the audio delivered now.
-    var currentPts: CMTime {
-        os_unfair_lock_lock(&lock); let f = deliveredFrames; os_unfair_lock_unlock(&lock)
-        return CMTime(value: Int64(f), timescale: 48000)
+    /// Where a video frame whose libVLC media time is `mediaUs` (from get_time) belongs on our
+    /// real-time timeline, at playback `rate`: the audio anchor gives media→real, and video
+    /// shares libVLC's media clock, so this places the picture exactly where its audio plays —
+    /// independent of how far ahead or behind libVLC happened to hand the frame.
+    func videoPts(mediaUs: Int64, rate: Double) -> CMTime {
+        os_unfair_lock_lock(&lock)
+        let aMedia = anchorMediaUs, aFrame = anchorFrame, have = haveAnchor
+        os_unfair_lock_unlock(&lock)
+        guard have else { return CMTime(value: Int64(aFrame), timescale: 48000) }
+        let deltaFrames = Double(mediaUs - aMedia) / 1_000_000.0 / max(rate, 0.01) * 48000.0
+        return CMTime(value: Int64(max(0, Double(aFrame) + deltaFrames)), timescale: 48000)
     }
 
     // MARK: called from libVLC's audio thread
@@ -87,6 +102,7 @@ final class VLCAudioSink {
         os_unfair_lock_lock(&lock)
         let startFrame = deliveredFrames
         deliveredFrames += n
+        if ptsUs > 0 { anchorMediaUs = ptsUs; anchorFrame = startFrame; haveAnchor = true }
         os_unfair_lock_unlock(&lock)
 
         var timing = CMSampleTimingInfo(
@@ -131,11 +147,12 @@ final class VLCAudioSink {
         }
     }
 
-    /// Drop everything (a seek/track change) and restart the real-time timeline so the next
-    /// sample re-starts the synchronizer at pts 0.
+    /// Drop the queued audio (a seek/track change) but KEEP the real-time counter running —
+    /// the next sample re-starts the synchronizer at the continuing time, so the clock never
+    /// jumps (which is what made a seek burst noise or fall silent).
     func flush() {
         os_unfair_lock_lock(&lock)
-        pending.removeAll(); pendingFrames = 0; deliveredFrames = 0; needStart = true
+        pending.removeAll(); pendingFrames = 0; needStart = true
         os_unfair_lock_unlock(&lock)
         let renderer = self.renderer
         renderQueue.async { renderer.flush() }
