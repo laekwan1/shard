@@ -554,6 +554,10 @@ button svg { display: block; }
 /* Marked to move: a plain, solid highlight the way a file list selects a row —
    no accent bar, just a clear fill so a picked set stands apart. */
 .file.selected, .file.selected:hover { background: var(--toolbar); }
+/* Clear the grey divider line around a selected row the same way hover does —
+   otherwise the 1px rule sitting at the row's top edge crossed the solid fill and
+   read as a grey band riding above the navy (the two "did not line up"). */
+.file.selected::before, .file.selected + .file::before { background: transparent; }
 /* Where the row being carried will land. */
 .file.above::after,
 .file.below::after {
