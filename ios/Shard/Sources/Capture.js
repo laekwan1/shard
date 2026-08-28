@@ -259,7 +259,29 @@
     return b;
   }
 
+  // Keep YouTube's seek bar visible while a video plays. YouTube adds `ytp-autohide` to
+  // the player to fade its bottom bar (the seek bar) during playback, so a video page in
+  // the browser looked like a bare picture cut straight into the list below — the bar only
+  // reappeared on pause. Overriding the fade keeps the seek bar under the video, the way
+  // the watch page reads on YouTube itself. CSS only (opacity), so it cannot break the
+  // player; if a future markup drops these classes it simply does nothing.
+  function keepYtControls() {
+    try {
+      if (location.hostname.indexOf("youtube.com") < 0) return;
+      if (document.getElementById("shard-yt-style")) return;
+      var head = document.head || document.documentElement;
+      if (!head) return;
+      var s = document.createElement("style");
+      s.id = "shard-yt-style";
+      s.textContent =
+        ".html5-video-player.ytp-autohide .ytp-chrome-bottom{opacity:1 !important;}" +
+        ".ytp-chrome-bottom{opacity:1 !important;}";
+      head.appendChild(s);
+    } catch (e) {}
+  }
+
   function syncButtons() {
+    keepYtControls();
     var vids = Array.prototype.slice.call(document.getElementsByTagName("video"));
     vids.forEach(function (v) {
       if (!buttons.some(function (x) { return x.video === v; })) {

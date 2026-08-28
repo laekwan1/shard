@@ -331,7 +331,28 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
                 document.documentElement.appendChild(b);
                 return b;
               }
+              // Keep YouTube's seek bar visible while playing — YouTube fades its bottom bar
+              // (class ytp-autohide) during playback, so a video page looked like a bare
+              // picture cut into the list below; the bar only returned on pause. CSS-only
+              // override (opacity), so it cannot break the player and no-ops if the markup
+              // changes.
+              function keepYtControls() {
+                try {
+                  if (location.hostname.indexOf('youtube.com') < 0) return;
+                  if (document.getElementById('shard-yt-style')) return;
+                  var head = document.head || document.documentElement;
+                  if (!head) return;
+                  var s = document.createElement('style');
+                  s.id = 'shard-yt-style';
+                  s.textContent =
+                    '.html5-video-player.ytp-autohide .ytp-chrome-bottom{opacity:1 !important;}' +
+                    '.ytp-chrome-bottom{opacity:1 !important;}';
+                  head.appendChild(s);
+                } catch (e) {}
+              }
+
               function syncDlButtons() {
+                keepYtControls();
                 var vids = document.getElementsByTagName('video');
                 for (var i = 0; i < vids.length; i++) {
                   var v = vids[i], has = false;
