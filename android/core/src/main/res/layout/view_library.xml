@@ -246,17 +246,18 @@
                 android:visibility="gone"
                 android:contentDescription="@string/library_back" />
 
-            <!-- Close, on the picture's top-right corner where a video is dismissed. Rides in
-                 and out with the rest of the controls (windowed and full screen alike). -->
+            <!-- Close, on the picture's top-right corner where a video is dismissed. Like
+                 iOS: a plain white ✕, no backdrop chip — the borderless ripple is the only
+                 press feedback. Rides in and out with the rest of the controls. -->
             <ImageButton
                 android:id="@+id/stageClose"
                 android:layout_width="42dp"
                 android:layout_height="42dp"
                 android:layout_gravity="top|end"
                 android:layout_margin="6dp"
-                android:background="@drawable/pull_backdrop"
-                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:background="?attr/selectableItemBackgroundBorderless"
                 android:src="@drawable/ic_close"
+                android:tint="#FFFFFF"
                 android:scaleType="fitCenter"
                 android:padding="10dp"
                 android:visibility="gone"

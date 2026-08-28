@@ -118,6 +118,15 @@ const addressRow = document.getElementById("address");
 const urlBox = document.getElementById("url");
 let browsing = false;
 
+// Grey the back/forward arrows when the front tab has nowhere to go. A disabled button
+// takes no clicks, so a dead arrow no longer looks pressable.
+function paintNav(message) {
+  const back = document.querySelector('[data-steer="back"]');
+  const forward = document.querySelector('[data-steer="forward"]');
+  if (back) back.disabled = !message.back;
+  if (forward) forward.disabled = !message.forward;
+}
+
 function paintTabs(message) {
   const list = message.list || [];
   const at = message.at;
@@ -1684,6 +1693,9 @@ window.__shard = {
         break;
       case "tabs":
         paintTabs(message);
+        break;
+      case "nav":
+        paintNav(message);
         break;
       case "settings":
         paintSettings(message);

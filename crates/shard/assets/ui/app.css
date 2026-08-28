@@ -240,6 +240,10 @@ button svg { display: block; }
 }
 #address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: var(--r-sm); color: var(--muted); font-size: 16px; }
 #address button:hover { color: var(--on-surface); background: #ffffff0f; }
+/* Nowhere to go: the arrow is dimmed and takes no hover/press, so it reads as unavailable
+   rather than a live button that does nothing. */
+#address button:disabled { opacity: .28; }
+#address button:disabled:hover { color: var(--muted); background: none; }
 #url {
   flex: 1;
   height: 30px;

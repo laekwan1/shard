@@ -1602,7 +1602,9 @@ impl Shell {
                 // taking it as the front tab's was the other half of the label
                 // flickering between sites. Each page reports its own address
                 // and names itself when it does.
-                crate::download::browser::Event::Navigated(_) => {}
+                // Re-push the front tab's back/forward availability so the arrows grey out
+                // with nowhere to go. (The URL bar is still each page's own business.)
+                crate::download::browser::Event::Navigated(_) => self.say_nav(),
                 crate::download::browser::Event::Offer(payload) => self.from_page(&payload),
                 crate::download::browser::Event::Closed => {}
             }
@@ -1754,6 +1756,7 @@ impl Shell {
             }
         }
         self.say_tabs();
+        self.say_nav();   // the arrows belong to the tab now in front
     }
 
     pub fn close_tab(&self, at: usize) {
@@ -1804,6 +1807,30 @@ impl Shell {
                 None => "null".to_string(),
             }
         ));
+    }
+
+    /// Push whether the FRONT tab can step back or forward, so the toolbar can grey the
+    /// arrows out when there is nowhere to go — they looked pressable with no history to
+    /// walk. Re-queried on every navigation and tab switch; asking the front tab each time
+    /// is correct even when a background tab is what navigated (its answer is unchanged).
+    pub fn say_nav(&self) {
+        use wry::WebViewExtWindows;
+        let view = self
+            .showing
+            .get()
+            .and_then(|at| self.tabs.borrow().get(at).map(|t| t.view.clone()));
+        let (mut back, mut forward) = (false, false);
+        if let Some(view) = view {
+            let (mut b, mut f) = (windows::core::BOOL(0), windows::core::BOOL(0));
+            unsafe {
+                let wv = view.webview();
+                let _ = wv.CanGoBack(&mut b);
+                let _ = wv.CanGoForward(&mut f);
+            }
+            back = b.as_bool();
+            forward = f.as_bool();
+        }
+        self.tell(&format!(r#"{{"t":"nav","back":{back},"forward":{forward}}}"#));
     }
 
     /// Do something to the tab in front: go somewhere, or step through history.

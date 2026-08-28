@@ -32,22 +32,17 @@
     android:background="?attr/selectableItemBackground"
     android:descendantFocusability="blocksDescendants"
     android:paddingHorizontal="12dp"
-    android:paddingVertical="0.5dp">
+    android:paddingVertical="0dp">
 
-    <!-- Starts at the frame's right edge — 80dp, no gap — so it reads as the
-         frame's own bottom line carrying on across the row.
-
-         The bottom margin is not decoration, it is arithmetic: the row's
-         height comes from the 48dp menu button, not the 45dp frame, and the
-         frame sits centred in that — (48 − 45) / 2 above the row's floor. A
-         line on the floor itself ran 1.5dp below the picture it claims to
-         continue. If either height changes, this number changes with it. -->
+    <!-- Starts at the frame's right edge (78dp) so it reads as the frame's own bottom line
+         carrying on across the row. The frame is as tall as the row (both 44dp), so its
+         bottom edge IS the row floor where this line sits — no margin arithmetic needed. -->
     <View
         android:id="@+id/rowLine"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_gravity="bottom"
-        android:layout_marginStart="85dp"
+        android:layout_marginStart="78dp"
         android:background="@color/state_hover" />
 
     <LinearLayout
@@ -56,13 +51,13 @@
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
-    <!-- 85 by 48: the frame is as TALL as the row (the 48dp menu button sets the row
-         height), so the thumbnail's bottom edge sits exactly on the row's floor where the
-         divider is — the line then reads as the picture's own bottom carrying on across the
-         row, with no gap to misalign. 85 keeps it ~16:9 at that height. -->
+    <!-- 78 by 44: as tall as the row (the 44dp menu button sets the height), so the
+         thumbnail fills the row's height and its bottom sits on the row floor where the
+         divider is. Rows are packed tight (no vertical padding) so more of the library is on
+         screen. 78 keeps it ~16:9 at 44 tall. -->
     <FrameLayout
-        android:layout_width="85dp"
-        android:layout_height="48dp"
+        android:layout_width="78dp"
+        android:layout_height="44dp"
         android:layout_marginEnd="12dp">
 
         <com.google.android.material.imageview.ShapeableImageView
@@ -130,8 +125,8 @@
         android:id="@+id/more"
         android:focusable="false"
         android:focusableInTouchMode="false"
-        android:layout_width="@dimen/target"
-        android:layout_height="@dimen/target"
+        android:layout_width="44dp"
+        android:layout_height="44dp"
         android:layout_marginStart="2dp"
         android:background="@drawable/press_soft"
         android:src="@drawable/ic_more"
