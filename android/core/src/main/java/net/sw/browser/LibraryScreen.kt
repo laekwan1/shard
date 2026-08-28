@@ -83,6 +83,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val vbTotal: TextView = root.findViewById(R.id.vbTotal)
     private val stageTitle: TextView = root.findViewById(R.id.stageTitle)
     private val vbMute: ImageButton = root.findViewById(R.id.vbMute)
+    private val vbStop: ImageButton = root.findViewById(R.id.vbStop)
     private val vbRate: TextView = root.findViewById(R.id.vbRate)
     private val folderSettings: ImageButton = root.findViewById(R.id.folderSettings)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
@@ -277,12 +278,12 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             // from before songs carried their own.
             var bmp = if (music) embeddedArt(item) else null
             if (bmp == null && music) bmp = Covers.load(activity, Covers.keyFor(item.name))
+            // A real frame at the video's OWN aspect, so a 9:16 short comes back tall instead
+            // of cropped to 16:9. loadThumbnail returns the requested (landscape) shape, which
+            // is what made shorts look wide.
+            if (bmp == null && !music) bmp = videoFrame(item)
             if (bmp == null) {
                 bmp = runCatching {
-                    // Asked for in the shape it will be drawn in. A square
-                    // request makes the store hand back a square, and cropping
-                    // that to 16:9 throws away the part of the frame that was
-                    // paid for.
                     activity.contentResolver.loadThumbnail(
                         item.uri, android.util.Size(320, 180), null
                     )
@@ -374,6 +375,23 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         }
     }.getOrNull()
 
+    /** A frame from the video at its OWN aspect. getScaledFrameAtTime fits within the box
+     *  keeping the ratio, so a vertical short returns tall — shown CENTER_INSIDE it reads as a
+     *  short, not a middle slice cropped to landscape. A few seconds in, past the opening black. */
+    private fun videoFrame(item: Library.Item): android.graphics.Bitmap? = runCatching {
+        val reader = android.media.MediaMetadataRetriever()
+        try {
+            reader.setDataSource(activity, item.uri)
+            val durUs = (reader.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L) * 1000
+            val at = if (durUs > 6_000_000) minOf(3_000_000L, durUs / 3) else 0L
+            reader.getScaledFrameAtTime(
+                at, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 320)
+        } finally {
+            runCatching { reader.release() }
+        }
+    }.getOrNull()
+
     /** The tile before a thumbnail lands: a type mark centred on the well. */
     private fun showTilePlaceholder(
         art: com.google.android.material.imageview.ShapeableImageView,
@@ -396,7 +414,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     ) {
         art.imageTintList = null
         art.setPadding(0, 0, 0, 0)
-        art.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        // Video: CENTER_INSIDE keeps the frame's aspect (a short stays tall). Music: album art
+        // is square, so CENTER_CROP fills the frame rather than sitting in side bars.
+        art.scaleType = if (music) android.widget.ImageView.ScaleType.CENTER_CROP
+                        else android.widget.ImageView.ScaleType.CENTER_INSIDE
         art.setImageBitmap(bmp)
         badge?.visibility = if (music) View.GONE else View.VISIBLE
     }
@@ -907,6 +928,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         tabMusic.setOnClickListener { selectTab(Library.Kind.MUSIC) }
         npToggle.setOnClickListener { togglePlayPause() }
         npStop.setOnClickListener { stopPlaying() }
+        vbStop.setOnClickListener { stopPlaying() }
         npSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
                 if (!fromUser || !prepared) return

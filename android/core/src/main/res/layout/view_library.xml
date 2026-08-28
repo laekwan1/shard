@@ -404,6 +404,18 @@
                         android:scaleType="fitCenter"
                         android:padding="14dp"
                         android:contentDescription="@string/library_expand" />
+
+                    <!-- Close the player, the same as the music bar's — a video listened to
+                         like music is dismissed like music. -->
+                    <ImageButton
+                        android:id="@+id/vbStop"
+                        android:layout_width="@dimen/target"
+                        android:layout_height="@dimen/target"
+                        android:background="@drawable/press_square"
+                        android:src="@drawable/ic_close"
+                        android:scaleType="fitCenter"
+                        android:padding="14dp"
+                        android:contentDescription="@string/close" />
                 </LinearLayout>
             </LinearLayout>
 
