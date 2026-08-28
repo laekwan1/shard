@@ -302,30 +302,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.media = makeMedia(url)
         player.play()
         player.rate = rate
-        // Fade the volume up over the first ~75ms instead of muting until the first frame.
-        // Muting hid libVLC's "텁" output pop but ALSO ate the start of the sound (the
-        // "앞부분 씹힘"); a fade keeps every sample — it just starts quiet, so the pop, which
-        // is loudest at t=0, is inaudible while the audio itself is not clipped.
-        fadeInVLC()
+        // No start mute/fade. The "텁" pop is a HARDWARE click made when the player attaches
+        // its audio stream to the mixer — software volume/fade cannot hide it (see 결함-기록),
+        // and a fade only quietens the real start of the sound (the "앞부분 씹힘"). So we let
+        // the sound play whole from sample 0 and accept the pop, which is the price of the
+        // native path the user chose for perfect A/V sync.
         scheduleWatchdog(url)
     }
 
-    /// Ramp libVLC's volume 0 → target over ~75ms so the opening pop is covered without
-    /// clipping the sound. Cheap timed steps; bails if the backend changed underfoot.
-    private func fadeInVLC() {
-        let target = targetVolume
-        player.audio?.volume = 0
-        let steps = 5
-        for i in 1...steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.015) { [weak self] in
-                guard let self = self, self.backend == .vlc else { return }
-                self.player.audio?.volume = Int32(Double(target) * Double(i) / Double(steps))
-            }
-        }
-    }
-
     /// Mute briefly through a seek — libVLC's decoder discontinuity comes out as a click/burst
-    /// otherwise. Restores the user's actual mute state after the jump settles.
+    /// otherwise. Kept short so the sound is not silent long enough to feel like lag; restores
+    /// the user's actual mute state after.
     private var seekMuteWork: DispatchWorkItem?
     private func muteThroughSeek() {
         player.audio?.isMuted = true
@@ -335,7 +322,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             self.player.audio?.isMuted = self.muted
         }
         seekMuteWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     // MARK: AVPlayer backend

@@ -1602,9 +1602,12 @@ impl Shell {
                 // taking it as the front tab's was the other half of the label
                 // flickering between sites. Each page reports its own address
                 // and names itself when it does.
-                // Re-push the front tab's back/forward availability so the arrows grey out
-                // with nowhere to go. (The URL bar is still each page's own business.)
-                crate::download::browser::Event::Navigated(_) => self.say_nav(),
+                // The URL bar is each page's own business; nothing to do on a plain navigate.
+                crate::download::browser::Event::Navigated(_) => {}
+                // The back/forward list changed (navigation, shorts pushState, or a
+                // GoBack/GoForward) — re-check the front tab's arrows so they grey out with
+                // nowhere to go and light up once there is somewhere.
+                crate::download::browser::Event::HistoryChanged => self.say_nav(),
                 crate::download::browser::Event::Offer(payload) => self.from_page(&payload),
                 crate::download::browser::Event::Closed => {}
             }

@@ -352,6 +352,10 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
               }
 
               function syncDlButtons() {
+                // Skip the per-video DOM work while the page is hidden (backgrounded, or the
+                // library/player over it) — this 400ms timer otherwise woke the CPU forever on
+                // every page, which shows up as battery. Resumes when the page is shown again.
+                if (document.hidden) return;
                 keepYtControls();
                 var vids = document.getElementsByTagName('video');
                 for (var i = 0; i < vids.length; i++) {

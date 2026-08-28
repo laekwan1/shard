@@ -32,6 +32,10 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 pub enum Event {
     /// A page finished loading, or navigated within itself.
     Navigated(String),
+    /// The back/forward list changed — real navigation, SPA pushState, or a GoBack/GoForward.
+    /// This is what the toolbar arrows key off, since the navigation handler misses the last
+    /// two.
+    HistoryChanged,
     /// The page answered a request for what it can offer.
     Offer(String),
     /// The window was closed.
@@ -129,9 +133,10 @@ pub(crate) const PAGE_HOOKS: &str = r#"
   // The page is no longer asked to dismiss anything: the address is a row of
   // the window rather than something resting on the page, so a click here means
   // only what it means to the page.
-  function title() { say({ frame: 'title', text: document.title || location.host }); }
+  function title() { if (document.hidden) return; say({ frame: 'title', text: document.title || location.host }); }
   // The page's own background, so the tab above it can be the same colour.
   function colour() {
+    if (document.hidden) return;   // hidden tab: skip the layout read (battery)
     try {
       var seen = '';
       var nodes = [document.body, document.documentElement];
@@ -161,6 +166,7 @@ pub(crate) const PAGE_HOOKS: &str = r#"
   // in front. A page can only ever report its own.
   var told = '';
   function here() {
+    if (document.hidden) return;
     if (location.href === told) return;
     told = location.href;
     say({ frame: 'url', text: told });
@@ -504,7 +510,7 @@ pub(crate) fn new_view(
     // The tab's id, ahead of everything else, so the hooks below it can name
     // themselves in every message they send.
     let startup = format!("window.__shardTab = {id};\n{startup}");
-    wry::WebViewBuilder::new()
+    let view = wry::WebViewBuilder::new()
         .with_url(url)
         .with_initialization_script(&startup)
         .with_ipc_handler(move |request| {
@@ -521,7 +527,26 @@ pub(crate) fn new_view(
         // DevTools on so the site view can be inspected too (F12 / Inspect).
         .with_devtools(true)
         .build_as_child(&host)
-        .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))
+        .map_err(|e| anyhow!("WebView2를 시작하지 못했습니다: {e}"))?;
+
+    // WebView2's HistoryChanged fires on EVERY change to the back/forward list — a real
+    // navigation, an SPA pushState (YouTube shorts stepping through videos), and our own
+    // GoBack/GoForward — which is exactly when the toolbar arrows must be re-checked. The
+    // navigation handler above catches none of the last two, so relying on it left the arrows
+    // stale (back never lit on shorts; forward never lit after going back).
+    {
+        use wry::WebViewExtWindows;
+        let hist = events.clone();
+        let handler = webview2_com::HistoryChangedEventHandler::create(Box::new(move |_, _| {
+            let _ = hist.send(Event::HistoryChanged);
+            Ok(())
+        }));
+        let mut token = 0i64;
+        if let Err(e) = unsafe { view.webview().add_HistoryChanged(&handler, &mut token) } {
+            tracing::warn!("could not watch history for back/forward state: {e}");
+        }
+    }
+    Ok(view)
 }
 
 /// The next unused tab id.

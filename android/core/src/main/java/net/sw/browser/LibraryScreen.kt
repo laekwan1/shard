@@ -414,10 +414,13 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     ) {
         art.imageTintList = null
         art.setPadding(0, 0, 0, 0)
-        // Video: CENTER_INSIDE keeps the frame's aspect (a short stays tall). Music: album art
-        // is square, so CENTER_CROP fills the frame rather than sitting in side bars.
+        // Video: FIT_CENTER keeps aspect (a short stays tall) AND scales to the frame — unlike
+        // CENTER_INSIDE, which leaves a small thumbnail small, so frames of different source
+        // resolutions showed at different sizes. Now every video thumbnail fills the frame's
+        // height consistently. Music: album art is square, CENTER_CROP fills rather than
+        // sitting in side bars.
         art.scaleType = if (music) android.widget.ImageView.ScaleType.CENTER_CROP
-                        else android.widget.ImageView.ScaleType.CENTER_INSIDE
+                        else android.widget.ImageView.ScaleType.FIT_CENTER
         art.setImageBitmap(bmp)
         badge?.visibility = if (music) View.GONE else View.VISIBLE
     }
