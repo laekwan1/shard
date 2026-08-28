@@ -22,16 +22,26 @@ final class VLCAudioSink {
     private var filled = 0                 // valid floats in the ring
     private var lock = os_unfair_lock()
 
+    // Media time (seconds) of the ring's WRITE head — libVLC hands each audio block a
+    // presentation pts, and this tracks the timeline just past the last sample written.
+    // The READ head (what is about to be output) is this minus the samples still queued,
+    // so the position AUDIBLE now is readHead − output latency. The VP9 video renderer
+    // clocks its frames off exactly this, so picture lands with the sound at the same
+    // media time regardless of how deep the buffer is (that is what makes A/V sync
+    // automatic instead of a hand-tuned offset). See VLCVideoSink.
+    private var writePtsSec: Double = 0
+
     /// Output silence until this many frames are buffered, JUST enough to avoid an
     /// underrun on the very first render pulls. Kept small (~20ms): AVAudioEngine does
     /// its own buffering, and libVLC decodes ahead of realtime, so the ring fills on its
     /// own for steady-state jitter. A big cushion here only delayed the audio start,
     /// desyncing it behind the (immediately-shown) video. Reset by a flush (a seek).
-    // The buffer B must equal the video's software-decode render lag R for A/V sync —
-    // libVLC cannot be told our output latency (amem has no time-get), so it assumes the
-    // audio plays immediately and matches video to that. At 10ms the sound led the video
-    // (B < R), so R is larger; set ~35ms and err toward audio a touch LATE (tolerable)
-    // rather than early (jarring). See the sync note in the commit / 결함-기록.
+    // With the VP9 video renderer (VLCVideoSink) the picture is clocked off THIS sink's
+    // audible position, so sync no longer depends on this value — it is purely an underrun
+    // cushion. Kept small (~35ms) so playback starts promptly; the 800ms input cache and
+    // libVLC's decode-ahead keep the ring full after that. (Only the fallback path, where
+    // the video handle could not be reached and libVLC draws on its own clock, still leans
+    // on this doubling as the A/V offset — 35ms errs toward audio a touch late there.)
     private let primeFrames = 1680          // ~35ms
     private var primed = false
     /// Whether playback WANTS the engine running — used to restart it after the OS stops
@@ -75,7 +85,9 @@ final class VLCAudioSink {
 
     /// Buffer `frames` of S16 interleaved stereo. Converts to Float and appends; if the
     /// ring is full the oldest audio is dropped (better a tiny skip than growing lag).
-    func push(_ samples: UnsafePointer<Int16>, frames: UInt32) {
+    /// `ptsUs` is libVLC's presentation time (µs) of the first sample in this block —
+    /// used to keep the media clock the video renderer reads.
+    func push(_ samples: UnsafePointer<Int16>, frames: UInt32, ptsUs: Int64) {
         let count = Int(frames) * 2              // interleaved floats
         os_unfair_lock_lock(&lock)
         let cap = ring.count
@@ -89,6 +101,10 @@ final class VLCAudioSink {
             }
         }
         if !primed && filled >= primeFrames * 2 { primed = true }
+        // The write head now sits just past this block: its pts plus the block's length.
+        // Taken from the block's own pts each time (not accumulated), so a seek that jumps
+        // the pts is followed exactly and drift never builds up.
+        if ptsUs > 0 { writePtsSec = Double(ptsUs) / 1_000_000.0 + Double(frames) / 48000.0 }
         os_unfair_lock_unlock(&lock)
     }
 
@@ -102,8 +118,24 @@ final class VLCAudioSink {
     /// Drop everything buffered (a seek/flush) and re-arm the prime cushion.
     func flush() {
         os_unfair_lock_lock(&lock)
-        readIndex = 0; writeIndex = 0; filled = 0; primed = false
+        readIndex = 0; writeIndex = 0; filled = 0; primed = false; writePtsSec = 0
         os_unfair_lock_unlock(&lock)
+    }
+
+    /// The media time (seconds) AUDIBLE right now: the read head (write head minus the
+    /// samples still queued) shifted back by the output latency (the sound already handed
+    /// to the OS but not yet at the speaker). The video renderer sets its display clock to
+    /// this so each frame appears exactly when its audio is heard. Returns nil until the
+    /// cushion has primed and there is a real pts to report.
+    var currentMediaTime: Double? {
+        os_unfair_lock_lock(&lock)
+        let ok = primed && writePtsSec > 0
+        let readHead = writePtsSec - Double(filled / 2) / 48000.0
+        os_unfair_lock_unlock(&lock)
+        guard ok else { return nil }
+        let session = AVAudioSession.sharedInstance()
+        let latency = session.outputLatency + session.ioBufferDuration
+        return max(0, readHead - latency)
     }
 
     // MARK: called from the audio render thread

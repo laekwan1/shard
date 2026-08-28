@@ -20,11 +20,30 @@ final class PlayerUI: ObservableObject {
 // libVLC's audio thread and just hand PCM to (or flush) the sink.
 // The bridge header marks these pointers nonnull, so Swift imports them non-optional.
 private let shardAudioSetup: ShardAudioSetupCb = { _, _, _ in }
-private let shardAudioPlay: ShardAudioPlayCb = { ctx, samples, count, _ in
-    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().push(samples, frames: count)
+private let shardAudioPlay: ShardAudioPlayCb = { ctx, samples, count, pts in
+    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().push(samples, frames: count, ptsUs: pts)
 }
 private let shardAudioFlush: ShardAudioFlushCb = { ctx in
     Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().flush()
+}
+
+// libVLC's C video callbacks (see VLCVideoBridge). Same @convention(c) no-capture rule as
+// the audio ones; the sink is reached through `ctx`. Run on libVLC's video thread.
+private let shardVideoFormat: ShardVideoFormatCb = { ctx, width, height, pitch in
+    Unmanaged<VLCVideoSink>.fromOpaque(ctx).takeUnretainedValue()
+        .format(width: Int(width), height: Int(height), pitch: Int(pitch))
+}
+private let shardVideoFrame: ShardVideoFrameCb = { ctx, bgra, width, height, pitch, timeMs in
+    Unmanaged<VLCVideoSink>.fromOpaque(ctx).takeUnretainedValue()
+        .frame(bgra: bgra, width: Int(width), height: Int(height), pitch: Int(pitch), timeMs: timeMs)
+}
+
+/// Weak hop for the video clock's CADisplayLink (see startClockLink) — keeps the link from
+/// pinning the controller alive.
+private final class DisplayLinkProxy {
+    weak var controller: VLCController?
+    init(_ c: VLCController) { controller = c }
+    @objc func tick() { controller?.stepClock() }
 }
 
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
@@ -46,6 +65,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // could not be reached (then libVLC keeps its own output, the old behaviour).
     private let audioSink = VLCAudioSink()
     private var audioRouted = false
+
+    // Our own presentation of libVLC's VP9 frames, clocked off the audio above so picture
+    // and sound land together with no hand-tuned offset (see VLCVideoSink). `videoRouted`
+    // is false if the private handle could not be reached — then libVLC draws to its view
+    // as before. A CADisplayLink feeds the audio's audible position to the video clock.
+    let videoSink = VLCVideoSink()
+    private(set) var videoRouted = false
+    private var clockLink: CADisplayLink?
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
     // which — unlike libVLC — starts without the hardware "텁" pop; libVLC for
@@ -137,6 +164,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Once, here, before any media — the callbacks apply to every stream after.
         audioRouted = ShardRouteVLCAudio(player, Unmanaged.passUnretained(audioSink).toOpaque(),
                                          shardAudioSetup, shardAudioPlay, shardAudioFlush)
+        // Route VP9 video into our own presenter, clocked off the audio. Only meaningful if
+        // the audio is also ours (the video clock reads the audio sink); if either handle
+        // is unreachable, libVLC keeps drawing to its view and the audio prime stands in for
+        // sync (the old path).
+        if audioRouted {
+            videoRouted = ShardRouteVLCVideo(player, Unmanaged.passUnretained(videoSink).toOpaque(),
+                                             shardVideoFormat, shardVideoFrame)
+        }
         let session = AVAudioSession.sharedInstance()
         // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
@@ -253,6 +288,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.stop()
         teardownAV()
         audioSink.stop()
+        stopClockLink()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -297,8 +333,33 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func attach(to view: UIView) {
         // Only when it actually changed — re-pointing the drawable on every
-        // SwiftUI update flickered the picture to black.
+        // SwiftUI update flickered the picture to black. When video is routed to our
+        // presenter libVLC ignores the drawable, but setting it is harmless.
         if (player.drawable as? UIView) !== view { player.drawable = view }
+    }
+
+    // MARK: video clock (VP9 pts renderer)
+
+    /// Feed the audio's audible position to the video timebase every screen refresh, so the
+    /// picture tracks the sound. While the audio is still priming there is no valid clock,
+    /// so the picture holds rather than racing ahead.
+    fileprivate func stepClock() {
+        if let t = audioSink.currentMediaTime { videoSink.setClock(t) }
+        else { videoSink.pauseClock() }
+    }
+    private func startClockLink() {
+        guard videoRouted, clockLink == nil else { return }
+        // A weak proxy target: CADisplayLink RETAINS its target, so pointing it straight at
+        // self would keep the controller (and its player) alive forever — deinit could never
+        // run to invalidate the link. The proxy holds the controller weakly instead.
+        let link = CADisplayLink(target: DisplayLinkProxy(self),
+                                 selector: #selector(DisplayLinkProxy.tick))
+        link.add(to: .main, forMode: .common)
+        clockLink = link
+    }
+    private func stopClockLink() {
+        clockLink?.invalidate(); clockLink = nil
+        videoSink.pauseClock()
     }
 
     func open(_ url: URL) {
@@ -320,6 +381,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             backend = .av
             player.stop()                 // make sure libVLC is not also sounding
             audioSink.stop()              // AV uses AVPlayer, not our engine
+            stopClockLink()               // AVPlayer syncs itself; no video clock to run
             openAV(url)
             return
         }
@@ -327,6 +389,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
         if audioRouted { audioSink.start() }   // our engine now carries libVLC's audio
+        // Our VP9 presenter: drop the previous stream's frames and (re)start the clock that
+        // ties the picture to the audio. Harmless for libVLC music (no video frames arrive).
+        if videoRouted { videoSink.flush(); startClockLink() }
         // MUTE (not just volume-0) across the transition to hide the "텁" pop libVLC's
         // OWN output makes on the first buffer — but ONLY when libVLC drives the output.
         // Through our AVAudioEngine there is no such pop, and muting instead fed silence
@@ -505,6 +570,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
             // "finished" and snaps back — cap just short so the far end is reachable.
             player.position = clamped
+            if videoRouted { videoSink.flush() }   // drop frames from the old spot
         }
     }
 
@@ -545,7 +611,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
     func seek(to p: Float) {
-        if backend == .av { avSeekFraction(max(0, min(1, p))) } else { player.position = max(0, min(1, p)) }
+        if backend == .av { avSeekFraction(max(0, min(1, p))) }
+        else { player.position = max(0, min(1, p)); if videoRouted { videoSink.flush() } }
     }
     func jump(_ seconds: Int32) {
         if backend == .av {
@@ -553,6 +620,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             av.seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
         } else {
             seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds)
+            if videoRouted { videoSink.flush() }
         }
     }
     func rewindStep() { backend == .av ? jump(-1) : player.jumpBackward(1) }
@@ -588,6 +656,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         player.stop()
         teardownAV()
         audioSink.stop()
+        stopClockLink()
+        videoSink.flush()
         currentURL = nil
         // Release the audio session so other devices/apps can take the Bluetooth route
         // back — holding it active kept the earbuds bound to us, which is why the Watch
@@ -662,29 +732,46 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 /// The drawing surface libVLC renders into. It attaches the player once it has a
 /// real size — attaching at make-time (a zero-size view) left the picture black.
 final class PlayerHostView: UIView {
-    weak var controller: VLCController?
+    weak var controller: VLCController? { didSet { hookVideoSink() } }
     private var attached = false
     /// AVPlayer draws into this sublayer; when nil/hidden, libVLC draws into the
     /// view itself. The two never play at once.
     private let avLayer = AVPlayerLayer()
+    /// Our VP9 presenter draws here (when video is routed), instead of libVLC drawing to
+    /// the view. Its timebase is driven from the audio clock so frames land with the sound.
+    private let sampleLayer = AVSampleBufferDisplayLayer()
+    private var videoSinkHooked = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         avLayer.videoGravity = .resizeAspect
         avLayer.isHidden = true
+        sampleLayer.videoGravity = .resizeAspect
+        sampleLayer.isHidden = true
+        layer.addSublayer(sampleLayer)
         layer.addSublayer(avLayer)
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Show (or hide) the AVPlayer picture on top of the libVLC surface.
+    private func hookVideoSink() {
+        guard !videoSinkHooked, let c = controller, c.videoRouted else { return }
+        videoSinkHooked = true
+        c.videoSink.attach(to: sampleLayer)   // builds the timebase and hangs it on the layer
+    }
+
+    /// Show (or hide) the AVPlayer picture. When it is hidden AND video is routed, the VP9
+    /// presenter's layer takes the surface; otherwise libVLC draws into the view itself.
     func showAV(_ player: AVPlayer?) {
         avLayer.player = player
         avLayer.isHidden = (player == nil)
+        // VLC path (player == nil): reveal our presenter if video is routed.
+        sampleLayer.isHidden = !(player == nil && (controller?.videoRouted ?? false))
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         avLayer.frame = bounds
+        sampleLayer.frame = bounds
         if !attached, bounds.width > 1, bounds.height > 1 {
             controller?.attach(to: self)
             attached = true
