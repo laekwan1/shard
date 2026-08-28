@@ -292,16 +292,9 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
                 return words;
               }
 
-              var lastFire = 0;
-              function fire(x, y) {
-                // A touch long-press makes the WebView fire both our touchstart
-                // timer and a contextmenu event, so fire() was called twice and
-                // two quality dialogs stacked. Swallow a second call within a
-                // second of the first.
-                var now = Date.now();
-                if (now - lastFire < 1000) return;
-                lastFire = now;
-                var v = videoAt(x, y);
+              // Report ONE video through the bridge — the shared body of the long-press and
+              // the per-video download button below.
+              function reportVideo(v) {
                 if (!v) return;
                 var title = titleFor(v);
                 ${BRIDGE}.onVideoLongPress(JSON.stringify({
@@ -314,6 +307,63 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
                   title: title,
                   declared: declaredMedia()
                 }));
+              }
+
+              // A download button over each video's top-right — the same affordance PC and
+              // iOS give, so a video is saved without discovering the long-press. Buttons are
+              // position:fixed and synced to each video's rectangle; a tap reports THAT video
+              // through the bridge and the native quality sheet takes over.
+              var dlButtons = [];   // {video, el}
+              function makeDlButton() {
+                var b = document.createElement('div');
+                b.setAttribute('data-shard', 'dl');
+                b.style.cssText =
+                  'position:fixed;width:26px;height:26px;z-index:2147483646;display:none;' +
+                  'align-items:center;justify-content:center;cursor:pointer;' +
+                  'color:rgba(255,255,255,0.92);font:600 15px system-ui;' +
+                  'border:1.5px solid rgba(255,255,255,0.7);border-radius:7px;' +
+                  'background:rgba(0,0,0,0.35);';
+                b.textContent = '↓';
+                b.addEventListener('click', function (e) {
+                  e.preventDefault(); e.stopPropagation();
+                  reportVideo(b.__video);
+                });
+                document.documentElement.appendChild(b);
+                return b;
+              }
+              function syncDlButtons() {
+                var vids = document.getElementsByTagName('video');
+                for (var i = 0; i < vids.length; i++) {
+                  var v = vids[i], has = false;
+                  for (var j = 0; j < dlButtons.length; j++) { if (dlButtons[j].video === v) { has = true; break; } }
+                  if (!has) { var el = makeDlButton(); el.__video = v; dlButtons.push({ video: v, el: el }); }
+                }
+                for (var k = 0; k < dlButtons.length; k++) {
+                  var x = dlButtons[k];
+                  if (!x.video.isConnected) { x.el.style.display = 'none'; continue; }
+                  var r = x.video.getBoundingClientRect();
+                  var visible = r.width > 60 && r.height > 60 && r.bottom > 0 && r.top < innerHeight;
+                  x.el.style.display = visible ? 'flex' : 'none';
+                  if (visible) {
+                    x.el.style.left = Math.min(innerWidth - 32, r.right - 32) + 'px';
+                    x.el.style.top = Math.max(6, r.top + 6) + 'px';
+                  }
+                }
+              }
+              setInterval(syncDlButtons, 400);
+              window.addEventListener('scroll', syncDlButtons, true);
+              window.addEventListener('resize', syncDlButtons, true);
+
+              var lastFire = 0;
+              function fire(x, y) {
+                // A touch long-press makes the WebView fire both our touchstart
+                // timer and a contextmenu event, so fire() was called twice and
+                // two quality dialogs stacked. Swallow a second call within a
+                // second of the first.
+                var now = Date.now();
+                if (now - lastFire < 1000) return;
+                lastFire = now;
+                reportVideo(videoAt(x, y));
               }
 
               function cancel() {

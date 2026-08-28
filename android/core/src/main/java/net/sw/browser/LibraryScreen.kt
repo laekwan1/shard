@@ -2221,6 +2221,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
 
     private fun drawFolders() {
         folderRow.removeAllViews()
+        val density = activity.resources.displayMetrics.density
         // The top-level chip is home — a house icon, not the word, so it reads as
         // "the whole storage" at a glance.
         val home = chip(activity.getString(R.string.library_all), showing == null, "") {
@@ -2232,6 +2233,13 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         home.text = ""
         home.setCompoundDrawablesRelativeWithIntrinsicBounds(R.drawable.ic_home, 0, 0, 0)
         home.compoundDrawablePadding = 0
+        // Icon-only: hug the house. The shared chip() forces a 64dp floor and 16dp side
+        // padding so word folders read as tabs, but on the imageless home chip that left a
+        // small icon marooned in a wide tab. Drop the floor and tighten the sides to the
+        // icon so the tab is the size of its picture.
+        home.minimumWidth = 0
+        val homePad = (10 * density).toInt()
+        home.setPadding(homePad, home.paddingTop, homePad, home.paddingBottom)
         folderRow.addView(home)
         folders.forEach { name ->
             val chip = chip(name, showing == name, name) {
@@ -2262,7 +2270,6 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // ends with — a small rounded square beside the tabs, not a tab among
         // them. A + drawn as a tab promised a folder that does not exist yet;
         // a button beside the row says "this makes more of these".
-        val density = activity.resources.displayMetrics.density
         val add = TextView(activity)
         add.text = "+"
         add.textSize = 15f

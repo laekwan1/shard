@@ -73,23 +73,33 @@ object Qualities {
      * states every format, its exact byte count and its codec, so the list is
      * built rather than guessed at.
      */
+    /** Codec preference for a video track: AV1 (best quality-per-byte) beats H.264 (widest
+     *  hardware decode) beats VP9. Unknown codecs sort last so a known one always wins. */
+    private fun codecRank(codec: String): Int = when (codec) {
+        "AV1" -> 0
+        "H.264" -> 1
+        "VP9" -> 2
+        else -> 3
+    }
+
     fun forYouTube(offer: YouTube.Offer, title: String): List<Option> {
         val template = offer.template ?: return emptyList()
         if (YouTube.bestAudio(offer.formats) == null) return emptyList()
 
-        // One row per resolution, carrying the smallest encoding of it.
-        //
-        // The full list runs to sixteen entries because YouTube offers each
-        // resolution in three codecs, and reading it means comparing the same
-        // number three times to reach the answer that is always the same: take
-        // the small one. So that choice is made here. Filtering down to a
-        // preferred codec instead would have emptied the list on every video
-        // YouTube never bothered to encode that way — which is most of the
-        // older ones.
+        // One row per resolution, carrying the BEST codec of it: AV1 > H.264 > VP9.
+        // YouTube offers each resolution in up to three codecs; showing all three made
+        // the reader compare the same resolution three times. We keep the highest-priority
+        // one that exists and drop the rest (if AV1 1080p exists, its H.264/VP9 siblings are
+        // not listed). AV1 first for quality-per-byte, H.264 next for the widest hardware
+        // decode, VP9 last. Bytes break a tie only within one codec. (bestAudio above already
+        // guarantees the list is non-empty, so no codec ever empties it.)
         val tracks = YouTube.videoTracks(offer.formats)
             .groupBy { it.quality }
             .values
-            .map { sameResolution -> sameResolution.minByOrNull { it.bytes.coerceAtLeast(0) }!! }
+            .map { sameResolution ->
+                sameResolution.minWithOrNull(
+                    compareBy({ codecRank(it.codec) }, { it.bytes.coerceAtLeast(0) }))!!
+            }
             .sortedByDescending { YouTube.heightOf(it.quality) }
         val options = tracks.mapNotNull { video ->
             val audio = YouTube.bestAudio(offer.formats, video.container) ?: return@mapNotNull null
