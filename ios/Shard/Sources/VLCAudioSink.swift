@@ -134,7 +134,14 @@ final class VLCAudioSink {
         os_unfair_lock_unlock(&lock)
         guard ok else { return nil }
         let session = AVAudioSession.sharedInstance()
-        let latency = session.outputLatency + session.ioBufferDuration
+        // Bluetooth A2DP buffers deeply and under-reports outputLatency, so readHead−latency
+        // still ran a touch AHEAD of what is truly heard — the picture then showed a hair
+        // early. Add a small route-dependent pad (BT only; wired/built-in report honestly)
+        // so the video waits for the real sound. Tunable if it drifts either way.
+        let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
+        let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
+        let pad = onBluetooth ? 0.045 : 0.0
+        let latency = session.outputLatency + session.ioBufferDuration + pad
         return max(0, readHead - latency)
     }
 

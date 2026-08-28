@@ -23,6 +23,12 @@ final class VLCVideoSink {
     private var poolWidth = 0
     private var poolHeight = 0
     private var lock = os_unfair_lock()
+    /// All AVSampleBufferDisplayLayer access (enqueue AND flush) runs here. The layer is
+    /// NOT safe to touch from two threads, and a seek did exactly that — libVLC's video
+    /// thread enqueuing while the main thread flushed — which crashed. Frames are copied
+    /// out synchronously on the libVLC thread (its buffer is reused the moment we return),
+    /// then the ready sample is handed to this queue; flush() hops here too.
+    private let layerQueue = DispatchQueue(label: "shard.vlc.videolayer")
 
     /// Called on the main thread once the display layer exists: build the timebase (paused)
     /// and hang it on the layer.
@@ -67,8 +73,9 @@ final class VLCVideoSink {
         let ok = (width == poolWidth && height == poolHeight)
         os_unfair_lock_unlock(&lock)
         guard ok, let pool = pool, let layer = displayLayer else { return }
-        if layer.status == .failed { layer.flush() }
 
+        // Copy libVLC's frame out NOW (this thread): its buffer is reused the instant this
+        // callback returns, so the pixel buffer must be filled synchronously here.
         var pb: CVPixelBuffer?
         guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pb) == kCVReturnSuccess,
               let buffer = pb else { return }
@@ -96,7 +103,12 @@ final class VLCVideoSink {
                 allocator: kCFAllocatorDefault, imageBuffer: buffer,
                 formatDescription: fmt, sampleTiming: &timing,
                 sampleBufferOut: &sample) == noErr, let sample = sample else { return }
-        if layer.isReadyForMoreMediaData { layer.enqueue(sample) }
+        // Hand the ready sample to the layer's own queue — never touch the layer from this
+        // thread while the main thread might be flushing it (a seek did, and it crashed).
+        layerQueue.async {
+            if layer.status == .failed { layer.flush() }
+            if layer.isReadyForMoreMediaData { layer.enqueue(sample) }
+        }
     }
 
     // MARK: main thread
@@ -119,9 +131,11 @@ final class VLCVideoSink {
         if CMTimebaseGetRate(tb) != 0 { CMTimebaseSetRate(tb, rate: 0) }
     }
 
-    /// Seek / track change: drop queued frames and reset the clock.
+    /// Seek / track change: drop queued frames and reset the clock. The layer flush runs on
+    /// the same queue as enqueue, so it never races a frame coming in on the libVLC thread.
     func flush() {
-        displayLayer?.flush()
+        let layer = displayLayer
+        layerQueue.async { layer?.flush() }
         if let tb = timebase {
             CMTimebaseSetRate(tb, rate: 0)
             CMTimebaseSetTime(tb, time: .zero)
