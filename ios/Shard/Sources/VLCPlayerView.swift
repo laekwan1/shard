@@ -173,12 +173,17 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // (it knows the real output latency), and the video layer follows it.
             synchronizer.addRenderer(audioSink.renderer)
             if videoRouted { synchronizer.addRenderer(videoSink.displayLayer) }
-            // The first decoded sample (libVLC audio thread) starts the clock at its pts.
+            // Video frames are stamped off the audio's real-time counter, so the two share
+            // one clock (see VLCAudioSink / VLCVideoSink).
+            videoSink.ptsProvider = { [weak self] in self?.audioSink.currentPts ?? .zero }
+            // The first decoded sample (render queue) starts the clock at its pts. The rate is
+            // ALWAYS 1 here — speed is done by libVLC (player.rate), and the audio is stamped
+            // real-time, so the synchronizer just plays it straight through.
             audioSink.onFirstSample = { [weak self] pts in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
                     self.syncStarted = true
-                    self.synchronizer.setRate(self.rate, time: pts)
+                    self.synchronizer.setRate(1, time: pts)
                 }
             }
         }
@@ -351,9 +356,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     // MARK: playback clock (shared by libVLC audio + VP9 video)
 
-    /// Resume the shared clock at the current rate — but only once the first sample has
-    /// started it (there is no clock to run before that).
-    private func syncPlay() { if syncStarted { synchronizer.rate = rate } }
+    /// Resume the shared clock — always at rate 1 (speed is libVLC's job), and only once the
+    /// first sample has started it (there is no clock to run before that).
+    private func syncPlay() { if syncStarted { synchronizer.rate = 1 } }
     /// Pause audio and video together, cleanly, rather than letting the buffered tail play on.
     private func syncPause() { if syncStarted { synchronizer.rate = 0 } }
     /// A fresh stream OR a seek: stop the clock and drop both buffers, then re-arm so the
@@ -646,11 +651,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // Setting AVPlayer.rate also starts playback; only change it while playing.
             if av.timeControlStatus != .paused { av.rate = r }
         } else {
+            // Speed is libVLC's alone: it plays faster and hands us rate-adjusted 48k audio,
+            // which we stamp real-time, so the synchronizer stays at rate 1 and the audio
+            // still abuts gap-free. (Driving the synchronizer's rate too would double it and
+            // break the sound.)
             player.rate = r
-            // Match the shared clock's rate while it is playing (leave a paused clock at 0).
-            // Note: at rate ≠ 1 the picture is our best effort — libVLC's own rate and the
-            // synchronizer's rate compound — but rate 1 (the sync-critical case) is exact.
-            if syncStarted, synchronizer.rate != 0 { synchronizer.rate = r }
         }
     }
     func cycleRate() {

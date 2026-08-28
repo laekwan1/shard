@@ -23,6 +23,11 @@ final class VLCVideoSink {
     private var poolWidth = 0
     private var poolHeight = 0
     private var lock = os_unfair_lock()
+    /// Where a frame's presentation time comes from: the audio's real-time counter (see
+    /// VLCAudioSink.currentPts). libVLC hands us audio and video in step, so the frame
+    /// arriving now belongs with the audio delivered now — stamping it off that one clock is
+    /// what keeps the two in sync at any playback rate, with the synchronizer at rate 1.
+    var ptsProvider: (() -> CMTime)?
     /// All AVSampleBufferDisplayLayer access (enqueue AND flush) runs here. The layer is
     /// NOT safe to touch from two threads, and a seek did exactly that — libVLC's video
     /// thread enqueuing while the main thread flushed — which crashed. Frames are copied
@@ -51,8 +56,8 @@ final class VLCVideoSink {
         pool = p; poolWidth = width; poolHeight = height
     }
 
-    /// One frame: copy the BGRA bytes into a pooled pixel buffer and enqueue it with its
-    /// presentation time. Enqueuing off the main thread is supported by the display layer.
+    /// One frame: copy the BGRA bytes into a pooled pixel buffer and enqueue it, stamped off
+    /// the audio clock. `timeMs` (libVLC's own clock) is the fallback if no provider is set.
     func frame(bgra: UnsafePointer<UInt8>, width: Int, height: Int, pitch: Int, timeMs: Int64) {
         os_unfair_lock_lock(&lock)
         let pool = self.pool
@@ -80,10 +85,9 @@ final class VLCVideoSink {
         guard CMVideoFormatDescriptionCreateForImageBuffer(
                 allocator: kCFAllocatorDefault, imageBuffer: buffer,
                 formatDescriptionOut: &fmt) == noErr, let fmt = fmt else { return }
+        let pts = ptsProvider?() ?? CMTime(value: timeMs, timescale: 1000)
         var timing = CMSampleTimingInfo(
-            duration: .invalid,
-            presentationTimeStamp: CMTime(value: timeMs, timescale: 1000),
-            decodeTimeStamp: .invalid)
+            duration: .invalid, presentationTimeStamp: pts, decodeTimeStamp: .invalid)
         var sample: CMSampleBuffer?
         guard CMSampleBufferCreateReadyWithImageBuffer(
                 allocator: kCFAllocatorDefault, imageBuffer: buffer,
