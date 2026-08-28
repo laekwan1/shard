@@ -23,6 +23,10 @@ final class VLCVideoSink {
     private var poolWidth = 0
     private var poolHeight = 0
     private var lock = os_unfair_lock()
+    /// True while the timebase is advancing. When it is NOT (priming, or between tracks),
+    /// frames are dropped rather than enqueued — a stalled clock never drains the layer, so
+    /// piling full-frame buffers behind it only grows memory toward a jetsam kill.
+    private var clockRunning = false
     /// All AVSampleBufferDisplayLayer access (enqueue AND flush) runs here. The layer is
     /// NOT safe to touch from two threads, and a seek did exactly that — libVLC's video
     /// thread enqueuing while the main thread flushed — which crashed. Frames are copied
@@ -60,8 +64,11 @@ final class VLCVideoSink {
             kCVPixelBufferHeightKey as String: height,
             kCVPixelBufferIOSurfacePropertiesKey as String: [:],
         ]
+        // Recycle buffers aggressively (age them out fast) so the pool cannot grow without
+        // bound if the layer ever holds frames longer than expected.
+        let poolAttrs: [String: Any] = [kCVPixelBufferPoolMaximumBufferAgeKey as String: 0.4]
         var p: CVPixelBufferPool?
-        CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attrs as CFDictionary, &p)
+        CVPixelBufferPoolCreate(kCFAllocatorDefault, poolAttrs as CFDictionary, attrs as CFDictionary, &p)
         pool = p; poolWidth = width; poolHeight = height
     }
 
@@ -71,8 +78,12 @@ final class VLCVideoSink {
         os_unfair_lock_lock(&lock)
         let pool = self.pool
         let ok = (width == poolWidth && height == poolHeight)
+        let running = clockRunning
         os_unfair_lock_unlock(&lock)
-        guard ok, let pool = pool, let layer = displayLayer else { return }
+        // Drop while the clock is stalled: with no timebase advance the layer never shows or
+        // frees these, so enqueuing them only piles memory. Video resumes on the next frame
+        // once the clock runs again.
+        guard ok, running, let pool = pool, let layer = displayLayer else { return }
 
         // Copy libVLC's frame out NOW (this thread): its buffer is reused the instant this
         // callback returns, so the pixel buffer must be filled synchronously here.
@@ -117,6 +128,7 @@ final class VLCVideoSink {
     /// timebase running at 1× and only re-anchors on a real gap (a seek), so steady playback
     /// is smooth rather than nudged every tick.
     func setClock(_ mediaTime: Double) {
+        os_unfair_lock_lock(&lock); clockRunning = true; os_unfair_lock_unlock(&lock)
         guard let tb = timebase else { return }
         let now = CMTimeGetSeconds(CMTimebaseGetTime(tb))
         if now <= 0 || abs(now - mediaTime) > 0.08 {
@@ -127,6 +139,7 @@ final class VLCVideoSink {
 
     /// No valid audio clock (priming / stopped): hold the picture.
     func pauseClock() {
+        os_unfair_lock_lock(&lock); clockRunning = false; os_unfair_lock_unlock(&lock)
         guard let tb = timebase else { return }
         if CMTimebaseGetRate(tb) != 0 { CMTimebaseSetRate(tb, rate: 0) }
     }
@@ -134,6 +147,7 @@ final class VLCVideoSink {
     /// Seek / track change: drop queued frames and reset the clock. The layer flush runs on
     /// the same queue as enqueue, so it never races a frame coming in on the libVLC thread.
     func flush() {
+        os_unfair_lock_lock(&lock); clockRunning = false; os_unfair_lock_unlock(&lock)
         let layer = displayLayer
         layerQueue.async { layer?.flush() }
         if let tb = timebase {

@@ -122,27 +122,36 @@ final class VLCAudioSink {
         os_unfair_lock_unlock(&lock)
     }
 
+    /// Output latency (seconds) from the read head to the speaker, plus a Bluetooth pad —
+    /// CACHED. currentMediaTime is read at display-refresh rate (~60/s) on the main thread,
+    /// and calling AVAudioSession's getters there hammered them; during an Apple Watch route
+    /// storm that could stall the main thread long enough for the watchdog to kill the app
+    /// (a crash-and-relaunch while a video just played). So the AVAudioSession read happens
+    /// only here — on start and on route changes — and the hot path uses the cached value.
+    private var cachedLatency: Double = 0.12
+    func refreshLatency() {
+        let session = AVAudioSession.sharedInstance()
+        // Bluetooth A2DP buffers deeply and under-reports its latency, so readHead−latency
+        // still ran AHEAD of what is truly heard and the picture led the sound. A
+        // route-dependent pad (BT only; wired/built-in report honestly) lets the video wait
+        // for the real sound. Tunable: raise if the picture still leads, lower if it lags.
+        let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
+        let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
+        let pad = onBluetooth ? 0.13 : 0.0
+        cachedLatency = session.outputLatency + session.ioBufferDuration + pad
+    }
+
     /// The media time (seconds) AUDIBLE right now: the read head (write head minus the
-    /// samples still queued) shifted back by the output latency (the sound already handed
-    /// to the OS but not yet at the speaker). The video renderer sets its display clock to
-    /// this so each frame appears exactly when its audio is heard. Returns nil until the
-    /// cushion has primed and there is a real pts to report.
+    /// samples still queued) shifted back by the (cached) output latency. The video renderer
+    /// sets its display clock to this so each frame appears exactly when its audio is heard.
+    /// Returns nil until the cushion has primed and there is a real pts to report.
     var currentMediaTime: Double? {
         os_unfair_lock_lock(&lock)
         let ok = primed && writePtsSec > 0
         let readHead = writePtsSec - Double(filled / 2) / 48000.0
         os_unfair_lock_unlock(&lock)
         guard ok else { return nil }
-        let session = AVAudioSession.sharedInstance()
-        // Bluetooth A2DP buffers deeply and under-reports outputLatency, so readHead−latency
-        // still ran a touch AHEAD of what is truly heard — the picture then showed a hair
-        // early. Add a small route-dependent pad (BT only; wired/built-in report honestly)
-        // so the video waits for the real sound. Tunable if it drifts either way.
-        let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
-        let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
-        let pad = onBluetooth ? 0.045 : 0.0
-        let latency = session.outputLatency + session.ioBufferDuration + pad
-        return max(0, readHead - latency)
+        return max(0, readHead - cachedLatency)
     }
 
     // MARK: called from the audio render thread
@@ -175,6 +184,7 @@ final class VLCAudioSink {
 
     func start() {
         wantRunning = true
+        refreshLatency()                       // pick up the current route's latency off the hot path
         if !engine.isRunning { try? engine.start() }
     }
 

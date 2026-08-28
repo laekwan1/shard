@@ -228,6 +228,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     @objc private func handleRouteChange(_ note: Notification) {
         configureForCurrentRoute()
+        // Re-cache the audio output latency for the new route (off the 60Hz video-clock path).
+        audioSink.refreshLatency()
     }
 
     @objc private func handleInterruption(_ note: Notification) {
