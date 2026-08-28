@@ -123,6 +123,7 @@
   // has to dismiss before downloading. Marking every <video> playsinline keeps
   // it on the page (paired with allowsInlineMediaPlayback on the native side).
   function keepInline() {
+    if (document.hidden) return;
     try {
       var vids = document.getElementsByTagName("video");
       for (var i = 0; i < vids.length; i++) {
@@ -281,6 +282,10 @@
   }
 
   function syncButtons() {
+    // Skip the per-frame DOM work while the page is hidden (app backgrounded, or another
+    // screen over the web) — these timers ran forever on every page and woke the CPU for
+    // nothing, which shows up as battery. They pick straight back up when it is shown.
+    if (document.hidden) return;
     keepYtControls();
     var vids = Array.prototype.slice.call(document.getElementsByTagName("video"));
     vids.forEach(function (v) {
@@ -362,6 +367,7 @@
   // does nothing — it never touches normal playback — so the worst case is that
   // ads come back, not that YouTube breaks.
   function skipAds() {
+    if (document.hidden) return;   // no ad to skip on a hidden page; save the CPU wakeups
     try {
       var skip = document.querySelector(
         ".ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-container button"
@@ -484,6 +490,7 @@
     setTimeout(syncDeletes, 60);
   }
   function syncDeletes() {
+    if (document.hidden) return;
     try {
       var box = searchBox();
       var live = [];

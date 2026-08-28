@@ -295,18 +295,47 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
-        // MUTE (not just volume-0) across the transition to hide the "텁" pop libVLC's own
-        // output makes on the first buffer; the first frame unmutes (mediaPlayerTimeChanged).
         let s = player.state
         let needStop = s == .ended || s == .error || s == .stopped
-        player.audio?.isMuted = true
         if needStop { player.stop() }
-        pendingUnmute = true
+        pendingUnmute = true              // holds the black cover until the first frame
         player.media = makeMedia(url)
-        player.audio?.isMuted = true
         player.play()
         player.rate = rate
+        // Fade the volume up over the first ~75ms instead of muting until the first frame.
+        // Muting hid libVLC's "텁" output pop but ALSO ate the start of the sound (the
+        // "앞부분 씹힘"); a fade keeps every sample — it just starts quiet, so the pop, which
+        // is loudest at t=0, is inaudible while the audio itself is not clipped.
+        fadeInVLC()
         scheduleWatchdog(url)
+    }
+
+    /// Ramp libVLC's volume 0 → target over ~75ms so the opening pop is covered without
+    /// clipping the sound. Cheap timed steps; bails if the backend changed underfoot.
+    private func fadeInVLC() {
+        let target = targetVolume
+        player.audio?.volume = 0
+        let steps = 5
+        for i in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.015) { [weak self] in
+                guard let self = self, self.backend == .vlc else { return }
+                self.player.audio?.volume = Int32(Double(target) * Double(i) / Double(steps))
+            }
+        }
+    }
+
+    /// Mute briefly through a seek — libVLC's decoder discontinuity comes out as a click/burst
+    /// otherwise. Restores the user's actual mute state after the jump settles.
+    private var seekMuteWork: DispatchWorkItem?
+    private func muteThroughSeek() {
+        player.audio?.isMuted = true
+        seekMuteWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.backend == .vlc else { return }
+            self.player.audio?.isMuted = self.muted
+        }
+        seekMuteWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: work)
     }
 
     // MARK: AVPlayer backend
@@ -467,6 +496,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         } else {
             // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
             // "finished" and snaps back — cap just short so the far end is reachable.
+            muteThroughSeek()
             player.position = clamped
         }
     }
@@ -509,13 +539,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     func seek(to p: Float) {
         if backend == .av { avSeekFraction(max(0, min(1, p))) }
-        else { player.position = max(0, min(1, p)) }
+        else { muteThroughSeek(); player.position = max(0, min(1, p)) }
     }
     func jump(_ seconds: Int32) {
         if backend == .av {
             let t = (av.currentItem?.currentTime().seconds ?? 0) + Double(seconds)
             av.seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
         } else {
+            muteThroughSeek()
             seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds)
         }
     }
@@ -570,7 +601,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
-            player.audio?.isMuted = muted
         } else if buffering, player.isPlaying {
             // Buffering that was NOT an open (e.g. after a seek) — clear it once
             // frames flow again, or the spinner spun forever over black.
@@ -608,10 +638,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the sound kept going. The cover is driven only by open() (a real track
         // change) and cleared on the first frame; a seek just re-buffers silently.
         if player.state == .ended || player.state == .error { buffering = false }
-        // Keep the (late-created) new audio object MUTED at every state update until
-        // we release it after playback is up — this is what actually stops the "텁"
-        // pop on the first buffer.
-        if pendingUnmute { player.audio?.isMuted = true }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
