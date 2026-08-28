@@ -83,7 +83,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
     private val vbTotal: TextView = root.findViewById(R.id.vbTotal)
     private val stageTitle: TextView = root.findViewById(R.id.stageTitle)
     private val vbMute: ImageButton = root.findViewById(R.id.vbMute)
-    private val vbStop: ImageButton = root.findViewById(R.id.vbStop)
+    private val stageClose: ImageButton = root.findViewById(R.id.stageClose)
     private val vbRate: TextView = root.findViewById(R.id.vbRate)
     private val folderSettings: ImageButton = root.findViewById(R.id.folderSettings)
     private val nowPlaying: View = root.findViewById(R.id.nowPlaying)
@@ -610,6 +610,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // The title on the picture rides in and out with the bar below it.
         fade(stageTitle, on)
         fade(leaveFullScreen, on && expanded)
+        // Close sits at the picture's top-right, up whenever the controls are.
+        fade(stageClose, on)
         if (on) {
             updateVideoBar()
             ui.removeCallbacks(vbTick)
@@ -928,7 +930,7 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         tabMusic.setOnClickListener { selectTab(Library.Kind.MUSIC) }
         npToggle.setOnClickListener { togglePlayPause() }
         npStop.setOnClickListener { stopPlaying() }
-        vbStop.setOnClickListener { stopPlaying() }
+        stageClose.setOnClickListener { stopPlaying() }
         npSeek.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: android.widget.SeekBar, progress: Int, fromUser: Boolean) {
                 if (!fromUser || !prepared) return

@@ -246,6 +246,22 @@
                 android:visibility="gone"
                 android:contentDescription="@string/library_back" />
 
+            <!-- Close, on the picture's top-right corner where a video is dismissed. Rides in
+                 and out with the rest of the controls (windowed and full screen alike). -->
+            <ImageButton
+                android:id="@+id/stageClose"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:layout_gravity="top|end"
+                android:layout_margin="6dp"
+                android:background="@drawable/pull_backdrop"
+                android:foreground="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_close"
+                android:scaleType="fitCenter"
+                android:padding="10dp"
+                android:visibility="gone"
+                android:contentDescription="@string/close" />
+
             <!--
                 The player's own bar, in place of the framework's
                 MediaController.
@@ -404,18 +420,6 @@
                         android:scaleType="fitCenter"
                         android:padding="14dp"
                         android:contentDescription="@string/library_expand" />
-
-                    <!-- Close the player, the same as the music bar's — a video listened to
-                         like music is dismissed like music. -->
-                    <ImageButton
-                        android:id="@+id/vbStop"
-                        android:layout_width="@dimen/target"
-                        android:layout_height="@dimen/target"
-                        android:background="@drawable/press_square"
-                        android:src="@drawable/ic_close"
-                        android:scaleType="fitCenter"
-                        android:padding="14dp"
-                        android:contentDescription="@string/close" />
                 </LinearLayout>
             </LinearLayout>
 

@@ -1813,12 +1813,18 @@ impl Shell {
             self.showing.get().and_then(|at| tabs.get(at).map(|t| t.view.clone()))
         };
         let Some(view) = view else { return };
-        let _ = match what {
-            "go" => view.load_url(url),
-            "back" => view.evaluate_script("history.back()"),
-            "forward" => view.evaluate_script("history.forward()"),
-            _ => view.evaluate_script("location.reload()"),
-        };
+        use wry::WebViewExtWindows;
+        match what {
+            "go" => { let _ = view.load_url(url); }
+            // Native WebView2 history rather than history.back()/forward() via script: the
+            // script form did nothing on the pages that most need it — cross-origin
+            // navigations (the JS history is per-origin) and SPA sites that rewrite their own
+            // history. GoBack/GoForward walk the WebView's real back/forward list, which is
+            // what the toolbar arrows are supposed to do.
+            "back" => unsafe { let _ = view.webview().GoBack(); }
+            "forward" => unsafe { let _ = view.webview().GoForward(); }
+            _ => { let _ = view.reload(); }
+        }
         // What was steered is what should take the keyboard.
         let _ = view.focus();
     }
