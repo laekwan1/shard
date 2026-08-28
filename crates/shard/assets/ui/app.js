@@ -647,22 +647,20 @@ function takeShots() {
   const draw = () => {
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = 88;
-      canvas.height = 50;
-      const ctx = canvas.getContext("2d");
-      // Crop the CENTRE to fill (cover), never stretch: a Shorts frame is 9:16, and
-      // drawing it into this 16:9 thumbnail with the plain 4-arg drawImage squished it
-      // flat. Match the row's CSS (background: cover) by scaling to fill and cropping the
-      // overflow — the same picture the box shows, just baked in.
+      // Bake the WHOLE frame at its own aspect — the canvas matches the video's shape, so a
+      // 9:16 short is stored tall and a 16:9 video wide, neither stretched nor cropped. The
+      // row shows it with `contain`, so a short reads as a short (a tall picture) rather than
+      // a middle slice cropped to a landscape frame.
       const vw = reader.videoWidth || 0, vh = reader.videoHeight || 0;
       if (vw > 0 && vh > 0) {
-        const scale = Math.max(canvas.width / vw, canvas.height / vh);
-        const sw = canvas.width / scale, sh = canvas.height / scale;
-        ctx.drawImage(reader, (vw - sw) / 2, (vh - sh) / 2, sw, sh,
-                      0, 0, canvas.width, canvas.height);
+        const scale = Math.min(88 / vw, 50 / vh);
+        canvas.width = Math.max(1, Math.round(vw * scale));
+        canvas.height = Math.max(1, Math.round(vh * scale));
       } else {
-        ctx.drawImage(reader, 0, 0, canvas.width, canvas.height);
+        canvas.width = 88;
+        canvas.height = 50;
       }
+      canvas.getContext("2d").drawImage(reader, 0, 0, canvas.width, canvas.height);
       done(canvas.toDataURL("image/jpeg", 0.62));
     } catch (e) {
       done(null);

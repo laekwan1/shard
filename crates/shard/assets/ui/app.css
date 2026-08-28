@@ -588,7 +588,10 @@ button svg { display: block; }
   width: 44px;
   height: 26px;
   border-radius: var(--r-xs);
-  background: #0b0d11 center/cover no-repeat;
+  /* `contain`, not `cover`: a vertical short cropped to fill this landscape frame showed
+     only a middle slice of it. Contained, the whole frame is kept — a short reads AS a
+     short (a tall picture, pillar-boxed), a normal video fills it. */
+  background: #0b0d11 center/contain no-repeat;
   border: 1px solid #ffffff0f;
 }
 /* Nothing to show: a plain well rather than an empty frame. */
