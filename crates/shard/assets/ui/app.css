@@ -533,9 +533,15 @@ button svg { display: block; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px 7px 14px;
-  border-radius: var(--r-sm);
-  margin: 0 6px;
+  /* Fixed height, no vertical padding: the row's height came from summing 7px + content +
+     7px, and at fractional display scaling (125/150%) those two paddings rounded to
+     different device pixels, so the content sat a pixel off-centre and the hover/selected
+     fill looked high. A single height value centres the content deterministically. */
+  height: 40px;
+  padding: 0 10px 0 14px;
+  /* Full-width highlight, flush to the list edges: the old `margin: 0 6px` inset the fill
+     so it read as narrower than the row. The hover/selected background now IS the row. */
+  margin: 0;
 }
 /* A hair between one row and the next, held off both walls so it reads as a
    division inside the list rather than as the list being ruled into a table. */
