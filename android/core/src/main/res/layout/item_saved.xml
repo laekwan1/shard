@@ -47,8 +47,7 @@
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_gravity="bottom"
-        android:layout_marginStart="80dp"
-        android:layout_marginBottom="1.5dp"
+        android:layout_marginStart="85dp"
         android:background="@color/state_hover" />
 
     <LinearLayout
@@ -57,13 +56,13 @@
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
-    <!-- 80 by 45 is sixteen by nine exactly. With the padding the row is 51dp:
-         the frame is the reason the row exists, so it takes the room, and the
-         padding gives back what the frame took — a list row's neighbours are
-         the same target, so it needs no 48 of its own. -->
+    <!-- 85 by 48: the frame is as TALL as the row (the 48dp menu button sets the row
+         height), so the thumbnail's bottom edge sits exactly on the row's floor where the
+         divider is — the line then reads as the picture's own bottom carrying on across the
+         row, with no gap to misalign. 85 keeps it ~16:9 at that height. -->
     <FrameLayout
-        android:layout_width="80dp"
-        android:layout_height="45dp"
+        android:layout_width="85dp"
+        android:layout_height="48dp"
         android:layout_marginEnd="12dp">
 
         <com.google.android.material.imageview.ShapeableImageView

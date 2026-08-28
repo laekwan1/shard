@@ -137,7 +137,7 @@ final class VLCAudioSink {
         // for the real sound. Tunable: raise if the picture still leads, lower if it lags.
         let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
         let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
-        let pad = onBluetooth ? 0.13 : 0.0
+        let pad = onBluetooth ? 0.18 : 0.0
         cachedLatency = session.outputLatency + session.ioBufferDuration + pad
     }
 

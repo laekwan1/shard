@@ -523,7 +523,9 @@ button svg { display: block; }
   flex: 0 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 0 0 4px;
+  /* No bottom padding: it left a strip of bare surface under the last row, so that row's
+     hover/select fill (which is the row, flush) stopped short of the list's bottom edge. */
+  padding: 0;
   background: var(--surface);
   border-bottom: 1px solid var(--divider);
 }
