@@ -1,196 +1,120 @@
 import AVFoundation
+import CoreMedia
 
-/// Plays libVLC's decoded PCM through AVAudioEngine — Apple's own audio output, which
-/// rides Bluetooth link jitter (worst during an Apple Watch workout) cleanly, the way
-/// AVPlayer does. libVLC hands us S16 interleaved stereo at 48kHz through its C audio
-/// callbacks (see VLCAudioBridge); we buffer it and an AVAudioSourceNode drains it at
-/// the output rate. This replaces libVLC's own iOS output, which crackled over that
-/// link and added start/seek latency — so Opus/VP9/AV1 keep best quality AND play clean.
+/// Plays libVLC's decoded PCM through an AVSampleBufferAudioRenderer, driven by an
+/// AVSampleBufferRenderSynchronizer shared with the video (VLCVideoSink). This is Apple's
+/// own media path — the same clean-over-Bluetooth output AVPlayer uses — so Opus/VP9/AV1
+/// keep best quality AND play without the crackle libVLC's own output made over a jittery
+/// (Apple-Watch) A2DP link.
+///
+/// Why this and not AVAudioEngine: the engine could play the PCM cleanly, but WE then had
+/// to guess the output latency to line the picture up with the sound — and Bluetooth
+/// under-reports that latency, so the sync needed a hand-tuned pad. The render synchronizer
+/// asks Apple's renderer for the REAL output timing (Bluetooth included) and lines audio
+/// and video up itself. No magic number. libVLC hands us S16 interleaved stereo @ 48kHz
+/// (see VLCAudioBridge), each block tagged with its presentation pts; we wrap it in a
+/// CMSampleBuffer and enqueue it.
 final class VLCAudioSink {
-    private let engine = AVAudioEngine()
-    private var source: AVAudioSourceNode?
-    // The engine graph MUST use a non-interleaved (standard) format — AVAudioEngine
-    // rejects an interleaved format on an internal connection (that crashed at launch).
-    // libVLC still gives us interleaved S16; we de-interleave into the L/R buffers in
-    // the render block.
-    private let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2)!
+    /// Apple's audio renderer. The controller adds it (and the video layer) to one
+    /// synchronizer, whose timebase presents both in step.
+    let renderer = AVSampleBufferAudioRenderer()
 
-    // Interleaved Float32 ring [L,R,L,R,…]. ~2s at 48k stereo.
-    private var ring = [Float](repeating: 0, count: 48000 * 2 * 2)
-    private var readIndex = 0
-    private var writeIndex = 0
-    private var filled = 0                 // valid floats in the ring
+    private var formatDesc: CMAudioFormatDescription?
     private var lock = os_unfair_lock()
-
-    // Media time (seconds) of the ring's WRITE head — libVLC hands each audio block a
-    // presentation pts, and this tracks the timeline just past the last sample written.
-    // The READ head (what is about to be output) is this minus the samples still queued,
-    // so the position AUDIBLE now is readHead − output latency. The VP9 video renderer
-    // clocks its frames off exactly this, so picture lands with the sound at the same
-    // media time regardless of how deep the buffer is (that is what makes A/V sync
-    // automatic instead of a hand-tuned offset). See VLCVideoSink.
-    private var writePtsSec: Double = 0
-
-    /// Output silence until this many frames are buffered, JUST enough to avoid an
-    /// underrun on the very first render pulls. Kept small (~20ms): AVAudioEngine does
-    /// its own buffering, and libVLC decodes ahead of realtime, so the ring fills on its
-    /// own for steady-state jitter. A big cushion here only delayed the audio start,
-    /// desyncing it behind the (immediately-shown) video. Reset by a flush (a seek).
-    // With the VP9 video renderer (VLCVideoSink) the picture is clocked off THIS sink's
-    // audible position, so sync no longer depends on this value — it is purely an underrun
-    // cushion. Kept small (~35ms) so playback starts promptly; the 800ms input cache and
-    // libVLC's decode-ahead keep the ring full after that. (Only the fallback path, where
-    // the video handle could not be reached and libVLC draws on its own clock, still leans
-    // on this doubling as the A/V offset — 35ms errs toward audio a touch late there.)
-    private let primeFrames = 1680          // ~35ms
-    private var primed = false
-    /// Whether playback WANTS the engine running — used to restart it after the OS stops
-    /// it on a route change. The engine's own `isRunning` is the truth for start/stop, so
-    /// our intent and the OS's state never drift apart (a stale flag left it silent).
-    private var wantRunning = false
-    /// Silence the output at once (a user mute) without waiting for the buffered audio
-    /// to drain — the ring is still consumed so unmuting resumes in sync.
-    private var muted = false
+    /// All renderer access (enqueue AND flush) runs here. The renderer is not safe to touch
+    /// from two threads, and flush (main, on a seek) would otherwise race enqueue (libVLC's
+    /// audio thread) — the same hazard that crashed the video layer. The PCM is copied out
+    /// synchronously in push (libVLC reuses its buffer at once); only the ready sample is
+    /// handed to this queue.
+    private let renderQueue = DispatchQueue(label: "shard.vlc.audiorenderer")
+    /// The synchronizer's clock is not running until the first sample gives it a start
+    /// time. Re-armed on flush (a seek starts a fresh pts).
+    private var needStart = true
+    /// Called (on the libVLC audio thread) with the first sample's pts after a start, so
+    /// the controller can start the synchronizer's clock there.
+    var onFirstSample: ((CMTime) -> Void)?
 
     init() {
-        let node = AVAudioSourceNode(format: format) { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
-            let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
-            let left = abl.count > 0 ? abl[0].mData?.assumingMemoryBound(to: Float.self) : nil
-            let right = abl.count > 1 ? abl[1].mData?.assumingMemoryBound(to: Float.self) : left
-            self?.pull(left: left, right: right, frames: Int(frameCount))
-            return noErr
-        }
-        source = node
-        engine.attach(node)
-        engine.connect(node, to: engine.mainMixerNode, format: format)
-        // The OS stops/reconfigures the engine when the audio route changes (earbuds in
-        // or out) or an interruption ends — after which it stays STOPPED and playback
-        // goes silent. Restart it here when that happens, if playback still wants it.
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
-        ) { [weak self] _ in
-            // Restart ONLY if the change actually left it stopped, and only if playback
-            // still wants it. An unconditional stop→start on every change churned the
-            // engine — a Watch workout fires a storm of route changes — which risked a
-            // crash for no gain.
-            guard let self = self, self.wantRunning, !self.engine.isRunning else { return }
-            try? self.engine.start()
-        }
+        var asbd = AudioStreamBasicDescription(
+            mSampleRate: 48000,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4, mFramesPerPacket: 1, mBytesPerFrame: 4,
+            mChannelsPerFrame: 2, mBitsPerChannel: 16, mReserved: 0)
+        CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault, asbd: &asbd,
+                                       layoutSize: 0, layout: nil,
+                                       magicCookieSize: 0, magicCookie: nil,
+                                       extensions: nil, formatDescriptionOut: &formatDesc)
     }
-
-    private var configObserver: NSObjectProtocol?
-    deinit { if let o = configObserver { NotificationCenter.default.removeObserver(o) } }
 
     // MARK: called from libVLC's audio thread
 
-    /// Buffer `frames` of S16 interleaved stereo. Converts to Float and appends; if the
-    /// ring is full the oldest audio is dropped (better a tiny skip than growing lag).
-    /// `ptsUs` is libVLC's presentation time (µs) of the first sample in this block —
-    /// used to keep the media clock the video renderer reads.
+    /// Wrap `frames` of S16 interleaved stereo (tagged with `ptsUs`, libVLC's presentation
+    /// time in µs) into a CMSampleBuffer and enqueue it. The renderer buffers internally and
+    /// back-pressures via `isReadyForMoreMediaData`; when it is not ready we drop, since the
+    /// clock will have moved on anyway (better a tiny skip than growing lag).
     func push(_ samples: UnsafePointer<Int16>, frames: UInt32, ptsUs: Int64) {
-        let count = Int(frames) * 2              // interleaved floats
+        guard let fmt = formatDesc, frames > 0 else { return }
+        guard renderer.isReadyForMoreMediaData else { return }
+
+        let n = Int(frames)
+        let byteCount = n * 4
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: byteCount,
+                blockAllocator: kCFAllocatorDefault, customBlockSource: nil,
+                offsetToData: 0, dataLength: byteCount,
+                flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block) == kCMBlockBufferNoErr,
+              let block = block else { return }
+        // Copy libVLC's bytes out now — its buffer is reused after this call returns.
+        guard CMBlockBufferReplaceDataBytes(with: samples, blockBuffer: block,
+                offsetIntoDestination: 0, dataLength: byteCount) == kCMBlockBufferNoErr else { return }
+
+        var timing = CMSampleTimingInfo(
+            duration: CMTime(value: 1, timescale: 48000),
+            presentationTimeStamp: CMTime(value: ptsUs, timescale: 1_000_000),
+            decodeTimeStamp: .invalid)
+        var sampleSize = 4
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreateReady(
+                allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: fmt,
+                sampleCount: n, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                sampleSizeEntryCount: 1, sampleSizeArray: &sampleSize,
+                sampleBufferOut: &sample) == noErr, let sample = sample else { return }
+
+        var fire: CMTime?
         os_unfair_lock_lock(&lock)
-        let cap = ring.count
-        for i in 0..<count {
-            ring[writeIndex] = Float(samples[i]) / 32768.0
-            writeIndex = (writeIndex + 1) % cap
-            if filled < cap {
-                filled += 1
-            } else {
-                readIndex = (readIndex + 1) % cap   // full: advance read, dropping oldest
-            }
+        if needStart { needStart = false; fire = CMTime(value: ptsUs, timescale: 1_000_000) }
+        os_unfair_lock_unlock(&lock)
+        let renderer = self.renderer
+        let onFirst = self.onFirstSample
+        renderQueue.async {
+            if renderer.status == .failed { renderer.flush() }
+            if renderer.isReadyForMoreMediaData { renderer.enqueue(sample) }
+            if let t = fire { DispatchQueue.main.async { onFirst?(t) } }
         }
-        if !primed && filled >= primeFrames * 2 { primed = true }
-        // The write head now sits just past this block: its pts plus the block's length.
-        // Taken from the block's own pts each time (not accumulated), so a seek that jumps
-        // the pts is followed exactly and drift never builds up.
-        if ptsUs > 0 { writePtsSec = Double(ptsUs) / 1_000_000.0 + Double(frames) / 48000.0 }
-        os_unfair_lock_unlock(&lock)
     }
 
-    /// Silence (or unsilence) the output instantly.
-    func setMuted(_ m: Bool) {
-        os_unfair_lock_lock(&lock)
-        muted = m
-        os_unfair_lock_unlock(&lock)
-    }
-
-    /// Drop everything buffered (a seek/flush) and re-arm the prime cushion.
+    /// Drop everything buffered (a seek/flush) and re-arm the start so the synchronizer's
+    /// clock restarts at the new pts.
     func flush() {
-        os_unfair_lock_lock(&lock)
-        readIndex = 0; writeIndex = 0; filled = 0; primed = false; writePtsSec = 0
-        os_unfair_lock_unlock(&lock)
+        let renderer = self.renderer
+        renderQueue.async { renderer.flush() }
+        os_unfair_lock_lock(&lock); needStart = true; os_unfair_lock_unlock(&lock)
     }
 
-    /// Output latency (seconds) from the read head to the speaker, plus a Bluetooth pad —
-    /// CACHED. currentMediaTime is read at display-refresh rate (~60/s) on the main thread,
-    /// and calling AVAudioSession's getters there hammered them; during an Apple Watch route
-    /// storm that could stall the main thread long enough for the watchdog to kill the app
-    /// (a crash-and-relaunch while a video just played). So the AVAudioSession read happens
-    /// only here — on start and on route changes — and the hot path uses the cached value.
-    private var cachedLatency: Double = 0.12
-    func refreshLatency() {
-        let session = AVAudioSession.sharedInstance()
-        // Bluetooth A2DP buffers deeply and under-reports its latency, so readHead−latency
-        // still ran AHEAD of what is truly heard and the picture led the sound. A
-        // route-dependent pad (BT only; wired/built-in report honestly) lets the video wait
-        // for the real sound. Tunable: raise if the picture still leads, lower if it lags.
-        let bt: Set<AVAudioSession.Port> = [.bluetoothA2DP, .bluetoothLE, .bluetoothHFP]
-        let onBluetooth = session.currentRoute.outputs.contains { bt.contains($0.portType) }
-        let pad = onBluetooth ? 0.18 : 0.0
-        cachedLatency = session.outputLatency + session.ioBufferDuration + pad
-    }
-
-    /// The media time (seconds) AUDIBLE right now: the read head (write head minus the
-    /// samples still queued) shifted back by the (cached) output latency. The video renderer
-    /// sets its display clock to this so each frame appears exactly when its audio is heard.
-    /// Returns nil until the cushion has primed and there is a real pts to report.
-    var currentMediaTime: Double? {
-        os_unfair_lock_lock(&lock)
-        let ok = primed && writePtsSec > 0
-        let readHead = writePtsSec - Double(filled / 2) / 48000.0
-        os_unfair_lock_unlock(&lock)
-        guard ok else { return nil }
-        return max(0, readHead - cachedLatency)
-    }
-
-    // MARK: called from the audio render thread
-
-    private func pull(left: UnsafeMutablePointer<Float>?, right: UnsafeMutablePointer<Float>?, frames: Int) {
-        os_unfair_lock_lock(&lock)
-        guard primed else {
-            os_unfair_lock_unlock(&lock)
-            for i in 0..<frames { left?[i] = 0; right?[i] = 0 }   // still filling the cushion
-            return
-        }
-        let cap = ring.count
-        let silent = muted
-        var given = 0
-        while given < frames && filled >= 2 {
-            // Consume the ring even when muted, so the timeline keeps advancing and
-            // unmuting picks up in sync — just write silence to the output.
-            left?[given] = silent ? 0 : ring[readIndex]
-            right?[given] = silent ? 0 : ring[(readIndex + 1) % cap]
-            readIndex = (readIndex + 2) % cap
-            filled -= 2
-            given += 1
-        }
-        if filled < 2 { primed = false }            // underran: rebuild the cushion
-        os_unfair_lock_unlock(&lock)
-        for i in given..<frames { left?[i] = 0; right?[i] = 0 }   // pad the shortfall
-    }
+    /// Silence instantly, without draining the buffer.
+    func setMuted(_ m: Bool) { renderer.isMuted = m }
 
     // MARK: lifecycle (main thread)
 
-    func start() {
-        wantRunning = true
-        refreshLatency()                       // pick up the current route's latency off the hot path
-        if !engine.isRunning { try? engine.start() }
-    }
+    /// The synchronizer drives playback; there is nothing to spin up here. Kept so the
+    /// call sites read the same as before.
+    func start() {}
 
     func stop() {
-        wantRunning = false
-        if engine.isRunning { engine.stop() }
-        flush()
+        let renderer = self.renderer
+        renderQueue.async { renderer.flush() }
+        os_unfair_lock_lock(&lock); needStart = true; os_unfair_lock_unlock(&lock)
     }
 }
