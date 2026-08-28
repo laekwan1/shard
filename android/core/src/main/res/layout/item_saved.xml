@@ -71,7 +71,6 @@
             android:layout_height="match_parent"
             android:background="@drawable/shot_tile"
             android:scaleType="centerInside"
-            android:padding="8dp"
             android:contentDescription="@null" />
 
         <!-- Laid over a video frame; hidden for music. -->
