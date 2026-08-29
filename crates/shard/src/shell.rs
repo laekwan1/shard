@@ -832,11 +832,10 @@ pub fn respond(uri: &str, range: Option<&str>) -> http::Response<std::borrow::Co
     if let Some(rest) = path.strip_prefix("/cover/") {
         let id = rest.split('/').next().unwrap_or("").parse::<u64>().unwrap_or(0);
         let Some(file) = media_path(id) else { return not_found() };
-        let Ok(mut handle) = std::fs::File::open(&file) else { return not_found() };
-        use std::io::Read;
-        let mut head = vec![0u8; 2 * 1024 * 1024];
-        let Ok(read) = handle.read(&mut head) else { return not_found() };
-        head.truncate(read);
+        // The whole file, not a 2 MB head: our writer puts the `moov` (which holds
+        // the cover) at the END, so a music file bigger than that head had its
+        // cover missed. A music file is a few MB, read once when the tile shows.
+        let Ok(head) = std::fs::read(&file) else { return not_found() };
         let Some((picture, kind)) = crate::download::mp4::cover(&head) else {
             return not_found();
         };
@@ -2096,10 +2095,12 @@ impl Shell {
             .iter()
             .map(|job| {
                 format!(
-                    r#"{{"id":{},"title":"{}","fraction":{:.4}}}"#,
+                    r#"{{"id":{},"title":"{}","fraction":{:.4},"done":{},"total":{}}}"#,
                     job.id,
                     escape(&job.title),
-                    job.fraction()
+                    job.fraction(),
+                    job.done,
+                    job.total
                 )
             })
             .collect();

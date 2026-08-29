@@ -240,9 +240,10 @@ homeBtn.addEventListener("click", () => {
   if (browsing) send("steer", { what: "go", url: homepage });
   else send("tab.new", { url: homepage });
 });
+// A right-click opens the favorites page, where the homepage is typed.
 homeBtn.addEventListener("contextmenu", (e) => {
   e.preventDefault();
-  if (browsing && frontUrl) send("home.set", { url: frontUrl });
+  show("favorites");
 });
 
 // The star: a left-click opens (or closes) the favorites page; a right-click
@@ -258,10 +259,13 @@ starBtn.addEventListener("contextmenu", (e) => {
 
 // ---- the favorites page ----------------------------------------------------
 
+const favHpInput = document.getElementById("favHpInput");
+
 function paintFavorites(message) {
   bookmarksList = message.bookmarks || [];
   const history = message.history || [];
-  if (typeof message.homepage === "string" && message.homepage) homepage = message.homepage;
+  if (typeof message.homepage === "string") homepage = message.homepage || homepage;
+  if (document.activeElement !== favHpInput) favHpInput.value = message.homepage || "";
 
   const bm = document.getElementById("favBookmarks");
   bm.textContent = "";
@@ -277,22 +281,58 @@ function paintFavorites(message) {
   paintStar();
 }
 
-// One row: the title over the address, opening on a click; the ✕ removes it — a
-// bookmark is unpinned, a history entry is dropped.
+// Save the homepage on Enter, so the home button opens what was typed.
+favHpInput.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const v = favHpInput.value.trim();
+  if (v) send("home.set", { url: /^[a-z]+:\/\//i.test(v) ? v : "https://" + v });
+  favHpInput.blur();
+});
+
+// A round badge with the site's first letter — a self-contained "icon" (the
+// window's strict CSP blocks fetching real favicons, and this needs no request).
+function favBadge(item) {
+  const badge = document.createElement("span");
+  badge.className = "favBadge";
+  const t = String(item.title || item.url).replace(/^https?:\/\//, "").replace(/^www\./, "").trim();
+  badge.textContent = (t[0] || "?").toUpperCase();
+  let h = 0;
+  const host = t.split("/")[0];
+  for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
+  const hues = [7, 32, 47, 119, 191, 209, 270, 299, 331];
+  badge.style.background = "hsl(" + hues[Math.abs(h) % hues.length] + ",50%,42%)";
+  return badge;
+}
+
+// One row: an icon, the title over the address, opening on a click; the ✕ removes
+// it — a bookmark is unpinned, a history entry is dropped.
 function favRow(item, kind) {
   const row = document.createElement("div");
   row.className = "favRow";
 
   const open = document.createElement("button");
   open.className = "favOpen";
+  open.appendChild(favBadge(item));
+  const text = document.createElement("span");
+  text.className = "favText";
   const name = document.createElement("span");
   name.className = "favName";
   name.textContent = item.title || item.url;
   const url = document.createElement("span");
   url.className = "favUrl";
   url.textContent = item.url;
-  open.append(name, url);
-  open.addEventListener("click", () => send("tab.new", { url: item.url }));
+  text.append(name, url);
+  open.appendChild(text);
+  // Open in the CURRENT tab, not a new one: bring the tab back to the front and
+  // steer it there. With no tab yet, open one.
+  open.addEventListener("click", () => {
+    if (tabCount > 0) {
+      send("nav", { to: "browser" });
+      send("steer", { what: "go", url: item.url });
+    } else {
+      send("tab.new", { url: item.url });
+    }
+  });
 
   const del = document.createElement("button");
   del.className = "favDel";
@@ -441,6 +481,14 @@ function paintEngine(state) {
 
 const downloads = document.getElementById("downloads");
 
+// Bytes, as a person reads them — the same steps the Rust side uses.
+function humanBytes(n) {
+  const b = Number(n) || 0;
+  if (b >= 1 << 30) return (b / (1 << 30)).toFixed(1) + " GB";
+  if (b >= 1 << 20) return Math.round(b / (1 << 20)) + " MB";
+  return Math.max(1, Math.round(b / 1024)) + " KB";
+}
+
 function paintDownloads(list) {
   downloads.textContent = "";
   for (const item of list) {
@@ -458,6 +506,12 @@ function paintDownloads(list) {
     fill.style.width = Math.round((item.fraction || 0) * 100) + "%";
     track.appendChild(fill);
 
+    // How much of the whole has arrived, in bytes — beside the percentage so a
+    // download that crawls still shows it is moving.
+    const size = document.createElement("span");
+    size.className = "size";
+    if (item.total > 0) size.textContent = humanBytes(item.done) + " / " + humanBytes(item.total);
+
     const percent = document.createElement("span");
     percent.className = "percent";
     percent.textContent = Math.round((item.fraction || 0) * 100) + "%";
@@ -468,7 +522,7 @@ function paintDownloads(list) {
     stop.textContent = "✕";
     stop.addEventListener("click", () => send("download.cancel", { id: item.id }));
 
-    row.append(name, track, percent, stop);
+    row.append(name, track, size, percent, stop);
     downloads.appendChild(row);
   }
 }

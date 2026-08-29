@@ -371,6 +371,7 @@ button svg { display: block; }
 /* Fixed, and the reading beside it given room for three digits in figures of
    one width: without both, the bar grew and shrank as the number changed. */
 .download .track { flex: none; width: 96px; height: 4px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; }
+.download .size { flex: none; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .85; }
 .download .percent { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* Told to be a block. A span is inline, and a width set on an inline box is
    ignored — which is why the track was there and the colour in it never was. */
@@ -1200,6 +1201,25 @@ button svg { display: block; }
 #favClear:hover { color: var(--on-surface); }
 .favEmpty { margin: 4px 2px 0; font-size: 12.5px; color: var(--muted); }
 .favList { display: flex; flex-direction: column; }
+
+/* The homepage field at the top of the page. */
+#favHomepage { display: flex; align-items: center; gap: 10px; margin: 2px 2px 6px; }
+.favHpLabel { font-size: 13px; color: var(--muted); flex: none; }
+#favHpInput {
+  flex: 1;
+  height: 30px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--on-surface);
+  background: var(--field);
+  border: 1px solid transparent;
+  border-radius: var(--r-pill);
+  outline: none;
+  user-select: text;
+}
+#favHpInput:focus { border-color: var(--accent); background: #1c1c21; }
+
 .favRow {
   display: flex;
   align-items: center;
@@ -1210,12 +1230,23 @@ button svg { display: block; }
   flex: 1;
   min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 11px;
+  padding: 7px 10px;
   text-align: left;
 }
+.favBadge {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+}
+.favText { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .favName {
   max-width: 100%;
   font-size: 13.5px;

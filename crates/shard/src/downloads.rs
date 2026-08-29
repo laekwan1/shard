@@ -57,16 +57,18 @@ impl Job {
 /// it is told apart from a click on a real video row. No real format uses it.
 pub const MUSIC_ITAG: u32 = u32::MAX;
 
-/// The marker for the second music row: the same AAC re-encoded to MP3. A separate
-/// row rather than a setting, so the format is chosen right in the download list —
-/// the desktop settings need admin rights to reach, and this does not.
-pub const MUSIC_MP3_ITAG: u32 = u32::MAX - 1;
-
 /// A direct progressive download (a plain media URL), for non-YouTube sites.
 pub const DIRECT_ITAG: u32 = u32::MAX - 1;
 
 /// An HLS stream, downloaded as segments and joined into one file.
 pub const HLS_ITAG: u32 = u32::MAX - 2;
+
+/// The marker for the second music row: the same AAC re-encoded to MP3. A separate
+/// row rather than a setting, so the format is chosen right in the download list —
+/// the desktop settings need admin rights to reach, and this does not. Must not
+/// collide with DIRECT_ITAG/HLS_ITAG above — it did (both were MAX-1), so a click
+/// on MP3 was taken for a direct download and refused with "받을 것을 찾지 못했습니다".
+pub const MUSIC_MP3_ITAG: u32 = u32::MAX - 3;
 
 /// Whether the page said to go ahead despite the warning.
 pub fn forced(payload: &str) -> bool {

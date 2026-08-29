@@ -174,12 +174,27 @@ const COVER_KINDS: [&str; 3] = ["jpg", "webp", "png"];
 /// of the file rather than the whole of it — a shelf of forty songs is forty of
 /// these every time it is opened.
 fn carries_cover(path: &Path) -> bool {
-    use std::io::Read;
+    use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let mut head = vec![0u8; 256 * 1024];
     let Ok(read) = file.read(&mut head) else { return false };
     head.truncate(read);
-    crate::download::mp4::has_cover(&head)
+    if crate::download::mp4::has_cover(&head) {
+        return true;
+    }
+    // Our own writer (mp4mux) lays the `moov` — which holds the cover — at the END
+    // of the file, past this head. A music file's cover was therefore never
+    // noticed: it showed a blank note instead of its art. Check the tail too.
+    let Ok(len) = file.seek(SeekFrom::End(0)) else { return false };
+    let tail = (512 * 1024u64).min(len);
+    if file.seek(SeekFrom::Start(len - tail)).is_err() {
+        return false;
+    }
+    let mut end = Vec::with_capacity(tail as usize);
+    if file.take(tail).read_to_end(&mut end).is_err() {
+        return false;
+    }
+    crate::download::mp4::has_cover(&end)
 }
 
 fn is_picture(path: &Path) -> bool {
