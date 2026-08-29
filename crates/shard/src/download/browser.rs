@@ -546,7 +546,75 @@ pub(crate) fn new_view(
             tracing::warn!("could not watch history for back/forward state: {e}");
         }
     }
+
+    // Block ad/tracker HOSTS at the network level — the same list iOS blocks
+    // (WKContentRuleList) and Android blocks in shouldInterceptRequest. The DOM
+    // skipAds only clicks a skip button after an ad has started; this stops the ad
+    // request itself. Never the video CDN (googlevideo.com) or youtube.com, so a
+    // pattern that stops matching brings ads back without breaking playback.
+    install_ad_block(&view);
+
     Ok(view)
+}
+
+/// The ad/tracker host and path fragments to block — identical to iOS/Android.
+fn is_ad_url(url: &str) -> bool {
+    const AD: [&str; 9] = [
+        "doubleclick.net",
+        "googlesyndication.com",
+        "googleadservices.com",
+        "google-analytics.com",
+        "googletagservices.com",
+        "googletagmanager.com",
+        "/pagead/",
+        "/ptracking",
+        "/api/stats/ads",
+    ];
+    AD.iter().any(|p| url.contains(p))
+}
+
+/// Attach a WebView2 WebResourceRequested filter that fails ad requests with an
+/// empty 403, so they never load. Best-effort: a failure to install just leaves
+/// the DOM skipAds as the only defense, as before.
+fn install_ad_block(view: &wry::WebView) {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, ICoreWebView2_2,
+    };
+    use webview2_com::WebResourceRequestedEventHandler;
+    use windows::core::{w, Interface};
+    use wry::WebViewExtWindows;
+
+    let wv = view.webview();
+    unsafe {
+        if let Err(e) = wv.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL) {
+            tracing::warn!("could not set ad-block filter: {e}");
+            return;
+        }
+    }
+    let handler = WebResourceRequestedEventHandler::create(Box::new(move |wv, args| {
+        let (Some(wv), Some(args)) = (wv, args) else { return Ok(()) };
+        unsafe {
+            let request = args.Request()?;
+            let mut uri = windows::core::PWSTR::null();
+            request.Uri(&mut uri)?;
+            let url = uri.to_string().unwrap_or_default();
+            if is_ad_url(&url) {
+                // An empty 403 in place of the ad. The response is built from the
+                // environment, reached through ICoreWebView2_2. No content stream.
+                if let Ok(env) = wv.cast::<ICoreWebView2_2>().and_then(|w2| w2.Environment()) {
+                    let no_content: Option<&windows::Win32::System::Com::IStream> = None;
+                    if let Ok(resp) = env.CreateWebResourceResponse(no_content, 403, w!("Blocked"), w!("")) {
+                        let _ = args.SetResponse(&resp);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }));
+    let mut token = 0i64;
+    if let Err(e) = unsafe { wv.add_WebResourceRequested(&handler, &mut token) } {
+        tracing::warn!("could not install ad block: {e}");
+    }
 }
 
 /// The next unused tab id.
