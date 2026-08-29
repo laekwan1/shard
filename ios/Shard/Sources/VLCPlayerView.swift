@@ -22,9 +22,15 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     // broke its sync, so we chose sync over that. The trade: this native audio can crackle over
     // a jittery (Apple-Watch) Bluetooth link on a FRESH output — but that only bites the rare
     // libVLC cases (VP9 video, and Opus music, which is itself rare now that music is AAC via
-    // AVPlayer). Time-stretch is left on so a speed change keeps pitch; the speex resampler is a
-    // better 48k resampler than the default linear one.
-    let player = VLCMediaPlayer(options: ["--audio-resampler=speex_resampler"])
+    // AVPlayer).
+    //   --no-audio-time-stretch : do NOT run libVLC's pitch-preserving stretcher on a speed
+    //     change. The stretcher re-buffers when the rate changes, which came out as the sound
+    //     CUTTING on every 배속 change; without it a rate change is a plain resample — the
+    //     pitch rises with the speed (like most players' fast-forward), but the sound does not
+    //     drop. This is the pre-engine (9774c6c) setting; leaving it off regressed the cut.
+    //   --audio-resampler=speex_resampler : a better 48k resampler than the default linear one.
+    let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
+                                          "--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
@@ -74,7 +80,11 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func toggleMute() {
         muted.toggle()
+        // libVLC's isMuted flag lagged noticeably; setting the volume too makes it INSTANT
+        // (volume takes effect at once), with isMuted still the semantic on/off. Restore to
+        // the last chosen volume on unmute.
         player.audio?.isMuted = muted
+        player.audio?.volume = muted ? 0 : targetVolume
         av.isMuted = muted
     }
 
@@ -295,34 +305,22 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
+        // MUTE across the whole transition and hold it until the first frame: the mute flag
+        // silences the new stream's first buffer — the moment the "텁" pop fires. libVLC's
+        // audio TRAILS the first video frame (by up to ~0.5s), so releasing the mute ON that
+        // frame (see mediaPlayerTimeChanged) lands BEFORE the sound actually starts — the pop
+        // is covered and NOT a single real sample is clipped. This is the pre-engine handling
+        // (9774c6c) that had this right; the fade/no-mute experiments regressed it.
         let s = player.state
         let needStop = s == .ended || s == .error || s == .stopped
+        player.audio?.isMuted = true
         if needStop { player.stop() }
-        pendingUnmute = true              // holds the black cover until the first frame
+        pendingUnmute = true
         player.media = makeMedia(url)
+        player.audio?.isMuted = true
         player.play()
         player.rate = rate
-        // No start mute/fade. The "텁" pop is a HARDWARE click made when the player attaches
-        // its audio stream to the mixer — software volume/fade cannot hide it (see 결함-기록),
-        // and a fade only quietens the real start of the sound (the "앞부분 씹힘"). So we let
-        // the sound play whole from sample 0 and accept the pop, which is the price of the
-        // native path the user chose for perfect A/V sync.
         scheduleWatchdog(url)
-    }
-
-    /// Mute briefly through a seek — libVLC's decoder discontinuity comes out as a click/burst
-    /// otherwise. Kept short so the sound is not silent long enough to feel like lag; restores
-    /// the user's actual mute state after.
-    private var seekMuteWork: DispatchWorkItem?
-    private func muteThroughSeek() {
-        player.audio?.isMuted = true
-        seekMuteWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self = self, self.backend == .vlc else { return }
-            self.player.audio?.isMuted = self.muted
-        }
-        seekMuteWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
     }
 
     // MARK: AVPlayer backend
@@ -431,6 +429,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // re-buffer; crackle-free playback over a contended radio is worth it. (New music
         // is AAC/.m4a → AVPlayer and never reaches libVLC at all.)
         media.addOption(":file-caching=800")
+        media.addOption(":no-audio-time-stretch")            // see player init — rate-change cut
         media.addOption(":audio-resampler=speex_resampler")  // decent resampler to 48k
         return media
     }
@@ -483,7 +482,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         } else {
             // Seeking to exactly 1.0 lands on end-of-stream, which VLC treats as
             // "finished" and snaps back — cap just short so the far end is reachable.
-            muteThroughSeek()
             player.position = clamped
         }
     }
@@ -526,14 +524,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     }
     func seek(to p: Float) {
         if backend == .av { avSeekFraction(max(0, min(1, p))) }
-        else { muteThroughSeek(); player.position = max(0, min(1, p)) }
+        else { player.position = max(0, min(1, p)) }
     }
     func jump(_ seconds: Int32) {
         if backend == .av {
             let t = (av.currentItem?.currentTime().seconds ?? 0) + Double(seconds)
             av.seek(to: CMTime(seconds: max(0, t), preferredTimescale: 600))
         } else {
-            muteThroughSeek()
             seconds < 0 ? player.jumpBackward(-seconds) : player.jumpForward(seconds)
         }
     }
@@ -556,7 +553,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // Setting AVPlayer.rate also starts playback; only change it while playing.
             if av.timeControlStatus != .paused { av.rate = r }
         } else {
-            player.rate = r   // libVLC plays faster; time-stretch keeps the pitch
+            player.rate = r   // plain resample (no time-stretch) — no cut on a speed change
         }
     }
     func cycleRate() {
@@ -588,6 +585,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
+            player.audio?.isMuted = muted   // release on the frame; audio trails it, so no clip
         } else if buffering, player.isPlaying {
             // Buffering that was NOT an open (e.g. after a seek) — clear it once
             // frames flow again, or the spinner spun forever over black.
@@ -625,6 +623,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the sound kept going. The cover is driven only by open() (a real track
         // change) and cleared on the first frame; a seek just re-buffers silently.
         if player.state == .ended || player.state == .error { buffering = false }
+        // Keep the new stream muted through every state update until the first frame releases
+        // it — this is what actually holds the mute across the "텁" pop on the first buffer.
+        if pendingUnmute { player.audio?.isMuted = true }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
 
