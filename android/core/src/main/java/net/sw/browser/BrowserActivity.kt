@@ -587,11 +587,18 @@ abstract class BrowserActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 // Whatever the reload was started by, this is where it ends.
                 pull.finished()
-                // One arrival, one visit — counted where a page finishes loading,
-                // by host, for the start page's "자주 방문". The start page and other
-                // non-web addresses are filtered out inside recordVisit.
+                // One arrival, one entry — pushed onto the history where a page
+                // finishes loading. Non-web addresses are filtered inside recordVisit.
                 favorites.recordVisit(url, pageTitle)
                 view.evaluateJavascript(VideoHook.SCRIPT, null)
+                // Nudge responsive grids that laid out early and overlap (xvideos'
+                // home thumbnails) to recompute — once now, once shortly after for
+                // grids that fill in late. Parity with iOS/PC.
+                view.evaluateJavascript(
+                    "window.dispatchEvent(new Event('resize'));" +
+                        "setTimeout(function(){window.dispatchEvent(new Event('resize'))},350);",
+                    null,
+                )
                 // Only where the document-start injection is unavailable. Where
                 // it works it has already run, and running the recorder again
                 // would discard what it has captured since.

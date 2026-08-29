@@ -309,8 +309,14 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         // grids (xvideos' home thumbnails) are laid out once, early, before the web
         // view has settled, and render overlapping until something makes them recompute
         // — a reload fixed it. A plain resize event does the same, page-side only (no
-        // native frame/scale change, so none of the zoom-runaway risk).
-        webView.evaluateJavaScript("window.dispatchEvent(new Event('resize'))", completionHandler: nil)
+        // native frame/scale change, so none of the zoom-runaway risk). Dispatched
+        // again shortly after for grids that fill in AFTER didFinish (the overlap that
+        // "still happens sometimes" — one nudge missed the late-rendered tiles).
+        let nudge = "window.dispatchEvent(new Event('resize'))"
+        webView.evaluateJavaScript(nudge, completionHandler: nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak webView] in
+            webView?.evaluateJavaScript(nudge, completionHandler: nil)
+        }
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         isLoading = false
