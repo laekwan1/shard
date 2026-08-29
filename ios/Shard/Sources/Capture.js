@@ -528,3 +528,57 @@
   window.addEventListener('resize', syncDeletes, true);
   setInterval(syncDeletes, 300);
 })();
+
+// A thin seek bar pinned to the bottom edge of the playing video — always
+// visible, dragged to scrub. Mobile YouTube renders its own controls lazily and
+// hides them, so there was no way to scrub without first tapping; this is ours.
+(function () {
+  if (window.__shardSeek) return;
+  window.__shardSeek = true;
+  var bar, played, dragging = false, vid = null;
+  function build() {
+    if (bar) return;
+    bar = document.createElement('div');
+    bar.style.cssText = 'position:fixed;left:0;height:18px;z-index:2147483000;display:none;touch-action:none;background:transparent;';
+    var track = document.createElement('div');
+    track.style.cssText = 'position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.28);';
+    played = document.createElement('div');
+    played.style.cssText = 'position:absolute;left:0;bottom:0;height:3px;width:0;background:#ff0033;';
+    bar.appendChild(track); bar.appendChild(played);
+    (document.body || document.documentElement).appendChild(bar);
+    var seek = function (cx) {
+      if (!vid || !isFinite(vid.duration) || vid.duration <= 0) return;
+      var r = bar.getBoundingClientRect();
+      var f = Math.min(1, Math.max(0, (cx - r.left) / r.width));
+      vid.currentTime = f * vid.duration;
+      played.style.width = (f * 100) + '%';
+    };
+    bar.addEventListener('touchstart', function (e) { dragging = true; seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); }, { passive: false });
+    bar.addEventListener('touchmove', function (e) { if (dragging) { seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); } }, { passive: false });
+    bar.addEventListener('touchend', function (e) { dragging = false; e.stopPropagation(); }, { passive: false });
+  }
+  function pick() {
+    var best = null, area = 0, vids = document.getElementsByTagName('video');
+    for (var i = 0; i < vids.length; i++) {
+      var v = vids[i], r = v.getBoundingClientRect(), a = r.width * r.height;
+      if (a > area && r.width > 120 && r.height > 80 && r.bottom > 0 && r.top < innerHeight) { best = v; area = a; }
+    }
+    return best;
+  }
+  function tick() {
+    try {
+      build();
+      vid = pick();
+      if (!vid) { bar.style.display = 'none'; return; }
+      var r = vid.getBoundingClientRect();
+      bar.style.display = 'block';
+      bar.style.left = r.left + 'px';
+      bar.style.width = r.width + 'px';
+      bar.style.top = (r.bottom - 18) + 'px';
+      if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
+        played.style.width = ((vid.currentTime / vid.duration) * 100) + '%';
+      }
+    } catch (e) {}
+  }
+  setInterval(tick, 250);
+})();
