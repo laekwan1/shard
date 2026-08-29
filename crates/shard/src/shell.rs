@@ -437,6 +437,15 @@ pub enum Ask {
     TabPick(usize),
     TabShut(usize),
     Steer { what: String, url: String },
+    /// The browser start page asked for its own contents — the pinned sites and
+    /// the ones visited most, so it can draw the tiles.
+    BrowserHome,
+    /// Pin or unpin a page: the star on the address row. Toggles by URL, so a
+    /// second press on a page already pinned removes it.
+    BookmarkToggle { url: String, title: String },
+    /// Drop one "자주 방문" tile for good — the host is remembered as hidden so
+    /// the tile does not come back the next time the site is opened.
+    FrequentHide(String),
     /// A page answered the download panel — which quality was chosen.
     /// A row on the quality list. `anyway` is set when it was pressed past a
     /// warning that the file is already saved.
@@ -507,6 +516,12 @@ pub fn read_ask(body: &str) -> Ask {
         "tab.new" => Ask::TabNew(field(body, "url").unwrap_or_default()),
         "tab.pick" => Ask::TabPick(number(body, "at").unwrap_or(0) as usize),
         "tab.shut" => Ask::TabShut(number(body, "at").unwrap_or(0) as usize),
+        "browser.home" => Ask::BrowserHome,
+        "bookmark.toggle" => Ask::BookmarkToggle {
+            url: field(body, "url").unwrap_or_default(),
+            title: field(body, "title").unwrap_or_default(),
+        },
+        "frequent.hide" => Ask::FrequentHide(field(body, "host").unwrap_or_default()),
         "steer" => Ask::Steer {
             what: field(body, "what").unwrap_or_else(|| "go".into()),
             url: field(body, "url").unwrap_or_default(),
@@ -1096,6 +1111,10 @@ pub fn preview() -> Result<()> {
             shell.say_engine(&engine.borrow());
             shell.say_downloads(&jobs.borrow());
             shell.say_tabs();
+            // Sent up front, not only when the start page opens: the star on the
+            // address row fills from this list, and it has to be right the moment
+            // a tab is looked at, before the start page has ever been seen.
+            shell.tell(&browser_home_json(&engine.borrow().shared.config.read().browser));
         }
         Ask::EngineToggle => {
             // The engine needs the WinDivert driver, and the driver needs an
@@ -1132,14 +1151,68 @@ pub fn preview() -> Result<()> {
                 shell.show_tab(None);
             }
         }
-        Ask::TabNew(url) => shell.open_tab(if url.is_empty() {
-            "https://www.youtube.com/"
-        } else {
-            &url
-        }),
+        Ask::TabNew(url) => {
+            let url = if url.is_empty() { "https://www.youtube.com/".to_string() } else { url };
+            // Counted where a page is opened by hand, not on every heartbeat a tab
+            // sends: "자주 방문" is the sites you go to, and one visit is one arrival,
+            // not one second spent there. Persisted at once, the way settings are.
+            {
+                let core = engine.borrow();
+                let mut cfg = core.shared.config.write();
+                record_visit(&mut cfg.browser, &url);
+            }
+            engine.borrow().save_config();
+            shell.open_tab(&url);
+        }
         Ask::TabPick(at) => shell.show_tab(Some(at)),
         Ask::TabShut(at) => shell.close_tab(at),
         Ask::Steer { what, url } => shell.steer(&what, &url),
+        // The start page asked for its tiles — the pinned sites and the ones
+        // visited most. Read straight from the saved config.
+        Ask::BrowserHome => {
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        // The star: pin the page in front, or unpin it if it was already pinned.
+        Ask::BookmarkToggle { url, title } => {
+            if !url.is_empty() {
+                {
+                    let core = engine.borrow();
+                    let mut cfg = core.shared.config.write();
+                    let marks = &mut cfg.browser.bookmarks;
+                    if let Some(pos) = marks.iter().position(|b| b.url == url) {
+                        marks.remove(pos);
+                    } else {
+                        // Newest first, so the most recently pinned reads at the top.
+                        marks.insert(0, crate::config::Bookmark {
+                            url: url.clone(),
+                            title: if title.trim().is_empty() { title_of(&url) } else { title },
+                        });
+                    }
+                }
+                engine.borrow().save_config();
+            }
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        // Drop one "자주 방문" tile and remember the host as hidden, so opening the
+        // site again does not bring the tile straight back.
+        Ask::FrequentHide(host) => {
+            let host = crate::config::normalise_host(&host);
+            if !host.is_empty() {
+                {
+                    let core = engine.borrow();
+                    let mut cfg = core.shared.config.write();
+                    cfg.browser.visits.remove(&host);
+                    if !cfg.browser.hidden_frequent.iter().any(|h| h == &host) {
+                        cfg.browser.hidden_frequent.push(host);
+                    }
+                }
+                engine.borrow().save_config();
+            }
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
 
         // The list of what can be saved, and the row that was pressed on it.
         Ask::PageOffer(payload) => {
@@ -1468,6 +1541,82 @@ fn title_of(url: &str) -> String {
         .unwrap_or(url)
         .trim_start_matches("www.")
         .to_string()
+}
+
+/// Note that a site was opened: bump its host's visit count and keep the newest
+/// pages in history. Host granularity, because "자주 방문" answers "which sites",
+/// not "which pages" — a hundred YouTube videos are one place you keep going.
+fn record_visit(b: &mut crate::config::Browser, url: &str) {
+    if !url.starts_with("http") {
+        return; // about:blank and the like are not places.
+    }
+    let host = crate::config::normalise_host(url);
+    if host.is_empty() {
+        return;
+    }
+    *b.visits.entry(host).or_insert(0) += 1;
+    // Newest first, without duplicates, capped — a long history is neither shown
+    // nor useful, and rewriting the whole file on each open should stay cheap.
+    b.history.retain(|h| h.url != url);
+    b.history.insert(0, crate::config::Bookmark { url: url.to_string(), title: title_of(url) });
+    b.history.truncate(60);
+}
+
+/// Build the start page: the pinned sites and the eight most-visited hosts, with
+/// YouTube always offered when nothing is hidden — the browser exists to save
+/// from it, so a blank start page would hide its one sure destination.
+fn browser_home_json(b: &crate::config::Browser) -> String {
+    let bookmarks: Vec<String> = b
+        .bookmarks
+        .iter()
+        .map(|m| format!(r#"{{"url":"{}","title":"{}"}}"#, escape(&m.url), escape(&m.title)))
+        .collect();
+
+    // Most-visited first, dropping the hosts the user has hidden.
+    let mut ranked: Vec<(&String, u32)> = b
+        .visits
+        .iter()
+        .filter(|(host, _)| !b.hidden_frequent.iter().any(|h| h == *host))
+        .map(|(host, n)| (host, *n))
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+
+    let mut frequent: Vec<String> = Vec::new();
+    let mut seen: Vec<String> = Vec::new();
+    // YouTube first when it is not hidden and not already pinned: the app's whole
+    // reason to have a browser, so it should be one press away on a fresh install.
+    let youtube = "youtube.com".to_string();
+    let yt_hidden = b.hidden_frequent.iter().any(|h| h == &youtube);
+    let yt_pinned = b.bookmarks.iter().any(|m| crate::config::normalise_host(&m.url) == youtube);
+    if !yt_hidden && !yt_pinned {
+        frequent.push(format!(
+            r#"{{"url":"https://www.youtube.com/","title":"youtube.com","host":"youtube.com"}}"#
+        ));
+        seen.push(youtube);
+    }
+    for (host, _) in ranked {
+        if frequent.len() >= 8 {
+            break;
+        }
+        if seen.iter().any(|h| h == host) {
+            continue;
+        }
+        // A host already pinned would be a tile that repeats a bookmark below it.
+        if b.bookmarks.iter().any(|m| &crate::config::normalise_host(&m.url) == host) {
+            continue;
+        }
+        frequent.push(format!(
+            r#"{{"url":"https://{host}/","title":"{host}","host":"{host}"}}"#,
+            host = escape(host)
+        ));
+        seen.push(host.clone());
+    }
+
+    format!(
+        r#"{{"t":"start","bookmarks":[{}],"frequent":[{}]}}"#,
+        bookmarks.join(","),
+        frequent.join(",")
+    )
 }
 
 /// Which shelf a name from the page means.
