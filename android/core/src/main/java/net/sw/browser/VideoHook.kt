@@ -377,6 +377,26 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
               }
               setInterval(syncDlButtons, 400);
               window.addEventListener('scroll', syncDlButtons, true);
+
+              // Best-effort YouTube ad skipping — parity with iOS. Defensive: only acts when
+              // an ad is actually shown (skip button, or the player's ad-showing class), all in
+              // try/catch, so if YouTube changes markup it just does nothing.
+              function skipAds() {
+                if (document.hidden) return;
+                try {
+                  var skip = document.querySelector(
+                    '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-container button');
+                  if (skip) { skip.click(); return; }
+                  var player = document.querySelector('.html5-video-player');
+                  if (player && player.classList.contains('ad-showing')) {
+                    var v = player.querySelector('video');
+                    if (v && isFinite(v.duration) && v.duration > 0) v.currentTime = v.duration;
+                  }
+                  var overlayClose = document.querySelector('.ytp-ad-overlay-close-button');
+                  if (overlayClose) { try { overlayClose.click(); } catch (e) {} }
+                } catch (e) {}
+              }
+              setInterval(skipAds, 350);
               window.addEventListener('resize', syncDlButtons, true);
 
               var lastFire = 0;
