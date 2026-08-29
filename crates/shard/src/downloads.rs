@@ -384,7 +384,11 @@ impl Downloads {
             // asked for it; the flag is read where the file is written.
             music_mp3: audio_only && self.shared.config.read().download.music_mp3,
         };
-        let expected = job.video.bytes + job.audio.bytes;
+        // Music-only never fetches the video (the "video" here is only a small decoy
+        // named as already-playing), so counting its bytes in the total made the bar
+        // stall at audio/(video+audio) — ~65% on a short song — and then jump to done.
+        // The audio's own size is the whole of an audio-only download.
+        let expected = if audio_only { job.audio.bytes } else { job.video.bytes + job.audio.bytes };
         let title = offer.title.clone();
 
         // The same video twice at once writes one file from two threads, and

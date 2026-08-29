@@ -36,8 +36,10 @@
     user-select: none;
     display: flex;
     flex-direction: column;
-    /* Clear the address bar that floats over the top. */
-    padding-top: max(54px, calc(env(safe-area-inset-top) + 46px));
+    /* Clear the address panel that floats over the top — it is taller than a plain
+       bar (status-bar inset + a 40dp button row + padding, ~78dp), and the
+       "즐겨찾기" header was hiding under it. */
+    padding-top: max(96px, calc(env(safe-area-inset-top) + 84px));
   }
 
   .head {

@@ -918,6 +918,19 @@ abstract class BrowserActivity : AppCompatActivity() {
                 }
                 return false
             }
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                // A tap outside the open panel closes it. Moved here from ACTION_DOWN:
+                // a LEFT-swipe starts with a down outside the bar, and closing the
+                // panel on that down cleared panelShown before onScroll could run its
+                // "dismiss the panel first, library on the next swipe" step — so a
+                // left-swipe on the right half jumped straight to the library.
+                if (panelShown && !favoritesShown && !touchIsInside(binding.bar, e)) {
+                    hidePanel()
+                    return true
+                }
+                return false
+            }
         })
     }
 
@@ -938,11 +951,10 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    // While the favorites overlay is up the panel is pinned — home and
-                    // star on it are the only way back off that page (as on iOS).
-                    if (panelShown && !favoritesShown && !touchIsInside(binding.bar, event)) {
-                        hidePanel()
-                    } else if (binding.url.hasFocus() && !touchIsInside(binding.url, event)) {
+                    // Only the keyboard is put away on the down. Closing the panel is
+                    // done on a single TAP (see onSingleTapUp) so a left-swipe is not
+                    // pre-dismissed before its dismiss-then-library step can run.
+                    if (binding.url.hasFocus() && !touchIsInside(binding.url, event)) {
                         dismissKeyboard()
                     }
                 }

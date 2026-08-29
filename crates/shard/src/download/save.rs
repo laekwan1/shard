@@ -970,7 +970,10 @@ pub fn run_youtube(
         // The phone keeps the original AAC (.m4a); MP3 is a desktop switch.
         music_mp3: false,
     };
-    let expected = job.video.bytes + job.audio.bytes;
+    // Audio-only never downloads the video (it is only a decoy), so its bytes must
+    // not count toward the total — otherwise the bar stalls partway and jumps to
+    // done. See downloads.rs for the same fix on the desktop path.
+    let expected = if audio_only { job.audio.bytes } else { job.video.bytes + job.audio.bytes };
     let mut progress = |p: Progress| on_progress(p.video + p.audio, expected);
     run(&job, &mut progress, cancelled)
 }
