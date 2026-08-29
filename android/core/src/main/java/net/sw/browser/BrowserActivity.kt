@@ -629,6 +629,17 @@ abstract class BrowserActivity : AppCompatActivity() {
                 request: WebResourceRequest,
             ): WebResourceResponse? {
                 val url = request.url?.toString() ?: return null
+                // Block ad/tracker HOSTS at the network level, the same list iOS
+                // blocks (WKContentRuleList) — this is what actually stops the ad,
+                // where the DOM skipAds only clicks a skip button after it has
+                // already started. Never the video CDN (googlevideo.com) or
+                // youtube.com itself, so if a pattern ever stops matching, ads
+                // return but nothing about YouTube breaks.
+                if (isAdRequest(url)) {
+                    return WebResourceResponse(
+                        "text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0))
+                    )
+                }
                 catcher.offer(url, pageTitle, request.requestHeaders ?: emptyMap())
                 return null
             }
@@ -1152,6 +1163,15 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
+     * Whether a request is to a known ad/tracker host or path — the same set iOS
+     * blocks. Pure string matching so it is safe on the background request thread.
+     * The video CDN (googlevideo.com) and youtube.com are deliberately absent.
+     */
+    private fun isAdRequest(url: String): Boolean {
+        return AD_PATTERNS.any { url.contains(it) }
+    }
+
+    /**
      * The favorites overlay (start.html) — a second web view the star toggles over
      * the page, the way iOS overlays its start page. Configured once; only its
      * visibility changes after that.
@@ -1367,6 +1387,23 @@ abstract class BrowserActivity : AppCompatActivity() {
     protected fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_SHORT).show()
 
     companion object {
+        /**
+         * Ad/tracker host and path fragments to block — the same set iOS blocks
+         * (see WebView.installAdBlock). The video CDN (googlevideo.com) and
+         * youtube.com are NOT here on purpose: block those and playback breaks.
+         */
+        private val AD_PATTERNS = listOf(
+            "doubleclick.net",
+            "googlesyndication.com",
+            "googleadservices.com",
+            "google-analytics.com",
+            "googletagservices.com",
+            "googletagmanager.com",
+            "/pagead/",
+            "/ptracking",
+            "/api/stats/ads",
+        )
+
         /** Panel height as a share of the screen. */
         private const val PANEL_FRACTION = 0.10
 
