@@ -1,0 +1,194 @@
+<!doctype html>
+<!--
+    The browser's start page (speed dial), shown when there is no site in front.
+    It is a local page loaded into the same web view the browser uses, the way a
+    real browser's new-tab page is: opening a tile navigates this view to the
+    site. Data comes from the native side over the `Shard` bridge; a tile press
+    and a tile dismiss go back the same way.
+
+    Self-contained on purpose — one file, no requests — so it draws instantly and
+    works with the engine off.
+-->
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root {
+    --surface: #0E0E10;
+    --raised: #202024;
+    --on-surface: #E8E6E3;
+    --muted: #8A8A90;
+    /* The app's own accent — the shard module paints it teal, the same as the
+       native star and every other control. Kept in step by hand because this
+       page is plain HTML and cannot read @color/accent. */
+    --accent: #2DD4BF;
+    --on-accent: #04252B;
+    --bad: #E5484D;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--surface);
+    color: var(--on-surface);
+    font-family: -apple-system, "Roboto", "Noto Sans KR", system-ui, sans-serif;
+    padding: max(28px, env(safe-area-inset-top)) 20px 32px;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .wordmark {
+    margin: 4px 0 26px;
+    text-align: center;
+    font-size: 13px;
+    letter-spacing: .12em;
+    color: var(--muted);
+  }
+  .group { margin-top: 24px; }
+  .group.hidden { display: none; }
+  .head {
+    margin: 0 2px 12px;
+    font-size: 12.5px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    color: var(--muted);
+  }
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 12px;
+  }
+  .tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 15px 6px 11px;
+    border-radius: 16px;
+    background: var(--raised);
+    border: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    transition: transform .1s ease, background .1s ease;
+  }
+  .tile:active { transform: scale(.95); background: #26262b; }
+  .badge {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--on-accent);
+    background: var(--accent);
+  }
+  .name {
+    max-width: 100%;
+    font-size: 11.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .drop {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--muted);
+    background: #00000066;
+    border: none;
+  }
+  .drop:active { color: #fff; background: var(--bad); }
+  .empty {
+    margin-top: 30vh;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <p class="wordmark">S H A R D</p>
+  <div id="bookmarksGroup" class="group hidden">
+    <p class="head">즐겨찾기</p>
+    <div id="bookmarks" class="tiles"></div>
+  </div>
+  <div id="frequentGroup" class="group hidden">
+    <p class="head">자주 방문</p>
+    <div id="frequent" class="tiles"></div>
+  </div>
+  <p id="empty" class="empty" hidden>위 주소창에 주소나 검색어를 입력하세요</p>
+
+<script>
+  function bridgeHome() {
+    try { return JSON.parse(window.Shard.home()); }
+    catch (e) { return { bookmarks: [], frequent: [] }; }
+  }
+  function open(url) { try { window.Shard.open(url); } catch (e) {} }
+  function hide(host) { try { window.Shard.hide(host); } catch (e) {} }
+
+  function initial(text) {
+    var t = String(text || "").replace(/^www\./, "").trim();
+    return (t[0] || "?").toUpperCase();
+  }
+
+  function tile(item, pinned) {
+    var cell = document.createElement("button");
+    cell.className = "tile";
+
+    var badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = initial(item.title || item.url);
+
+    var name = document.createElement("span");
+    name.className = "name";
+    name.textContent = (item.title || item.url).replace(/^https?:\/\//, "").replace(/^www\./, "");
+
+    cell.appendChild(badge);
+    cell.appendChild(name);
+    cell.addEventListener("click", function () { open(item.url); });
+
+    if (!pinned && item.host) {
+      var drop = document.createElement("button");
+      drop.className = "drop";
+      drop.textContent = "✕";
+      drop.addEventListener("click", function (e) {
+        e.stopPropagation();
+        hide(item.host);
+        render();
+      });
+      cell.appendChild(drop);
+    }
+    return cell;
+  }
+
+  function render() {
+    var data = bridgeHome();
+    var marks = data.bookmarks || [];
+    var freq = data.frequent || [];
+
+    var bm = document.getElementById("bookmarks");
+    var fq = document.getElementById("frequent");
+    bm.textContent = "";
+    fq.textContent = "";
+    marks.forEach(function (b) { bm.appendChild(tile(b, true)); });
+    freq.forEach(function (f) { fq.appendChild(tile(f, false)); });
+
+    document.getElementById("bookmarksGroup").classList.toggle("hidden", marks.length === 0);
+    document.getElementById("frequentGroup").classList.toggle("hidden", freq.length === 0);
+    document.getElementById("empty").hidden = marks.length + freq.length > 0;
+  }
+
+  render();
+</script>
+</body>
+</html>

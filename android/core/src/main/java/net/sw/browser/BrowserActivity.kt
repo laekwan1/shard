@@ -62,6 +62,9 @@ abstract class BrowserActivity : AppCompatActivity() {
     @Volatile
     private var pageTitle: String = ""
 
+    /** The pinned sites and the ones visited most — what the start page draws. */
+    private val favorites by lazy { Favorites(this) }
+
     private var panelShown = false
 
     /**
@@ -250,7 +253,10 @@ abstract class BrowserActivity : AppCompatActivity() {
         warnIfNotificationsAreOff()
 
         if (autoStart) setEngine(true) else showEngineState(false)
-        binding.web.loadUrl(homeUrl)
+        // The start page, not a fixed site: the browser opens onto its own speed
+        // dial the way a real browser opens onto a new tab. A tile or the address
+        // bar is what then loads a site over it.
+        binding.web.loadUrl(Favorites.START_URL)
         ui.post(statusTicker)
     }
 
@@ -542,6 +548,8 @@ abstract class BrowserActivity : AppCompatActivity() {
         // The page reports long presses on video through this.
         addJavascriptInterface(VideoHook(::onVideoLongPress), VideoHook.BRIDGE)
         addJavascriptInterface(YouTubeBridge(), YouTube.BRIDGE)
+        // The start page reads its tiles and opens them through this.
+        addJavascriptInterface(FavoritesBridge(), Favorites.BRIDGE)
 
         // The YouTube recorder has to be in place before the page's own scripts
         // run. Injecting it when the page finishes loading was too late: the
@@ -563,6 +571,8 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 binding.url.setText(url)
+                // The star follows the page in front, and hides on the start page.
+                updateStar(url)
                 // A new page has no title yet; the chrome client fills it in.
                 pageTitle = ""
                 // Media found on the last page has nothing to do with this one.
@@ -575,6 +585,10 @@ abstract class BrowserActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 // Whatever the reload was started by, this is where it ends.
                 pull.finished()
+                // One arrival, one visit — counted where a page finishes loading,
+                // by host, for the start page's "자주 방문". The start page and other
+                // non-web addresses are filtered out inside recordVisit.
+                favorites.recordVisit(url)
                 view.evaluateJavascript(VideoHook.SCRIPT, null)
                 // Only where the document-start injection is unavailable. Where
                 // it works it has already run, and running the recorder again
@@ -593,6 +607,8 @@ abstract class BrowserActivity : AppCompatActivity() {
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                 if (url != binding.url.text.toString()) {
                     binding.url.setText(url)
+                    // In-app navigation (YouTube's SPA) changes the page too.
+                    updateStar(url)
                     // A different video's streams are not this one's.
                     catcher.clear()
                     PageContext.current = PageContext(url, view.settings.userAgentString)
@@ -783,6 +799,18 @@ abstract class BrowserActivity : AppCompatActivity() {
     private fun wireControls() {
         binding.power.setOnClickListener { setEngine(!engineOn) }
         binding.rotate.setOnClickListener { rotateScreen() }
+
+        // The house goes back to the start page, keeping the site one tile away.
+        binding.home.setOnClickListener { binding.web.loadUrl(Favorites.START_URL) }
+
+        // The star pins or unpins the page in front. Toggled here, drawn at once —
+        // the store is the truth, so the icon follows what it returns.
+        binding.star.setOnClickListener {
+            val url = binding.web.url ?: return@setOnClickListener
+            if (url.startsWith(Favorites.START_URL)) return@setOnClickListener
+            favorites.toggle(url, pageTitle)
+            updateStar(url)
+        }
 
         // Tapping the address bar should replace what is there, not put a
         // cursor in the middle of a URL nobody wants to edit by hand.
@@ -1079,6 +1107,42 @@ abstract class BrowserActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * How the start page reaches the pinned sites and opens them.
+     *
+     * `home` is read on the page's own thread and returns at once; `open` and
+     * `hide` change the view or the store, so they hop to the main thread. Opening
+     * a tile navigates this same web view — the start page is the new-tab page,
+     * not a separate screen.
+     */
+    private inner class FavoritesBridge {
+        @android.webkit.JavascriptInterface
+        fun home(): String = favorites.homeJson()
+
+        @android.webkit.JavascriptInterface
+        fun open(url: String) {
+            ui.post { binding.web.loadUrl(asUrl(url)) }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun hide(host: String) {
+            favorites.hide(host)
+        }
+    }
+
+    /**
+     * Fill or empty the address-bar star for the page in front, and take it away
+     * on the start page where there is nothing to pin.
+     */
+    private fun updateStar(url: String) {
+        val onStart = url.startsWith(Favorites.START_URL)
+        binding.star.visibility = if (onStart) View.GONE else View.VISIBLE
+        if (onStart) return
+        binding.star.setImageResource(
+            if (favorites.isPinned(url)) R.drawable.ic_star_on else R.drawable.ic_star
+        )
     }
 
     /**

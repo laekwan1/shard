@@ -41,6 +41,8 @@
     <string name="library_title">오프라인 보관함</string>
     <string name="library_open">오프라인 보관함</string>
     <string name="rotate_screen">화면 회전</string>
+    <string name="start_page">시작 페이지</string>
+    <string name="favorite">즐겨찾기</string>
     <string name="library_mute">음소거</string>
     <string name="library_rate">재생 속도</string>
     <string name="library_playback_settings">재생 설정</string>

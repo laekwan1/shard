@@ -82,12 +82,25 @@
                     android:padding="10dp"
                     android:contentDescription="@string/on" />
 
+                <!-- Back to the start page, keeping the site loadable again from a
+                     tile. A house, the same mark the top-level folder chip uses. -->
+                <ImageButton
+                    android:id="@+id/home"
+                    android:layout_width="38dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_home"
+                    android:scaleType="fitCenter"
+                    android:padding="9dp"
+                    android:contentDescription="@string/start_page" />
+
                 <EditText
                     android:id="@+id/url"
                     android:layout_width="0dp"
                     android:layout_height="38dp"
                     android:layout_weight="1"
-                    android:layout_marginStart="10dp"
+                    android:layout_marginStart="6dp"
                     android:background="@drawable/field"
                     android:paddingHorizontal="14dp"
                     android:hint="@string/url_hint"
@@ -98,6 +111,20 @@
                     android:textColor="@color/on_surface"
                     android:textColorHint="@color/muted"
                     android:importantForAutofill="no" />
+
+                <!-- The pin: filled amber while the page in front is saved, hollow
+                     while it is not. Gone on the start page, where there is no page
+                     to pin. -->
+                <ImageButton
+                    android:id="@+id/star"
+                    android:layout_width="38dp"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="2dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/ic_star"
+                    android:scaleType="fitCenter"
+                    android:padding="8dp"
+                    android:contentDescription="@string/favorite" />
 
                 <!--
                     Turn the whole browser a quarter. A page that only plays wide
