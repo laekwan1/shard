@@ -113,7 +113,21 @@ pub fn has_cover(head: &[u8]) -> bool {
 /// fragmented one they are counted from each fragment, so the header can grow
 /// without anything else having to be told.
 pub fn with_cover(file: &[u8], picture: &[u8], kind: &str) -> Option<Vec<u8>> {
-    if find(file, &[b"moof"]).is_none() || cover(file).is_some() {
+    if cover(file).is_some() {
+        return None; // already has one
+    }
+    // Growing `moov` (where the cover goes) is only safe when it does not shift the
+    // sample data the tables point at: either the file is fragmented (moof/trun use
+    // relative offsets) OR its `moov` sits AFTER the `mdat`, so adding to it moves
+    // nothing before it. Our music writer (mp4mux) is the second case — it lays
+    // ftyp, mdat, then moov — and the old moof-only guard rejected it, so a saved
+    // song never got its cover. A `moov` BEFORE `mdat` (faststart) is still refused.
+    let has_moof = find(file, &[b"moof"]).is_some();
+    let moov_after_mdat = match (find(file, &[b"moov"]), find(file, &[b"mdat"])) {
+        (Some((moov, _)), Some((mdat, _))) => moov > mdat,
+        _ => false,
+    };
+    if !has_moof && !moov_after_mdat {
         return None;
     }
     // Where the header starts and ends, headers included.

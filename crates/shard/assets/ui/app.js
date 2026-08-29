@@ -150,6 +150,7 @@ function syncAddress() {
   addressRow.hidden = !show;
   starBtn.hidden = !show;
   paintStar();
+  paintBookmarksBar();
 }
 
 // Fill the star while the favorites page is up, or when the page in front is one
@@ -159,6 +160,41 @@ function paintStar() {
     favActive() ||
     (browsing && !!frontUrl && bookmarksList.some((b) => b.url === frontUrl));
   starBtn.classList.toggle("on", on);
+}
+
+const bookmarksBar = document.getElementById("bookmarksBar");
+// The height (page units) the bookmarks bar takes; must match #bookmarksBar's CSS
+// height, and is what Rust keeps room for so the site sits below the bar.
+const BOOKMARK_BAR_H = 30;
+let bmBarExtra = 0;
+
+// Draw the bookmarks bar under the address row — a chip per pinned site — and tell
+// Rust how much room it needs. Shown only while a site is in front and there is at
+// least one pinned site.
+function paintBookmarksBar() {
+  const show = browsing && bookmarksList.length > 0;
+  bookmarksBar.hidden = !show;
+  bookmarksBar.textContent = "";
+  if (show) {
+    for (const b of bookmarksList) {
+      const chip = document.createElement("button");
+      chip.className = "bmChip";
+      chip.title = b.url;
+      const icon = favBadge(b);
+      icon.classList.add("bmIcon");
+      const label = document.createElement("span");
+      label.className = "bmLabel";
+      label.textContent = b.title || b.url;
+      chip.append(icon, label);
+      chip.addEventListener("click", () => send("steer", { what: "go", url: b.url }));
+      bookmarksBar.appendChild(chip);
+    }
+  }
+  const extra = show ? BOOKMARK_BAR_H : 0;
+  if (extra !== bmBarExtra) {
+    bmBarExtra = extra;
+    send("chrome", { extra });
+  }
 }
 
 // Grey the back/forward arrows when the front tab has nowhere to go. A disabled button
@@ -246,15 +282,17 @@ homeBtn.addEventListener("contextmenu", (e) => {
   show("favorites");
 });
 
-// The star: a left-click opens (or closes) the favorites page; a right-click
-// pins or unpins the page in front.
+// The star: a left-click pins or unpins the page in front; a right-click opens
+// (or closes) the favorites page — the same place the home button's right-click
+// goes, where the homepage is set too.
 starBtn.addEventListener("click", () => {
-  if (favActive()) send("nav", { to: "browser" }); // on it → back to the tab
-  else show("favorites");
+  if (favActive()) send("nav", { to: "browser" }); // on the page → back to the tab
+  else if (browsing && frontUrl) send("bookmark.toggle", { url: frontUrl, title: frontTitle });
 });
 starBtn.addEventListener("contextmenu", (e) => {
   e.preventDefault();
-  if (browsing && frontUrl) send("bookmark.toggle", { url: frontUrl, title: frontTitle });
+  if (favActive()) send("nav", { to: "browser" });
+  else show("favorites");
 });
 
 // ---- the favorites page ----------------------------------------------------
@@ -279,6 +317,7 @@ function paintFavorites(message) {
   document.getElementById("favClear").style.visibility = history.length ? "visible" : "hidden";
 
   paintStar();
+  paintBookmarksBar();
 }
 
 // Save the homepage on Enter, so the home button opens what was typed.

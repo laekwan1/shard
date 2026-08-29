@@ -261,6 +261,35 @@ button svg { display: block; }
 }
 #url:focus { border-color: var(--accent); background: #1c1c21; }
 
+/* The bookmarks bar under the address row. Its height must match BOOKMARK_BAR_H
+   in app.js — Rust keeps exactly that much room for it. */
+#bookmarksBar {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  background: var(--toolbar);
+  border-top: 1px solid var(--divider);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+}
+#bookmarksBar::-webkit-scrollbar { height: 0; }
+.bmChip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 3px;
+  border-radius: var(--r-sm);
+  color: var(--on-surface);
+}
+.bmChip:hover { background: #ffffff0f; }
+.bmChip .bmIcon { width: 17px; height: 17px; border-radius: 4px; font-size: 10px; }
+.bmChip .bmLabel { font-size: 11.5px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 #frame-buttons { display: flex; }
 #frame-buttons { align-items: center; padding-right: 8px; }
 #frame-buttons button {
@@ -1202,9 +1231,8 @@ button svg { display: block; }
 .favEmpty { margin: 4px 2px 0; font-size: 12.5px; color: var(--muted); }
 .favList { display: flex; flex-direction: column; }
 
-/* The homepage field at the top of the page. */
-#favHomepage { display: flex; align-items: center; gap: 10px; margin: 2px 2px 6px; }
-.favHpLabel { font-size: 13px; color: var(--muted); flex: none; }
+/* The homepage field, under its heading. */
+#favHomepage { display: flex; margin: 2px 2px 6px; }
 #favHpInput {
   flex: 1;
   height: 30px;

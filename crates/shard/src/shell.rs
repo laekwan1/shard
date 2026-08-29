@@ -283,6 +283,10 @@ thread_local! {
     /// Whether something is playing. Beside the others so the window procedure
     /// keeps the room for the strip while the window is being dragged.
     static PLAYING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Extra chrome height (in page units) the bookmarks bar takes under the
+    /// address row — 0 when it is not shown. The page reports it so the site below
+    /// starts under the bar rather than beneath it.
+    static EXTRA_CHROME: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
     /// The window the shell's page is drawn in — a child of ours, taken while it
     /// was the only one. Needed to say which of two overlapping children is in
     /// front, which nothing in the web view binding can be asked.
@@ -310,7 +314,9 @@ fn relayout(hwnd: HWND) {
     let width = (rect.right - rect.left).max(0) as u32;
     let height = (rect.bottom - rect.top).max(0) as u32;
     let showing = SHOWING.with(|cell| cell.get());
-    let chrome = chrome_height(hwnd);
+    // The address row plus, when the bookmarks bar is shown, its height too — so
+    // the site starts under the bar, not behind it.
+    let chrome = chrome_height(hwnd) + scaled(hwnd, EXTRA_CHROME.with(|cell| cell.get()));
     // Room kept along the bottom for the strip that says what is playing. The
     // page draws it, and the page is underneath the site being browsed, so the
     // site has to be made shorter or the strip is simply covered up.
@@ -432,6 +438,9 @@ pub enum Ask {
     /// Something is playing, or has stopped: the window keeps room along the
     /// bottom for the strip that says so.
     Playing(bool),
+    /// The bookmarks bar appeared or went away: keep room for it under the address
+    /// row so the site starts below it. The value is its height in page units.
+    ChromeExtra(i32),
     /// Browsing: a tab to open, pick or drop, and where to point it.
     TabNew(String),
     TabPick(usize),
@@ -518,6 +527,7 @@ pub fn read_ask(body: &str) -> Ask {
         },
         // A plain boolean, not a string, so it is read as one.
         "playing" => Ask::Playing(body.contains(r#""on":true"#)),
+        "chrome" => Ask::ChromeExtra(number(body, "extra").unwrap_or(0) as i32),
         "tab.new" => Ask::TabNew(field(body, "url").unwrap_or_default()),
         "tab.pick" => Ask::TabPick(number(body, "at").unwrap_or(0) as usize),
         "tab.shut" => Ask::TabShut(number(body, "at").unwrap_or(0) as usize),
@@ -1396,6 +1406,12 @@ pub fn preview() -> Result<()> {
             }
         }
         Ask::Playing(on) => shell.now_playing(on),
+        Ask::ChromeExtra(extra) => {
+            if EXTRA_CHROME.with(|cell| cell.get()) != extra {
+                EXTRA_CHROME.with(|cell| cell.set(extra));
+                shell.lay_out();
+            }
+        }
         other => tracing::info!("shell ask: {other:?}"),
     })?;
 

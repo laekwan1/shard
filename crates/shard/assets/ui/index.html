@@ -71,6 +71,11 @@
     <button data-steer="reload" title="새로고침"><svg viewBox="0 0 20 20"><path d="M15.5 7A6 6 0 1 0 16.5 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M15.8 3.4V7.2H12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
 
+  <!-- The bookmarks bar, under the address row while a site is in front: one chip
+       per pinned site, a click opens it in the tab. Rust keeps room for it below
+       the address row (see the "chrome" message) so the site starts under it. -->
+  <div id="bookmarksBar" hidden></div>
+
   <main id="screen">
     <!-- Home: the engine, and the two places to go. -->
     <section id="home" class="view">
@@ -226,10 +231,11 @@
     -->
     <section id="favorites" class="view" hidden>
       <div id="favInner">
-        <!-- The homepage, set right here: the home button (a right-click) opens
-             this page, and this is where its address is typed. -->
+        <!-- The homepage, its own section like the two below it: the home button
+             (a right-click) opens this page, and the field under the heading is
+             where its address is typed. -->
+        <div class="favHead"><h2>홈페이지</h2></div>
         <div id="favHomepage">
-          <span class="favHpLabel">홈페이지</span>
           <input id="favHpInput" spellcheck="false" placeholder="홈 버튼이 여는 주소">
         </div>
 

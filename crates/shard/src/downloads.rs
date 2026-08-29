@@ -406,7 +406,15 @@ impl Downloads {
         // what lands is neither of them. Pressing a row twice — while the page
         // is still there and the panel has not closed yet — is an easy thing to
         // do, so it is answered rather than obeyed.
-        let key = format!("{}|{}", job.into.display(), title);
+        // The format is part of the key: an M4A and an MP3 of the same song are
+        // different files (different extensions) and must be allowed to run at
+        // once — without this the second was refused as "already downloading".
+        let fmt = if audio_only {
+            if want_mp3 { "mp3" } else { "m4a" }
+        } else {
+            "video"
+        };
+        let key = format!("{}|{}|{}", job.into.display(), title, fmt);
         if self
             .list
             .iter()
