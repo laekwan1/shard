@@ -219,6 +219,25 @@
       <button data-do="hold" data-on="spot">재생 위치 저장</button>
       <button data-do="forget" data-on="spot">저장한 위치 지우기</button>
     </div>
+    <!--
+        The favorites page: the pinned sites and the pages visited, as two lists.
+        Reached by the star (a left-click), never on its own — the browser opens
+        straight onto a site. A row opens; the ✕ removes it.
+    -->
+    <section id="favorites" class="view" hidden>
+      <div id="favInner">
+        <div class="favHead"><h2>즐겨찾기</h2></div>
+        <div id="favBookmarks" class="favList"></div>
+        <p id="favBmEmpty" class="favEmpty" hidden>주소창의 ★를 눌러 즐겨찾기를 추가하세요.</p>
+
+        <div class="favHead" id="favHistHead">
+          <h2>방문기록</h2>
+          <button id="favClear">전체 지우기</button>
+        </div>
+        <div id="favHistory" class="favList"></div>
+        <p id="favHistEmpty" class="favEmpty" hidden>방문기록이 없습니다.</p>
+      </div>
+    </section>
     <section id="settings" class="view" hidden></section>
   </main>
 

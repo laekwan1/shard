@@ -84,7 +84,7 @@ document.addEventListener(
 
 // ---- where we are ----------------------------------------------------------
 
-const views = ["home", "library", "settings"];
+const views = ["home", "library", "settings", "favorites"];
 let here = "home";
 
 function show(where) {
@@ -104,6 +104,8 @@ function show(where) {
   // download that finished a moment ago — is already there.
   if (where === "library") send("library.list", { kind: shelf.kind });
   if (where === "settings") send("settings.read");
+  // The favorites page reads its lists fresh each time it opens.
+  if (where === "favorites") send("browser.home");
   // Rust decides what the window looks like around it: the browsing tabs are
   // its children, not ours, so it is told which view is up.
   send("nav", { to: where });
@@ -129,21 +131,33 @@ let tabCount = 0;
 // The page in front, for the star to pin and unpin.
 let frontUrl = "";
 let frontTitle = "";
-// The pinned sites, kept from the last start-page push so the star can fill
-// even while browsing, without asking Rust on every navigation.
+// The pinned sites, kept from the last push so the star can fill even while
+// browsing, without asking Rust on every navigation.
 let bookmarksList = [];
+// The homepage the home button goes to, from the same push.
+let homepage = "https://www.youtube.com/";
 
-// The address row belongs to whatever site is in front; it is hidden on our own
-// screens. The star only means something when there is a real page to pin.
+// The favorites page is the active screen only when it is up AND no tab is in
+// front (opening a bookmark from it puts a tab in front, covering it).
+function favActive() {
+  return here === "favorites" && !browsing;
+}
+
+// The address row belongs to a site in front, and to the favorites page too (its
+// star is the way back off it). Hidden on our other screens.
 function syncAddress() {
-  addressRow.hidden = !browsing;
-  starBtn.hidden = !browsing;
+  const show = browsing || favActive();
+  addressRow.hidden = !show;
+  starBtn.hidden = !show;
   paintStar();
 }
 
-// Fill the star when the page in front is one that has been pinned.
+// Fill the star while the favorites page is up, or when the page in front is one
+// that has been pinned.
 function paintStar() {
-  const on = browsing && !!frontUrl && bookmarksList.some((b) => b.url === frontUrl);
+  const on =
+    favActive() ||
+    (browsing && !!frontUrl && bookmarksList.some((b) => b.url === frontUrl));
   starBtn.classList.toggle("on", on);
 }
 
@@ -207,7 +221,6 @@ function paintTabs(message) {
 
 // A new tab opens the browser's home site straight away — no start page in
 // between. The address bar is there to go elsewhere.
-const HOME_URL = "https://www.youtube.com/";
 newTab.addEventListener("click", () => send("tab.new", { url: "" }));
 
 // Only the arrows and reload steer a tab; the home and star buttons carry no
@@ -218,18 +231,84 @@ for (const button of document.querySelectorAll("#address button[data-steer]")) {
   );
 }
 
-// The house takes the tab in front to the home site.
-document.querySelector("#address [data-home]").addEventListener("click", () => {
-  if (browsing) send("steer", { what: "go", url: HOME_URL });
-  else send("tab.new", { url: HOME_URL });
+// The house: a left-click goes to the homepage; a right-click makes the page in
+// front the homepage (the one desktop way to "hold").
+const homeBtn = document.querySelector("#address [data-home]");
+homeBtn.addEventListener("click", () => {
+  // Steer the tab in front to the homepage; from the favorites page (no tab in
+  // front) open the homepage in a tab, which also leaves the favorites page.
+  if (browsing) send("steer", { what: "go", url: homepage });
+  else send("tab.new", { url: homepage });
+});
+homeBtn.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (browsing && frontUrl) send("home.set", { url: frontUrl });
 });
 
-// The star: pin or unpin the page in front. Rust flips it and sends the pinned
-// list back, which repaints the star.
+// The star: a left-click opens (or closes) the favorites page; a right-click
+// pins or unpins the page in front.
 starBtn.addEventListener("click", () => {
-  if (!browsing || !frontUrl) return;
-  send("bookmark.toggle", { url: frontUrl, title: frontTitle });
+  if (favActive()) send("nav", { to: "browser" }); // on it → back to the tab
+  else show("favorites");
 });
+starBtn.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (browsing && frontUrl) send("bookmark.toggle", { url: frontUrl, title: frontTitle });
+});
+
+// ---- the favorites page ----------------------------------------------------
+
+function paintFavorites(message) {
+  bookmarksList = message.bookmarks || [];
+  const history = message.history || [];
+  if (typeof message.homepage === "string" && message.homepage) homepage = message.homepage;
+
+  const bm = document.getElementById("favBookmarks");
+  bm.textContent = "";
+  bookmarksList.forEach((b) => bm.appendChild(favRow(b, "bookmark")));
+  document.getElementById("favBmEmpty").hidden = bookmarksList.length > 0;
+
+  const hist = document.getElementById("favHistory");
+  hist.textContent = "";
+  history.forEach((h) => hist.appendChild(favRow(h, "history")));
+  document.getElementById("favHistEmpty").hidden = history.length > 0;
+  document.getElementById("favClear").style.visibility = history.length ? "visible" : "hidden";
+
+  paintStar();
+}
+
+// One row: the title over the address, opening on a click; the ✕ removes it — a
+// bookmark is unpinned, a history entry is dropped.
+function favRow(item, kind) {
+  const row = document.createElement("div");
+  row.className = "favRow";
+
+  const open = document.createElement("button");
+  open.className = "favOpen";
+  const name = document.createElement("span");
+  name.className = "favName";
+  name.textContent = item.title || item.url;
+  const url = document.createElement("span");
+  url.className = "favUrl";
+  url.textContent = item.url;
+  open.append(name, url);
+  open.addEventListener("click", () => send("tab.new", { url: item.url }));
+
+  const del = document.createElement("button");
+  del.className = "favDel";
+  del.textContent = "✕";
+  del.title = kind === "bookmark" ? "즐겨찾기에서 빼기" : "기록에서 지우기";
+  del.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (kind === "bookmark") send("bookmark.toggle", { url: item.url, title: item.title || "" });
+    else send("history.remove", { url: item.url });
+  });
+
+  row.append(open, del);
+  return row;
+}
+
+document.getElementById("favClear").addEventListener("click", () => send("history.clear"));
 
 urlBox.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
@@ -1754,10 +1833,9 @@ window.__shard = {
         paintNav(message);
         break;
       case "start":
-        // No start page any more; this now only carries the pinned list, so the
-        // address-row star can fill for a page that is already bookmarked.
-        bookmarksList = message.bookmarks || [];
-        paintStar();
+        // The favorites data: pinned sites, history, and the homepage. Renders the
+        // favorites page, and keeps the pinned list so the address star can fill.
+        paintFavorites(message);
         break;
       case "settings":
         paintSettings(message);

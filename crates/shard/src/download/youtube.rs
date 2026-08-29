@@ -686,6 +686,38 @@ mod tests {
     }
 }
 
+/// Strip YouTube's ads from the player response, the way uBlock does — at the
+/// source, before the player schedules them, rather than clicking "skip" after an
+/// ad has begun (which is all the DOM skipAds could do, and which still shows the
+/// unskippable head of every ad). Injected at document-start so it wraps the
+/// page's own JSON.parse before any player response is read.
+///
+/// It deletes ONLY the ad fields (adPlacements / playerAds / adSlots). It never
+/// touches `streamingData` — the download reads that same player response, so
+/// leaving it intact keeps saving working. Defensive throughout: any error falls
+/// back to the untouched object, so a YouTube change makes it a no-op, not a break.
+pub const AD_STRIP: &str = r#"
+(function () {
+  try {
+    if (window.__shardAdStrip) return;
+    window.__shardAdStrip = true;
+    var strip = function (o) {
+      if (!o || typeof o !== 'object') return;
+      try {
+        delete o.adPlacements; delete o.adSlots; delete o.playerAds;
+        if (o.playerResponse) { delete o.playerResponse.adPlacements; delete o.playerResponse.adSlots; delete o.playerResponse.playerAds; }
+      } catch (e) {}
+    };
+    var _parse = JSON.parse;
+    JSON.parse = function (text, reviver) {
+      var o = _parse.call(this, text, reviver);
+      strip(o);
+      return o;
+    };
+  } catch (e) {}
+})();
+"#;
+
 /// The download control, injected into every page.
 ///
 /// Drawn in the page rather than as a window of its own: the browser is already

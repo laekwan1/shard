@@ -238,7 +238,9 @@ button svg { display: block; }
   padding: 0 8px;
   background: var(--toolbar);
 }
-#address button { width: 30px; height: 30px; /* NAV_BOX */ border-radius: var(--r-sm); color: var(--muted); font-size: 16px; }
+/* place-items:center so the SVG sits in the middle of the 30px box — without it
+   the icon hugged the top-left and the hover highlight looked off to one side. */
+#address button { width: 30px; height: 30px; /* NAV_BOX */ display: grid; place-items: center; border-radius: var(--r-sm); color: var(--muted); font-size: 16px; }
 #address button:hover { color: var(--on-surface); background: #ffffff0f; }
 /* Nowhere to go: the arrow is dimmed and takes no hover/press, so it reads as unavailable
    rather than a live button that does nothing. */
@@ -1169,5 +1171,77 @@ button svg { display: block; }
 /* Every control on the address row is a line icon now (back, forward, home,
    star, reload), so they share one size and sit together. */
 #address button svg { width: 18px; height: 18px; }
-/* Filled amber once the page in front is pinned, hollow while it is not. */
+/* Filled amber once the page in front is pinned, or while the favorites page is
+   open; hollow otherwise. */
 #star.on svg path { fill: var(--warn); stroke: var(--warn); }
+
+/* ---- favorites page -------------------------------------------------------
+   Reached by the star. Two lists — pinned sites and visited pages — of rows that
+   open on a click, with a ✕ to remove one. */
+#favInner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px 24px 40px;
+}
+.favHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 22px 2px 8px;
+}
+.favHead:first-child { margin-top: 6px; }
+.favHead h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--on-surface); }
+#favClear {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 4px;
+  border-radius: var(--r-xs);
+}
+#favClear:hover { color: var(--on-surface); }
+.favEmpty { margin: 4px 2px 0; font-size: 12.5px; color: var(--muted); }
+.favList { display: flex; flex-direction: column; }
+.favRow {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+.favRow:hover { background: var(--state-hover); }
+.favOpen {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 8px 10px;
+  text-align: left;
+}
+.favName {
+  max-width: 100%;
+  font-size: 13.5px;
+  color: var(--on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.favUrl {
+  max-width: 100%;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.favDel {
+  width: 30px;
+  height: 30px;
+  margin-right: 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0;
+}
+.favRow:hover .favDel { opacity: 1; }
+.favDel:hover { color: #fff; background: var(--bad); }

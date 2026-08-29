@@ -446,6 +446,11 @@ pub enum Ask {
     /// Drop one "자주 방문" tile for good — the host is remembered as hidden so
     /// the tile does not come back the next time the site is opened.
     FrequentHide(String),
+    /// Make the page in front the homepage (a right-click on the home button).
+    HomeSet(String),
+    /// The favorites page's history: drop one entry, or clear it all.
+    HistoryRemove(String),
+    HistoryClear,
     /// A page answered the download panel — which quality was chosen.
     /// A row on the quality list. `anyway` is set when it was pressed past a
     /// warning that the file is already saved.
@@ -522,6 +527,9 @@ pub fn read_ask(body: &str) -> Ask {
             title: field(body, "title").unwrap_or_default(),
         },
         "frequent.hide" => Ask::FrequentHide(field(body, "host").unwrap_or_default()),
+        "home.set" => Ask::HomeSet(field(body, "url").unwrap_or_default()),
+        "history.remove" => Ask::HistoryRemove(field(body, "url").unwrap_or_default()),
+        "history.clear" => Ask::HistoryClear,
         "steer" => Ask::Steer {
             what: field(body, "what").unwrap_or_else(|| "go".into()),
             url: field(body, "url").unwrap_or_default(),
@@ -1143,7 +1151,7 @@ pub fn preview() -> Result<()> {
         Ask::Nav(to) => {
             if to == "browser" {
                 if shell.tab_count() == 0 {
-                    shell.open_tab("https://www.youtube.com/");
+                    shell.open_tab(&homepage(&engine.borrow()));
                 } else {
                     shell.show_tab(Some(shell.tab_count() - 1));
                 }
@@ -1210,6 +1218,36 @@ pub fn preview() -> Result<()> {
                 }
                 engine.borrow().save_config();
             }
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        // Right-click on the home button: the page in front becomes the homepage.
+        Ask::HomeSet(url) => {
+            if url.starts_with("http") {
+                {
+                    let core = engine.borrow();
+                    core.shared.config.write().browser.homepage = url;
+                }
+                engine.borrow().save_config();
+            }
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        Ask::HistoryRemove(url) => {
+            {
+                let core = engine.borrow();
+                core.shared.config.write().browser.history.retain(|h| h.url != url);
+            }
+            engine.borrow().save_config();
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        Ask::HistoryClear => {
+            {
+                let core = engine.borrow();
+                core.shared.config.write().browser.history.clear();
+            }
+            engine.borrow().save_config();
             let json = browser_home_json(&engine.borrow().shared.config.read().browser);
             shell.tell(&json);
         }
@@ -1562,60 +1600,33 @@ fn record_visit(b: &mut crate::config::Browser, url: &str) {
     b.history.truncate(60);
 }
 
-/// Build the start page: the pinned sites and the eight most-visited hosts, with
-/// YouTube always offered when nothing is hidden — the browser exists to save
-/// from it, so a blank start page would hide its one sure destination.
+/// Where the browser opens and the home button goes — the saved homepage, or
+/// YouTube when none is set (the browser's reason to exist).
+fn homepage(core: &crate::core::EngineCore) -> String {
+    let set = core.shared.config.read().browser.homepage.clone();
+    if set.trim().is_empty() { "https://www.youtube.com/".to_string() } else { set }
+}
+
+/// Build the favorites page's data: the pinned sites, the visited pages (newest
+/// first), and the saved homepage. Mirrors iOS/Android — bookmarks + 방문기록, no
+/// "자주 방문" tiles.
 fn browser_home_json(b: &crate::config::Browser) -> String {
     let bookmarks: Vec<String> = b
         .bookmarks
         .iter()
         .map(|m| format!(r#"{{"url":"{}","title":"{}"}}"#, escape(&m.url), escape(&m.title)))
         .collect();
-
-    // Most-visited first, dropping the hosts the user has hidden.
-    let mut ranked: Vec<(&String, u32)> = b
-        .visits
+    let history: Vec<String> = b
+        .history
         .iter()
-        .filter(|(host, _)| !b.hidden_frequent.iter().any(|h| h == *host))
-        .map(|(host, n)| (host, *n))
+        .map(|m| format!(r#"{{"url":"{}","title":"{}"}}"#, escape(&m.url), escape(&m.title)))
         .collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
-
-    let mut frequent: Vec<String> = Vec::new();
-    let mut seen: Vec<String> = Vec::new();
-    // YouTube first when it is not hidden and not already pinned: the app's whole
-    // reason to have a browser, so it should be one press away on a fresh install.
-    let youtube = "youtube.com".to_string();
-    let yt_hidden = b.hidden_frequent.iter().any(|h| h == &youtube);
-    let yt_pinned = b.bookmarks.iter().any(|m| crate::config::normalise_host(&m.url) == youtube);
-    if !yt_hidden && !yt_pinned {
-        frequent.push(format!(
-            r#"{{"url":"https://www.youtube.com/","title":"youtube.com","host":"youtube.com"}}"#
-        ));
-        seen.push(youtube);
-    }
-    for (host, _) in ranked {
-        if frequent.len() >= 8 {
-            break;
-        }
-        if seen.iter().any(|h| h == host) {
-            continue;
-        }
-        // A host already pinned would be a tile that repeats a bookmark below it.
-        if b.bookmarks.iter().any(|m| &crate::config::normalise_host(&m.url) == host) {
-            continue;
-        }
-        frequent.push(format!(
-            r#"{{"url":"https://{host}/","title":"{host}","host":"{host}"}}"#,
-            host = escape(host)
-        ));
-        seen.push(host.clone());
-    }
 
     format!(
-        r#"{{"t":"start","bookmarks":[{}],"frequent":[{}]}}"#,
+        r#"{{"t":"start","bookmarks":[{}],"history":[{}],"homepage":"{}"}}"#,
         bookmarks.join(","),
-        frequent.join(",")
+        history.join(","),
+        escape(&b.homepage)
     )
 }
 
@@ -1855,8 +1866,9 @@ impl Shell {
         // the download button on the page. Without the last two a page never
         // offers anything and nothing can be saved.
         let startup = format!(
-            "{}\n{}\n{}",
+            "{}\n{}\n{}\n{}",
             crate::download::browser::PAGE_HOOKS,
+            crate::download::youtube::AD_STRIP,
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
         );

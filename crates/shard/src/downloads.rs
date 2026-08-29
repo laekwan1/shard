@@ -53,9 +53,14 @@ impl Job {
     }
 }
 
-/// The marker itag the music-only row carries, so a click on it is told apart
-/// from a click on a real video row. No real format uses it.
+/// The marker itag the music-only (original AAC → .m4a) row carries, so a click on
+/// it is told apart from a click on a real video row. No real format uses it.
 pub const MUSIC_ITAG: u32 = u32::MAX;
+
+/// The marker for the second music row: the same AAC re-encoded to MP3. A separate
+/// row rather than a setting, so the format is chosen right in the download list —
+/// the desktop settings need admin rights to reach, and this does not.
+pub const MUSIC_MP3_ITAG: u32 = u32::MAX - 1;
 
 /// A direct progressive download (a plain media URL), for non-YouTube sites.
 pub const DIRECT_ITAG: u32 = u32::MAX - 1;
@@ -153,24 +158,28 @@ pub fn rows_for(offer: &Offer, wish: &AudioWish) -> Vec<(u32, String, String)> {
     rows
 }
 
-/// The music-only row, shown at the top of the list.
-pub fn music_row(offer: &Offer, wish: &AudioWish) -> Option<(u32, String, String)> {
-    let audio = offer.best_audio(wish)?;
-    Some((
-        MUSIC_ITAG,
-        "음악만 저장".into(),
-        format!(
-            "{} · {} {}k{}",
-            human(audio.size()),
-            audio.codec(),
-            audio.bitrate / 1000,
-            if audio.audio_name.is_empty() {
-                String::new()
-            } else {
-                format!(" · {}", audio.audio_name)
-            }
+/// The music-only rows, shown at the top of the list: the original audio as .m4a,
+/// and the same re-encoded to MP3. Two rows rather than a hidden setting so the
+/// format is picked right here — the desktop settings need admin rights to reach.
+pub fn music_rows(offer: &Offer, wish: &AudioWish) -> Vec<(u32, String, String)> {
+    let Some(audio) = offer.best_audio(wish) else { return Vec::new() };
+    let lang = if audio.audio_name.is_empty() {
+        String::new()
+    } else {
+        format!(" · {}", audio.audio_name)
+    };
+    vec![
+        (
+            MUSIC_ITAG,
+            "음악만 저장 (M4A)".into(),
+            format!("원음질 · {} · {} {}k{}", human(audio.size()), audio.codec(), audio.bitrate / 1000, lang),
         ),
-    ))
+        (
+            MUSIC_MP3_ITAG,
+            "음악만 저장 (MP3)".into(),
+            format!("호환성 · 320k · 재인코딩{lang}"),
+        ),
+    ]
 }
 
 /// What came of draining the downloads: what to say, and whether a shelf changed.
@@ -290,9 +299,9 @@ impl Downloads {
         // The video rows, and a music-only row at the top — the same shape the
         // phone shows, so there is no separate "include video" setting to find.
         let mut rows = rows_for(&offer, &self.wish(false));
-        if let Some(music) = music_row(&offer, &self.wish(true)) {
-            rows.insert(0, music);
-        }
+        // Both music rows at the very top, M4A then MP3.
+        let music = music_rows(&offer, &self.wish(true));
+        rows.splice(0..0, music);
         if rows.is_empty() {
             // Counted after the filters this code applies, not before: the first
             // version of this message reported what the page listed and so said
@@ -345,9 +354,10 @@ impl Downloads {
         let Some(template) = offer.template() else {
             return youtube::say_script("받을 것을 찾지 못했습니다.", true);
         };
-        // The row decides it: the music row carries a marker itag, every other
-        // row a real video one.
-        let audio_only = itag == MUSIC_ITAG;
+        // The row decides it: the two music rows carry marker itags, every other
+        // row a real video one. The MP3 marker also asks for the re-encode.
+        let audio_only = itag == MUSIC_ITAG || itag == MUSIC_MP3_ITAG;
+        let want_mp3 = itag == MUSIC_MP3_ITAG;
         let wish = self.wish(audio_only);
         let Some(audio) = offer.best_audio(&wish) else {
             return youtube::say_script("음성을 찾지 못했습니다.", true);
@@ -380,9 +390,8 @@ impl Downloads {
             cover: offer.thumb.clone(),
             audio_only,
             mp4: false,   // desktop plays through the WebView, which opens MKV/WebM too
-            // MP3 only makes sense for a music-only save, and only when the user
-            // asked for it; the flag is read where the file is written.
-            music_mp3: audio_only && self.shared.config.read().download.music_mp3,
+            // Chosen by the row (the MP3 music row), not a setting.
+            music_mp3: want_mp3,
         };
         // Music-only never fetches the video (the "video" here is only a small decoy
         // named as already-playing), so counting its bytes in the total made the bar
