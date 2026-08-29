@@ -28,17 +28,15 @@ private let shardAudioFlush: ShardAudioFlushCb = { ctx in
 }
 
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    // Bluetooth crackle on every FRESH libVLC audio output (track change / seek /
-    // replay) while an Apple Watch adds jitter to the A2DP link: a continuously-running
-    // output stays clean, a re-primed one crackles as libVLC continuously micro-corrects
-    // its output clock. Two levers, both best-effort (ignored if a module is absent):
-    //   --no-audio-time-stretch : stop the pitch-preserving stretcher from continuously
-    //                             resampling to chase the jittery clock.
-    //   --audio-resampler=speex_resampler : a decent bundled resampler instead of the
-    //                             default "ugly" linear one (SoXR was ignored — likely
-    //                             not in this MobileVLCKit build).
-    let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
-                                          "--audio-resampler=speex_resampler"])
+    // Time-stretch is LEFT ON (no --no-audio-time-stretch) so a speed change keeps the
+    // pitch — 2× is faster, not chipmunked. It was disabled to stop libVLC's OWN Bluetooth
+    // output from crackling as its clock chased a jittery A2DP link, but the audio now goes
+    // to our AVAudioEngine renderer (amem), not libVLC's BT output, so that reason is gone
+    // and pitch preservation is free. (Restores commit 68742d5, lost in the engine restore.)
+    //   --audio-resampler=speex_resampler : a decent bundled resampler to 48k instead of the
+    //                             default "ugly" linear one (SoXR was ignored — likely not in
+    //                             this MobileVLCKit build).
+    let player = VLCMediaPlayer(options: ["--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
 
     // Our AVAudioEngine output for libVLC's decoded audio — clean over Bluetooth,
@@ -450,8 +448,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // re-buffer; crackle-free playback over a contended radio is worth it. (New music
         // is AAC/.m4a → AVPlayer and never reaches libVLC at all.)
         media.addOption(":file-caching=800")
-        media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
-        media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
+        // No :no-audio-time-stretch — pitch is preserved on a speed change (see player
+        // init). The audio goes to our renderer, so libVLC's BT-clock crackle reason is gone.
+        media.addOption(":audio-resampler=speex_resampler")  // decent resampler to 48k
         return media
     }
 
