@@ -142,10 +142,16 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     kind: Kind::Text(cfg.download.audio_language.clone()),
                 },
                 Item {
-                    key: "download.music_mp3",
-                    label: "음악을 MP3로 저장",
-                    help: "음악만 저장할 때 MP3로 바꿉니다. 어디서나 열리지만, 원본(AAC)을 다시 인코딩하므로 음질이 조금 떨어집니다.",
-                    kind: Kind::Toggle(cfg.download.music_mp3),
+                    key: "download.music_format",
+                    label: "음악 저장 형식",
+                    help: "음악만 저장할 때의 형식입니다. AAC는 원본 그대로 담아 고음질이고, MP3는 어디서나 열리지만 다시 인코딩하므로 저음질입니다.",
+                    kind: Kind::Choice(
+                        if cfg.download.music_mp3 { "mp3" } else { "aac" }.to_string(),
+                        vec![
+                            ("aac".to_string(), "AAC · 고음질".to_string()),
+                            ("mp3".to_string(), "MP3 · 저음질".to_string()),
+                        ],
+                    ),
                 },
             ],
         ),
@@ -541,7 +547,7 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
             }
         }
         "download.audio_language" => cfg.download.audio_language = value.trim().to_string(),
-        "download.music_mp3" => cfg.download.music_mp3 = on,
+        "download.music_format" => cfg.download.music_mp3 = value == "mp3",
         _ => return false,
     }
     true
