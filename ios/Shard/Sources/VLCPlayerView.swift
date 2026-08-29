@@ -15,23 +15,37 @@ final class PlayerUI: ObservableObject {
     @Published var duration = "0:00"
 }
 
+// libVLC's C audio callbacks (see VLCAudioBridge). @convention(c), so they cannot
+// capture — the sink is reached through the `ctx` opaque pointer instead. They run on
+// libVLC's audio thread and just hand PCM to (or flush) the sink.
+// The bridge header marks these pointers nonnull, so Swift imports them non-optional.
+private let shardAudioSetup: ShardAudioSetupCb = { _, _, _ in }
+private let shardAudioPlay: ShardAudioPlayCb = { ctx, samples, count, _ in
+    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().push(samples, frames: count)
+}
+private let shardAudioFlush: ShardAudioFlushCb = { ctx in
+    Unmanaged<VLCAudioSink>.fromOpaque(ctx).takeUnretainedValue().flush()
+}
+
 final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
-    // VP9 video and old Opus music play through libVLC's OWN audio+video — libVLC syncs the
-    // two itself, perfectly, and handles seeks. We do NOT intercept the audio: intercepting it
-    // (for a cleaner Bluetooth output) is exactly what took the timing away from libVLC and
-    // broke its sync, so we chose sync over that. The trade: this native audio can crackle over
-    // a jittery (Apple-Watch) Bluetooth link on a FRESH output — but that only bites the rare
-    // libVLC cases (VP9 video, and Opus music, which is itself rare now that music is AAC via
-    // AVPlayer).
-    //   --no-audio-time-stretch : do NOT run libVLC's pitch-preserving stretcher on a speed
-    //     change. The stretcher re-buffers when the rate changes, which came out as the sound
-    //     CUTTING on every 배속 change; without it a rate change is a plain resample — the
-    //     pitch rises with the speed (like most players' fast-forward), but the sound does not
-    //     drop. This is the pre-engine (9774c6c) setting; leaving it off regressed the cut.
-    //   --audio-resampler=speex_resampler : a better 48k resampler than the default linear one.
+    // Bluetooth crackle on every FRESH libVLC audio output (track change / seek /
+    // replay) while an Apple Watch adds jitter to the A2DP link: a continuously-running
+    // output stays clean, a re-primed one crackles as libVLC continuously micro-corrects
+    // its output clock. Two levers, both best-effort (ignored if a module is absent):
+    //   --no-audio-time-stretch : stop the pitch-preserving stretcher from continuously
+    //                             resampling to chase the jittery clock.
+    //   --audio-resampler=speex_resampler : a decent bundled resampler instead of the
+    //                             default "ugly" linear one (SoXR was ignored — likely
+    //                             not in this MobileVLCKit build).
     let player = VLCMediaPlayer(options: ["--no-audio-time-stretch",
                                           "--audio-resampler=speex_resampler"])
     let ui = PlayerUI()
+
+    // Our AVAudioEngine output for libVLC's decoded audio — clean over Bluetooth,
+    // unlike libVLC's own output. `audioRouted` is false if the private libvlc handle
+    // could not be reached (then libVLC keeps its own output, the old behaviour).
+    private let audioSink = VLCAudioSink()
+    private var audioRouted = false
 
     // Two backends: AVPlayer for the formats it can open (mp4/mov/m4a/mp3/…),
     // which — unlike libVLC — starts without the hardware "텁" pop; libVLC for
@@ -80,12 +94,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func toggleMute() {
         muted.toggle()
-        // libVLC's isMuted flag lagged noticeably; setting the volume too makes it INSTANT
-        // (volume takes effect at once), with isMuted still the semantic on/off. Restore to
-        // the last chosen volume on unmute.
         player.audio?.isMuted = muted
-        player.audio?.volume = muted ? 0 : targetVolume
         av.isMuted = muted
+        audioSink.setMuted(muted)   // our engine mutes instantly, not a buffer later
     }
 
     /// The one surface VLC draws into, reparented between windowed and full
@@ -122,6 +133,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     override init() {
         super.init()
         player.delegate = self
+        // Route libVLC's decoded audio to our AVAudioEngine (clean over Bluetooth).
+        // Once, here, before any media — the callbacks apply to every stream after.
+        audioRouted = ShardRouteVLCAudio(player, Unmanaged.passUnretained(audioSink).toOpaque(),
+                                         shardAudioSetup, shardAudioPlay, shardAudioFlush)
         let session = AVAudioSession.sharedInstance()
         // .allowBluetoothA2DP makes the music-quality Bluetooth profile explicit and
         // never asks for the call profile (HFP), so a call that flipped the earbuds to
@@ -206,6 +221,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
                 configureForCurrentRoute()
             }
             try? session.setActive(true)
+            // The interruption stopped our AVAudioEngine; restart it or libVLC playback
+            // resumes to silence (the config-change note does not always fire for an
+            // interruption end).
+            if backend == .vlc, audioRouted { audioSink.start() }
             // Only auto-resume if we were actually playing when interrupted AND had
             // not intentionally paused. A web video playing over us fires this pair
             // too — without the guard, pausing the library for a web video and then
@@ -233,6 +252,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the lock screen does not talk to a dead player.
         player.stop()
         teardownAV()
+        audioSink.stop()
         NotificationCenter.default.removeObserver(self)
         let center = MPRemoteCommandCenter.shared()
         for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
@@ -277,7 +297,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
 
     func attach(to view: UIView) {
         // Only when it actually changed — re-pointing the drawable on every
-        // SwiftUI update flickered the picture to black. libVLC renders the video here.
+        // SwiftUI update flickered the picture to black.
         if (player.drawable as? UIView) !== view { player.drawable = view }
     }
 
@@ -299,25 +319,26 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if prefersAV(url) {
             backend = .av
             player.stop()                 // make sure libVLC is not also sounding
+            audioSink.stop()              // AV uses AVPlayer, not our engine
             openAV(url)
             return
         }
 
         backend = .vlc
         teardownAV()                      // stop/detach AVPlayer
-        // MUTE across the whole transition and hold it until the first frame: the mute flag
-        // silences the new stream's first buffer — the moment the "텁" pop fires. libVLC's
-        // audio TRAILS the first video frame (by up to ~0.5s), so releasing the mute ON that
-        // frame (see mediaPlayerTimeChanged) lands BEFORE the sound actually starts — the pop
-        // is covered and NOT a single real sample is clipped. This is the pre-engine handling
-        // (9774c6c) that had this right; the fade/no-mute experiments regressed it.
+        if audioRouted { audioSink.start() }   // our engine now carries libVLC's audio
+        // MUTE (not just volume-0) across the transition to hide the "텁" pop libVLC's
+        // OWN output makes on the first buffer — but ONLY when libVLC drives the output.
+        // Through our AVAudioEngine there is no such pop, and muting instead fed silence
+        // into the ring so the START of the sound was clipped. So skip it when routed.
+        let mask = !audioRouted
         let s = player.state
         let needStop = s == .ended || s == .error || s == .stopped
-        player.audio?.isMuted = true
+        if mask { player.audio?.isMuted = true }
         if needStop { player.stop() }
-        pendingUnmute = true
+        pendingUnmute = mask
         player.media = makeMedia(url)
-        player.audio?.isMuted = true
+        if mask { player.audio?.isMuted = true }
         player.play()
         player.rate = rate
         scheduleWatchdog(url)
@@ -429,8 +450,8 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // re-buffer; crackle-free playback over a contended radio is worth it. (New music
         // is AAC/.m4a → AVPlayer and never reaches libVLC at all.)
         media.addOption(":file-caching=800")
-        media.addOption(":no-audio-time-stretch")            // see player init — rate-change cut
-        media.addOption(":audio-resampler=speex_resampler")  // decent resampler to 48k
+        media.addOption(":no-audio-time-stretch")            // see player init — BT crackle
+        media.addOption(":audio-resampler=speex_resampler")  // see player init — BT crackle
         return media
     }
 
@@ -460,6 +481,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// the web video may have taken the audio route.
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
+        if backend == .vlc, audioRouted { audioSink.start() }
         backend == .av ? avPlay() : player.play()
         userPaused = false
     }
@@ -523,8 +545,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
     func seek(to p: Float) {
-        if backend == .av { avSeekFraction(max(0, min(1, p))) }
-        else { player.position = max(0, min(1, p)) }
+        if backend == .av { avSeekFraction(max(0, min(1, p))) } else { player.position = max(0, min(1, p)) }
     }
     func jump(_ seconds: Int32) {
         if backend == .av {
@@ -553,7 +574,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
             // Setting AVPlayer.rate also starts playback; only change it while playing.
             if av.timeControlStatus != .paused { av.rate = r }
         } else {
-            player.rate = r   // plain resample (no time-stretch) — no cut on a speed change
+            player.rate = r
         }
     }
     func cycleRate() {
@@ -566,6 +587,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func stop() {
         player.stop()
         teardownAV()
+        audioSink.stop()
         currentURL = nil
         // Release the audio session so other devices/apps can take the Bluetooth route
         // back — holding it active kept the earbuds bound to us, which is why the Watch
@@ -585,7 +607,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if pendingUnmute, player.isPlaying {
             pendingUnmute = false
             buffering = false          // reveal the picture the instant it is running
-            player.audio?.isMuted = muted   // release on the frame; audio trails it, so no clip
+            player.audio?.isMuted = muted
         } else if buffering, player.isPlaying {
             // Buffering that was NOT an open (e.g. after a seek) — clear it once
             // frames flow again, or the spinner spun forever over black.
@@ -623,8 +645,9 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // the sound kept going. The cover is driven only by open() (a real track
         // change) and cleared on the first frame; a seek just re-buffers silently.
         if player.state == .ended || player.state == .error { buffering = false }
-        // Keep the new stream muted through every state update until the first frame releases
-        // it — this is what actually holds the mute across the "텁" pop on the first buffer.
+        // Keep the (late-created) new audio object MUTED at every state update until
+        // we release it after playback is up — this is what actually stops the "텁"
+        // pop on the first buffer.
         if pendingUnmute { player.audio?.isMuted = true }
         if player.state == .ended { reachedEnd = true; onEnded?() }
     }
