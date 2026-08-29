@@ -26,7 +26,12 @@ use std::path::{Path, PathBuf};
 /// into the iOS cdylib) is never pulled in; the price is that rustls has no
 /// default provider until one is installed. Do it once, before the first client
 /// is built. Idempotent — a second install just returns Err, which we ignore.
-fn use_ring() {
+///
+/// pub(crate) so the DoH forwarder and the prober — which build reqwest clients
+/// of their own, not through `run` — can install it before theirs, or they panic
+/// with "no rustls crypto provider is configured" (which is what the doh/prober
+/// tests hit).
+pub(crate) fn use_ring() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();

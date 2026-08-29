@@ -293,6 +293,8 @@ pub fn reachable(shared: &Arc<Shared>, host: &str) -> bool {
 /// strategy the browser cannot actually use — which is exactly what a probe is
 /// supposed to rule out.
 fn request_completes(addr: SocketAddr, host: &str) -> bool {
+    // reqwest is ring-only (rustls-no-provider); install the provider first.
+    crate::download::save::use_ring();
     // Said out loud when it goes wrong. Everything below answers with a plain
     // yes or no, and a run where every rung failed in no time at all is a run
     // that never reached the network — which reads the same as "all blocked"
@@ -405,6 +407,7 @@ mod tests {
         // Nothing here touches the network. It is the step before that: if the
         // client cannot be built at all, every rung fails in no time and the
         // screen reads as though the whole internet were blocked.
+        crate::download::save::use_ring();
         let client = reqwest::Client::builder()
             .timeout(READ_TIMEOUT + CONNECT_TIMEOUT)
             .resolve("example.com", "93.184.216.34:443".parse().unwrap())

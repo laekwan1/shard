@@ -285,6 +285,9 @@ pub fn resolve_encrypted(cfg: &Doh, host: &str) -> Option<IpAddr> {
 /// Pin each upstream's address so resolving the resolver does not depend on the
 /// very DNS we are replacing — and cannot be redirected by a poisoned answer.
 fn build_client(cfg: &Doh) -> Result<reqwest::Client> {
+    // reqwest uses rustls-no-provider (ring only, for the iOS link); install the
+    // ring provider before the first client is built here too.
+    crate::download::save::use_ring();
     let mut builder = reqwest::Client::builder()
         .timeout(QUERY_TIMEOUT)
         .pool_idle_timeout(Duration::from_secs(90))
