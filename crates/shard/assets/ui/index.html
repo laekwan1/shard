@@ -54,16 +54,21 @@
 
   <!-- The address row, under the tabs, while a site is in front. The site
        itself is a web view of its own below this: Rust lays it out. -->
+  <!--
+      The toolbar's controls, in the order a browser reads left to right: step
+      back, step forward, home, pin, the address, and reload at the far end. All
+      drawn as line icons of one weight so they sit together — the old mix of text
+      arrows (‹ › ⟳) beside drawn glyphs looked assembled from parts.
+  -->
   <div id="address" hidden>
-    <button data-home title="시작 페이지"><svg viewBox="0 0 20 20"><path d="M3.5 9.5 10 4l6.5 5.5M5 8.5V16h10V8.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <button data-steer="back" title="뒤로">‹</button>
-    <button data-steer="forward" title="앞으로">›</button>
-    <button data-steer="reload" title="새로고침">⟳</button>
+    <button data-steer="back" title="뒤로"><svg viewBox="0 0 20 20"><path d="M12 5l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button data-steer="forward" title="앞으로"><svg viewBox="0 0 20 20"><path d="M8 5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <button data-home title="홈"><svg viewBox="0 0 20 20"><path d="M4 9.5 10 4l6 5.5M5.5 8.5V16h9V8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <!-- The pin: filled while the page in front is already saved, hollow while it
+         is not. -->
+    <button id="star" title="즐겨찾기"><svg viewBox="0 0 20 20"><path d="M10 3l2.16 4.38 4.84.7-3.5 3.41.83 4.82L10 14.03 5.67 16.3l.83-4.82L3 8.08l4.84-.7z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></button>
     <input id="url" spellcheck="false" placeholder="주소 또는 검색어">
-    <!-- The pin, at the right end of the address: filled while the page in front
-         is already saved, hollow while it is not. Hidden on the start page,
-         where there is no page to pin. -->
-    <button id="star" title="즐겨찾기"><svg viewBox="0 0 20 20"><path d="M10 2.5l2.35 4.76 5.25.76-3.8 3.7.9 5.23L10 14.7l-4.7 2.47.9-5.23-3.8-3.7 5.25-.76z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+    <button data-steer="reload" title="새로고침"><svg viewBox="0 0 20 20"><path d="M15.5 7A6 6 0 1 0 16.5 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M15.8 3.4V7.2H12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
 
   <main id="screen">
@@ -214,25 +219,6 @@
       <button data-do="hold" data-on="spot">재생 위치 저장</button>
       <button data-do="forget" data-on="spot">저장한 위치 지우기</button>
     </div>
-    <!--
-        The browser's start page: a speed dial. Shown when the browser is opened
-        with no page in front — pinned sites first, then the ones visited most.
-        The address row above it does the typing; a tile or the row opens a tab
-        and the web view then covers this.
-    -->
-    <section id="start" class="view" hidden>
-      <div id="startInner">
-        <p class="wordmark">S H A R D</p>
-        <div id="bookmarksWrap" class="tileGroup" hidden>
-          <h2 class="tileHead">즐겨찾기</h2>
-          <div id="bookmarks" class="tiles"></div>
-        </div>
-        <div id="frequentWrap" class="tileGroup" hidden>
-          <h2 class="tileHead">자주 방문</h2>
-          <div id="frequent" class="tiles"></div>
-        </div>
-      </div>
-    </section>
     <section id="settings" class="view" hidden></section>
   </main>
 

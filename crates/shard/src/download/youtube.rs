@@ -878,25 +878,6 @@ pub const CONTROL: &str = r#"
   // scrolling and page changes feel heavy. Asking for a frame instead collapses
   // a burst of events into one measurement, taken when the browser was going to
   // lay the page out anyway.
-  // Keep YouTube's own seek bar visible while a video plays — parity with iOS and
-  // Android. YouTube hides the bottom chrome (ytp-autohide) during playback, which
-  // left no way to scrub without moving the mouse first; a one-time style override
-  // pins it. Guarded by an id so it is injected once, and only on YouTube.
-  function keepYtControls() {
-    try {
-      if (location.hostname.indexOf('youtube.com') < 0) return;
-      if (document.getElementById('shard-yt-style')) return;
-      var head = document.head || document.documentElement;
-      if (!head) return;
-      var s = document.createElement('style');
-      s.id = 'shard-yt-style';
-      s.textContent =
-        '.html5-video-player.ytp-autohide .ytp-chrome-bottom{opacity:1 !important;}' +
-        '.ytp-chrome-bottom{opacity:1 !important;}';
-      head.appendChild(s);
-    } catch (e) {}
-  }
-
   var due = false;
   function soon() {
     if (due) return;
@@ -904,12 +885,10 @@ pub const CONTROL: &str = r#"
     requestAnimationFrame(function () {
       due = false;
       keep();
-      keepYtControls();
     });
   }
 
   keep();
-  keepYtControls();
   // Some responsive grids (xvideos' home thumbnails) lay out once, early, before
   // the view has settled, and render OVERLAPPING until something makes them
   // recompute. A plain resize event does it, page-side only — once on load, and

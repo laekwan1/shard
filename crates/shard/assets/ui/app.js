@@ -84,7 +84,7 @@ document.addEventListener(
 
 // ---- where we are ----------------------------------------------------------
 
-const views = ["home", "library", "settings", "start"];
+const views = ["home", "library", "settings"];
 let here = "home";
 
 function show(where) {
@@ -104,14 +104,9 @@ function show(where) {
   // download that finished a moment ago — is already there.
   if (where === "library") send("library.list", { kind: shelf.kind });
   if (where === "settings") send("settings.read");
-  // The start page reads its tiles fresh each time: a site opened since it was
-  // last seen should already be in "자주 방문".
-  if (where === "start") send("browser.home");
   // Rust decides what the window looks like around it: the browsing tabs are
   // its children, not ours, so it is told which view is up.
   send("nav", { to: where });
-  // The address row belongs to the start page too, even though no tab is in
-  // front there — it is where a place to go is typed.
   syncAddress();
 }
 
@@ -138,15 +133,15 @@ let frontTitle = "";
 // even while browsing, without asking Rust on every navigation.
 let bookmarksList = [];
 
-// The address row serves both a page in front and the start page. Show it for
-// either; the star only means something when there is a real page to pin.
+// The address row belongs to whatever site is in front; it is hidden on our own
+// screens. The star only means something when there is a real page to pin.
 function syncAddress() {
-  addressRow.hidden = !(browsing || here === "start");
+  addressRow.hidden = !browsing;
   starBtn.hidden = !browsing;
   paintStar();
 }
 
-// Fill the star when the page in front is one of the pinned sites.
+// Fill the star when the page in front is one that has been pinned.
 function paintStar() {
   const on = browsing && !!frontUrl && bookmarksList.some((b) => b.url === frontUrl);
   starBtn.classList.toggle("on", on);
@@ -210,12 +205,12 @@ function paintTabs(message) {
   });
 }
 
-// A new tab lands on the start page, not straight on a fixed site: it is where
-// the next place to go is chosen. The web view opens once a tile or the address
-// is used.
-newTab.addEventListener("click", () => show("start"));
+// A new tab opens the browser's home site straight away — no start page in
+// between. The address bar is there to go elsewhere.
+const HOME_URL = "https://www.youtube.com/";
+newTab.addEventListener("click", () => send("tab.new", { url: "" }));
 
-// Only the three arrows steer a tab; the home and star buttons carry no
+// Only the arrows and reload steer a tab; the home and star buttons carry no
 // data-steer and must not be read as one (an undefined "what" reloaded the tab).
 for (const button of document.querySelectorAll("#address button[data-steer]")) {
   button.addEventListener("click", () =>
@@ -223,8 +218,11 @@ for (const button of document.querySelectorAll("#address button[data-steer]")) {
   );
 }
 
-// The house: back to the start page, keeping the tabs open behind it.
-document.querySelector("#address [data-home]").addEventListener("click", () => show("start"));
+// The house takes the tab in front to the home site.
+document.querySelector("#address [data-home]").addEventListener("click", () => {
+  if (browsing) send("steer", { what: "go", url: HOME_URL });
+  else send("tab.new", { url: HOME_URL });
+});
 
 // The star: pin or unpin the page in front. Rust flips it and sends the pinned
 // list back, which repaints the star.
@@ -232,67 +230,6 @@ starBtn.addEventListener("click", () => {
   if (!browsing || !frontUrl) return;
   send("bookmark.toggle", { url: frontUrl, title: frontTitle });
 });
-
-// ---- the start page (speed dial) -------------------------------------------
-
-function paintStart(message) {
-  bookmarksList = message.bookmarks || [];
-  const frequent = message.frequent || [];
-
-  const marksWrap = document.getElementById("bookmarksWrap");
-  const marks = document.getElementById("bookmarks");
-  const freqWrap = document.getElementById("frequentWrap");
-  const freq = document.getElementById("frequent");
-
-  marks.textContent = "";
-  bookmarksList.forEach((b) => marks.appendChild(tile(b, true)));
-  marksWrap.hidden = bookmarksList.length === 0;
-
-  freq.textContent = "";
-  frequent.forEach((f) => freq.appendChild(tile(f, false)));
-  freqWrap.hidden = frequent.length === 0;
-
-  // The pinned list just changed, so the address-row star may need to fill.
-  paintStar();
-}
-
-// One speed-dial tile: a round badge with the site's initial and its name. A
-// press opens it in a new tab. Frequent tiles can be dismissed — which hides the
-// host so it does not return; pinned tiles are unpinned from the star instead.
-function tile(item, pinned) {
-  const cell = document.createElement("button");
-  cell.className = "tile";
-  cell.title = item.url;
-
-  const badge = document.createElement("span");
-  badge.className = "badge";
-  badge.textContent = initialOf(item.title || item.url);
-
-  const name = document.createElement("span");
-  name.className = "tileName";
-  name.textContent = item.title || item.url;
-
-  cell.append(badge, name);
-  cell.addEventListener("click", () => send("tab.new", { url: item.url }));
-
-  if (!pinned && item.host) {
-    const drop = document.createElement("span");
-    drop.className = "tileDrop";
-    drop.textContent = "✕";
-    drop.title = "이 타일 지우기";
-    drop.addEventListener("click", (e) => {
-      e.stopPropagation();
-      send("frequent.hide", { host: item.host });
-    });
-    cell.appendChild(drop);
-  }
-  return cell;
-}
-
-function initialOf(text) {
-  const t = String(text).replace(/^www\./, "").trim();
-  return (t[0] || "?").toUpperCase();
-}
 
 urlBox.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
@@ -376,12 +313,10 @@ function applyElevation() {
 for (const button of document.querySelectorAll("#go button")) {
   button.addEventListener("click", () => {
     const to = button.dataset.go;
-    // The browser opens where it was left when a tab is still up; with none, it
-    // lands on the start page rather than forcing a fixed site open.
-    if (to === "browser") {
-      if (tabCount > 0) send("nav", { to: "browser" });
-      else show("start");
-    } else show(to);
+    // The browser opens straight onto a site — the last tab if one is up, or the
+    // home site if none. Rust decides which.
+    if (to === "browser") send("nav", { to: "browser" });
+    else show(to);
   });
 }
 
@@ -1819,7 +1754,10 @@ window.__shard = {
         paintNav(message);
         break;
       case "start":
-        paintStart(message);
+        // No start page any more; this now only carries the pinned list, so the
+        // address-row star can fill for a page that is already bookmarked.
+        bookmarksList = message.bookmarks || [];
+        paintStar();
         break;
       case "settings":
         paintSettings(message);
