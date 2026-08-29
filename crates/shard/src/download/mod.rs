@@ -23,6 +23,10 @@ pub mod hls;
 pub mod mkv;
 pub mod mp4;
 pub mod mp4mux;
+// MP3 for the music-only save. Desktop only: it needs the AAC decoder and LAME,
+// which the phone build (download without desktop) does not link.
+#[cfg(feature = "desktop")]
+pub mod mp3;
 pub mod pull;
 pub mod sabr;
 #[cfg(feature = "download")]

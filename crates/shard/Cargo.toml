@@ -21,6 +21,8 @@ desktop = [
     "dep:raw-window-handle",
     "dep:webview2-com",
     "dep:windows",
+    "dep:symphonia",
+    "dep:mp3lame-encoder",
     "uikit/gui",
 ]
 
@@ -92,6 +94,14 @@ wry = { version = "0.56.0", default-features = false, optional = true }
 raw-window-handle = { version = "0.6.2", optional = true }
 # The config format is shared with the desktop build; only its window is not.
 uikit = { path = "../uikit", default-features = false }
+
+# MP3 for the music-only save (desktop only). symphonia decodes the AAC frames
+# we already hold to PCM; mp3lame-encoder (LAME, built from bundled C source) is
+# the encoder — plain resample-quality MP3 would defeat the point, and LAME is
+# the one that makes a re-encode worth having. Both are optional and only pulled
+# in by `desktop`, so the phone (download-only) build never sees them.
+symphonia = { version = "0.5.4", default-features = false, features = ["aac"], optional = true }
+mp3lame-encoder = { version = "0.2.1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # The web view's own interface, for the one thing wry does not pass on: being

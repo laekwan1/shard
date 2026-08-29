@@ -56,6 +56,9 @@ pub struct Job {
     /// Mux into a plain MP4 (H.264 + AAC) instead of Matroska. Set for an H.264 pick,
     /// so iOS plays it through AVPlayer — clean over Bluetooth, no libVLC engine needed.
     pub mp4: bool,
+    /// Convert a music-only save (AAC) to MP3 rather than keeping the .m4a.
+    /// Desktop only; ignored for anything but the AAC music row.
+    pub music_mp3: bool,
 }
 
 /// Fetch both streams and join them. Returns where the file landed.
@@ -127,7 +130,7 @@ pub fn run(
         // first (append a trailing '.'), instead of the plain title every time.
         let stem = free_stem(&job.into, &safe_name(&job.title));
         let saved = if job.audio_only {
-            save_audio_only(&audio_path, &job.into, &stem)?
+            save_audio_only(&audio_path, &job.into, &stem, job.music_mp3)?
         } else if job.mp4 {
             save_video_mp4(&video_path, &audio_path, &job.into, &stem)?
         } else {
@@ -210,6 +213,14 @@ fn fetch_picture(client: &reqwest::blocking::Client, url: &str) -> Result<(Vec<u
 
 fn put_in((bytes, kind): (Vec<u8>, &'static str), saved: &Path) -> Result<()> {
     let file = std::fs::read(saved)?;
+    // MP3 (desktop only) carries its cover in an ID3 tag at the front, not in an
+    // MP4 box. Written before the .m4a path so an .mp3 is not sent through it.
+    #[cfg(feature = "desktop")]
+    if saved.extension().and_then(|e| e.to_str()) == Some("mp3") {
+        let with = crate::download::mp3::with_cover_id3(&file, &bytes, kind);
+        std::fs::write(saved, with)?;
+        return Ok(());
+    }
     let Some(with) = mp4::with_cover(&file, &bytes, kind) else {
         // Opus in WebM, say. Nothing is written rather than a file rewritten
         // into something a player might not open.
@@ -253,10 +264,12 @@ pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
 /// frames (each a fixed 1024 samples), which states the correct duration. Rebuilding
 /// (not copying) is what keeps the .m4a — the AVPlayer path that plays clean over
 /// Bluetooth — usable; see 결함-기록.
-fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf> {
+fn save_audio_only(audio_path: &Path, into: &Path, stem: &str, mp3: bool) -> Result<PathBuf> {
     use crate::download::{mp4mux, ts};
     let bytes = std::fs::read(audio_path)?;
-    // WebM (Opus): keep the container it came in.
+    // WebM (Opus): keep the container it came in. MP3 is not offered here — the
+    // music row takes AAC, so a request for MP3 always meets the branch below;
+    // an Opus track would need another decoder and is left as it arrived.
     if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
         let output = into.join(format!("{stem}.weba"));
         std::fs::write(&output, &bytes)?;
@@ -281,6 +294,30 @@ fn save_audio_only(audio_path: &Path, into: &Path, stem: &str) -> Result<PathBuf
     if audio.is_empty() {
         bail!("음성 프레임을 찾지 못했습니다");
     }
+    // MP3 (desktop only): decode the AAC frames we just gathered and re-encode.
+    // The .m4a rebuild below is the default and higher-quality path; this runs
+    // only when the user turned the switch on.
+    #[cfg(feature = "desktop")]
+    if mp3 {
+        let frames: Vec<Vec<u8>> = audio.iter().map(|s| s.data.clone()).collect();
+        match crate::download::mp3::from_aac(
+            &stream.codec_private,
+            stream.sample_rate as u32,
+            stream.channels,
+            &frames,
+        ) {
+            Ok(data) => {
+                let output = into.join(format!("{stem}.mp3"));
+                std::fs::write(&output, data)?;
+                return Ok(output);
+            }
+            // A transcode failure should not lose the download: fall through to
+            // the .m4a the AAC would have produced anyway.
+            Err(e) => tracing::warn!("MP3 변환 실패, .m4a로 저장: {e:#}"),
+        }
+    }
+    #[cfg(not(feature = "desktop"))]
+    let _ = mp3;
     let demuxed = ts::Demuxed {
         avcc: Vec::new(),
         video_av1: false,
@@ -930,6 +967,8 @@ pub fn run_youtube(
         cover: offer.thumb.clone(),
         audio_only,
         mp4: avplayer,
+        // The phone keeps the original AAC (.m4a); MP3 is a desktop switch.
+        music_mp3: false,
     };
     let expected = job.video.bytes + job.audio.bytes;
     let mut progress = |p: Progress| on_progress(p.video + p.audio, expected);

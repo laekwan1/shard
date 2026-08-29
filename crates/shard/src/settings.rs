@@ -141,6 +141,12 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     help: "비워 두면 영상의 기본 언어를 씁니다. 예: ko, en",
                     kind: Kind::Text(cfg.download.audio_language.clone()),
                 },
+                Item {
+                    key: "download.music_mp3",
+                    label: "음악을 MP3로 저장",
+                    help: "음악만 저장할 때 MP3로 바꿉니다. 어디서나 열리지만, 원본(AAC)을 다시 인코딩하므로 음질이 조금 떨어집니다.",
+                    kind: Kind::Toggle(cfg.download.music_mp3),
+                },
             ],
         ),
         (
@@ -535,6 +541,7 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
             }
         }
         "download.audio_language" => cfg.download.audio_language = value.trim().to_string(),
+        "download.music_mp3" => cfg.download.music_mp3 = on,
         _ => return false,
     }
     true

@@ -306,11 +306,23 @@ pub struct Download {
     /// Language to prefer, as YouTube spells it — "ko", "en", and so on.
     /// Empty means whatever the video treats as its default track.
     pub audio_language: String,
+    /// Convert a music-only save to MP3 rather than keeping the original AAC
+    /// (.m4a). MP3 plays on anything — old car stereos, players that will not
+    /// touch .m4a — at the cost of a re-encode, which is why it is a switch and
+    /// not the only way: the original AAC is already smaller for the same sound.
+    /// Only the AAC music row is converted; an Opus (.weba) track is left as-is
+    /// because decoding Opus would need another library.
+    pub music_mp3: bool,
 }
 
 impl Default for Download {
     fn default() -> Self {
-        Self { include_video: true, audio: AudioQuality::Best, audio_language: String::new() }
+        Self {
+            include_video: true,
+            audio: AudioQuality::Best,
+            audio_language: String::new(),
+            music_mp3: true,
+        }
     }
 }
 

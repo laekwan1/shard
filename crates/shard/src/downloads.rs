@@ -380,6 +380,9 @@ impl Downloads {
             cover: offer.thumb.clone(),
             audio_only,
             mp4: false,   // desktop plays through the WebView, which opens MKV/WebM too
+            // MP3 only makes sense for a music-only save, and only when the user
+            // asked for it; the flag is read where the file is written.
+            music_mp3: audio_only && self.shared.config.read().download.music_mp3,
         };
         let expected = job.video.bytes + job.audio.bytes;
         let title = offer.title.clone();
