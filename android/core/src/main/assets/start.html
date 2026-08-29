@@ -1,13 +1,16 @@
 <!doctype html>
 <!--
-    The browser's start page (speed dial), shown when there is no site in front.
-    It is a local page loaded into the same web view the browser uses, the way a
-    real browser's new-tab page is: opening a tile navigates this view to the
-    site. Data comes from the native side over the `Shard` bridge; a tile press
-    and a tile dismiss go back the same way.
+    The favorites page — the same one iOS shows (BrowserScreen.startPage), minus
+    the "자주 방문" tiles the user dropped here: 즐겨찾기 as a horizontal row of
+    favicon tiles, and 방문기록 as the vertical list below.
 
-    Self-contained on purpose — one file, no requests — so it draws instantly and
-    works with the engine off.
+    It is a local page shown as an overlay over the web view (a second WebView the
+    star toggles), not a navigation — so the page underneath stays put, the way
+    iOS keeps the web page under its start overlay. Data and actions cross the
+    `Shard` bridge: open a row, remove one, clear the history.
+
+    Self-contained on purpose — one file, no requests except the favicons, which
+    reach Google directly (no bypass needed).
 -->
 <html lang="ko">
 <head>
@@ -16,179 +19,297 @@
 <style>
   :root {
     --surface: #0E0E10;
-    --raised: #202024;
-    --on-surface: #E8E6E3;
+    --chrome: #1A1A1D;
+    --onSurface: #E8E6E3;
     --muted: #8A8A90;
-    /* The app's own accent — the shard module paints it teal, the same as the
-       native star and every other control. Kept in step by hand because this
-       page is plain HTML and cannot read @color/accent. */
     --accent: #2DD4BF;
-    --on-accent: #04252B;
+    --divider: #2E2E34;
     --bad: #E5484D;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; height: 100%; }
   body {
     background: var(--surface);
-    color: var(--on-surface);
+    color: var(--onSurface);
     font-family: -apple-system, "Roboto", "Noto Sans KR", system-ui, sans-serif;
-    padding: max(28px, env(safe-area-inset-top)) 20px 32px;
     -webkit-user-select: none;
     user-select: none;
+    display: flex;
+    flex-direction: column;
+    /* Clear the address bar that floats over the top. */
+    padding-top: max(54px, calc(env(safe-area-inset-top) + 46px));
   }
-  .wordmark {
-    margin: 4px 0 26px;
-    text-align: center;
-    font-size: 13px;
-    letter-spacing: .12em;
-    color: var(--muted);
-  }
-  .group { margin-top: 24px; }
-  .group.hidden { display: none; }
+
   .head {
-    margin: 0 2px 12px;
-    font-size: 12.5px;
-    font-weight: 600;
-    letter-spacing: .03em;
-    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    margin-bottom: 2px;
   }
+  .head h2 { margin: 0; font-size: 17px; font-weight: 700; }
+  .head .action { font-size: 14px; color: var(--muted); background: none; border: none; }
+  .head .action.on { color: var(--accent); }
+
+  /* 즐겨찾기 — a single horizontal row of tiles. */
   .tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-    gap: 12px;
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding: 6px 16px 14px;
+    scrollbar-width: none;
   }
+  .tiles::-webkit-scrollbar { display: none; }
   .tile {
-    position: relative;
+    flex: 0 0 auto;
+    width: 68px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    padding: 15px 6px 11px;
-    border-radius: 16px;
-    background: var(--raised);
+    gap: 5px;
+    background: none;
     border: none;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-    transition: transform .1s ease, background .1s ease;
+    padding: 0;
+    position: relative;
   }
-  .tile:active { transform: scale(.95); background: #26262b; }
-  .badge {
-    width: 46px;
-    height: 46px;
+  .tile .icon {
+    width: 54px;
+    height: 54px;
+    border-radius: 13px;
+    overflow: hidden;
     display: grid;
     place-items: center;
-    border-radius: 50%;
-    font-size: 21px;
-    font-weight: 700;
-    color: var(--on-accent);
-    background: var(--accent);
+    background: var(--chrome);
   }
-  .name {
-    max-width: 100%;
-    font-size: 11.5px;
-    color: var(--muted);
+  .tile .icon img { width: 54px; height: 54px; object-fit: contain; padding: 13px; }
+  .tile .icon .letter { font-size: 26px; font-weight: 700; color: #fff; }
+  .tile .name {
+    font-size: 11px;
+    color: var(--onSurface);
+    max-width: 66px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .drop {
+  .tile .badge {
     position: absolute;
-    top: 5px;
-    right: 5px;
+    top: -5px;
+    left: -5px;
     width: 22px;
     height: 22px;
-    display: grid;
-    place-items: center;
     border-radius: 50%;
-    font-size: 12px;
-    line-height: 1;
-    color: var(--muted);
-    background: #00000066;
-    border: none;
-  }
-  .drop:active { color: #fff; background: var(--bad); }
-  .empty {
-    margin-top: 30vh;
-    text-align: center;
-    color: var(--muted);
+    background: var(--bad);
+    color: #fff;
+    border: 2px solid var(--surface);
+    display: none;
+    place-items: center;
     font-size: 13px;
+    line-height: 1;
   }
+  body.editing .tile { animation: jiggle .16s infinite alternate; }
+  body.editing .tile .badge { display: grid; }
+  @keyframes jiggle { from { transform: rotate(-1.6deg); } to { transform: rotate(1.6deg); } }
+
+  .empty { color: var(--muted); font-size: 12px; padding: 0 16px 10px; }
+
+  .divider { height: 1px; background: var(--divider); margin: 2px 0; }
+
+  /* 방문기록 — the vertical list, the only scrolling area. */
+  .history { flex: 1; overflow-y: auto; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .row .open {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    min-width: 0;
+  }
+  .row .icon {
+    width: 26px; height: 26px; border-radius: 6px; overflow: hidden;
+    flex: 0 0 auto; display: grid; place-items: center; background: var(--chrome);
+  }
+  .row .icon img { width: 26px; height: 26px; object-fit: contain; padding: 5px; }
+  .row .icon .letter { font-size: 13px; font-weight: 700; color: #fff; }
+  .row .text { min-width: 0; }
+  .row .title { font-size: 14px; color: var(--onSurface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .url { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .del { background: none; border: none; color: var(--muted); font-size: 15px; padding: 8px; }
+  .empty-history { color: var(--muted); font-size: 15px; text-align: center; padding-top: 40px; }
 </style>
 </head>
 <body>
-  <p class="wordmark">S H A R D</p>
-  <div id="bookmarksGroup" class="group hidden">
-    <p class="head">즐겨찾기</p>
-    <div id="bookmarks" class="tiles"></div>
+  <div class="head">
+    <h2>즐겨찾기</h2>
+    <button id="doneBtn" class="action on" style="display:none">완료</button>
   </div>
-  <div id="frequentGroup" class="group hidden">
-    <p class="head">자주 방문</p>
-    <div id="frequent" class="tiles"></div>
+  <div id="favEmpty" class="empty" style="display:none">주소창의 ★를 길게 눌러 즐겨찾기를 추가하세요.</div>
+  <div id="tiles" class="tiles"></div>
+
+  <div class="divider"></div>
+
+  <div class="head" style="margin-top:10px">
+    <h2>방문기록</h2>
+    <button id="clearBtn" class="action" style="display:none">전체 지우기</button>
   </div>
-  <p id="empty" class="empty" hidden>위 주소창에 주소나 검색어를 입력하세요</p>
+  <div id="history" class="history"></div>
 
 <script>
   function bridgeHome() {
     try { return JSON.parse(window.Shard.home()); }
-    catch (e) { return { bookmarks: [], frequent: [] }; }
+    catch (e) { return { bookmarks: [], history: [] }; }
   }
-  function open(url) { try { window.Shard.open(url); } catch (e) {} }
-  function hide(host) { try { window.Shard.hide(host); } catch (e) {} }
-
+  function B() { return window.Shard; }
+  function hostOf(u) {
+    try { return new URL(u).hostname.replace(/^www\./, ""); } catch (e) { return u; }
+  }
   function initial(text) {
-    var t = String(text || "").replace(/^www\./, "").trim();
+    var t = String(text || "").replace(/^www\./, "").replace(/^https?:\/\//, "").trim();
     return (t[0] || "?").toUpperCase();
   }
+  // A stable color per host, mirroring iOS tileColor (hue table, hashed host).
+  function tileColor(host) {
+    var hues = [7, 32, 47, 119, 191, 209, 270, 299, 331];
+    var h = 0;
+    for (var i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
+    return "hsl(" + hues[Math.abs(h) % hues.length] + ",55%,60%)";
+  }
 
-  function tile(item, pinned) {
-    var cell = document.createElement("button");
+  // A favicon element: Google's service, falling back to a colored initial.
+  function favicon(host, letterSize) {
+    var box = document.createElement("div");
+    box.className = "icon";
+    var img = document.createElement("img");
+    img.src = "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(host) + "&sz=64";
+    img.onerror = function () {
+      box.textContent = "";
+      var span = document.createElement("span");
+      span.className = "letter";
+      span.textContent = initial(host);
+      box.style.background = tileColor(host);
+      box.appendChild(span);
+    };
+    box.appendChild(img);
+    return box;
+  }
+
+  var editing = false;
+  function setEditing(on) {
+    editing = on;
+    document.body.classList.toggle("editing", on);
+    document.getElementById("doneBtn").style.display = on ? "" : "none";
+  }
+
+  function tile(b) {
+    var host = hostOf(b.url);
+    var cell = document.createElement("div");
     cell.className = "tile";
 
-    var badge = document.createElement("span");
-    badge.className = "badge";
-    badge.textContent = initial(item.title || item.url);
+    cell.appendChild(favicon(host, 26));
 
-    var name = document.createElement("span");
+    var name = document.createElement("div");
     name.className = "name";
-    name.textContent = (item.title || item.url).replace(/^https?:\/\//, "").replace(/^www\./, "");
-
-    cell.appendChild(badge);
+    name.textContent = b.title || host;
     cell.appendChild(name);
-    cell.addEventListener("click", function () { open(item.url); });
 
-    if (!pinned && item.host) {
-      var drop = document.createElement("button");
-      drop.className = "drop";
-      drop.textContent = "✕";
-      drop.addEventListener("click", function (e) {
-        e.stopPropagation();
-        hide(item.host);
-        render();
-      });
-      cell.appendChild(drop);
-    }
+    var badge = document.createElement("div");
+    badge.className = "badge";
+    badge.textContent = "−"; // minus
+    badge.addEventListener("click", function (e) {
+      e.stopPropagation();
+      B().removeBookmark(b.url);
+      render();
+    });
+    cell.appendChild(badge);
+
+    // Tap opens (unless editing); long-press enters edit mode, like iOS.
+    var timer = null, moved = false;
+    cell.addEventListener("touchstart", function () {
+      moved = false;
+      timer = setTimeout(function () { timer = null; setEditing(true); }, 450);
+    }, { passive: true });
+    cell.addEventListener("touchmove", function () { moved = true; if (timer) { clearTimeout(timer); timer = null; } }, { passive: true });
+    cell.addEventListener("touchend", function () {
+      if (timer) { clearTimeout(timer); timer = null; if (!moved && !editing) B().open(b.url); }
+    });
+    // Mouse (emulator/desktop) fallback.
+    cell.addEventListener("click", function () { if (!editing && !("ontouchstart" in window)) B().open(b.url); });
     return cell;
+  }
+
+  function historyRow(h) {
+    var host = hostOf(h.url);
+    var row = document.createElement("div");
+    row.className = "row";
+
+    var open = document.createElement("button");
+    open.className = "open";
+    open.appendChild(favicon(host, 13));
+    var text = document.createElement("div");
+    text.className = "text";
+    var title = document.createElement("div");
+    title.className = "title";
+    title.textContent = h.title || host;
+    var url = document.createElement("div");
+    url.className = "url";
+    url.textContent = h.url;
+    text.appendChild(title); text.appendChild(url);
+    open.appendChild(text);
+    open.addEventListener("click", function () { B().open(h.url); });
+    row.appendChild(open);
+
+    var del = document.createElement("button");
+    del.className = "del";
+    del.textContent = "✕";
+    del.addEventListener("click", function () { B().removeHistory(h.url); render(); });
+    row.appendChild(del);
+    return row;
   }
 
   function render() {
     var data = bridgeHome();
     var marks = data.bookmarks || [];
-    var freq = data.frequent || [];
+    var hist = data.history || [];
 
-    var bm = document.getElementById("bookmarks");
-    var fq = document.getElementById("frequent");
-    bm.textContent = "";
-    fq.textContent = "";
-    marks.forEach(function (b) { bm.appendChild(tile(b, true)); });
-    freq.forEach(function (f) { fq.appendChild(tile(f, false)); });
+    var tiles = document.getElementById("tiles");
+    tiles.textContent = "";
+    marks.forEach(function (b) { tiles.appendChild(tile(b)); });
+    document.getElementById("favEmpty").style.display = marks.length ? "none" : "";
+    if (!marks.length) setEditing(false);
 
-    document.getElementById("bookmarksGroup").classList.toggle("hidden", marks.length === 0);
-    document.getElementById("frequentGroup").classList.toggle("hidden", freq.length === 0);
-    document.getElementById("empty").hidden = marks.length + freq.length > 0;
+    var history = document.getElementById("history");
+    history.textContent = "";
+    if (hist.length) {
+      hist.forEach(function (h) { history.appendChild(historyRow(h)); });
+    } else {
+      var e = document.createElement("div");
+      e.className = "empty-history";
+      e.textContent = "방문기록이 없습니다.";
+      history.appendChild(e);
+    }
+    document.getElementById("clearBtn").style.display = hist.length ? "" : "none";
   }
 
+  document.getElementById("doneBtn").addEventListener("click", function () { setEditing(false); });
+  document.getElementById("clearBtn").addEventListener("click", function () { B().clearHistory(); render(); });
+  // A tap on empty space leaves edit mode.
+  document.body.addEventListener("click", function (e) {
+    if (editing && !e.target.closest(".tile") && !e.target.closest("#doneBtn")) setEditing(false);
+  });
+
+  // Re-read every time the overlay is shown, so a page bookmarked since it was
+  // last seen appears. The native side calls this by reloading the overlay.
   render();
+  window.shardRender = render;
 </script>
 </body>
 </html>

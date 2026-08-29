@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.EditText
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
@@ -62,8 +63,11 @@ abstract class BrowserActivity : AppCompatActivity() {
     @Volatile
     private var pageTitle: String = ""
 
-    /** The pinned sites and the ones visited most — what the start page draws. */
+    /** The pinned sites and the history — what the favorites overlay draws. */
     private val favorites by lazy { Favorites(this) }
+
+    /** Whether the favorites overlay is up (the star toggles it). */
+    private var favoritesShown = false
 
     private var panelShown = false
 
@@ -253,10 +257,10 @@ abstract class BrowserActivity : AppCompatActivity() {
         warnIfNotificationsAreOff()
 
         if (autoStart) setEngine(true) else showEngineState(false)
-        // The start page, not a fixed site: the browser opens onto its own speed
-        // dial the way a real browser opens onto a new tab. A tile or the address
-        // bar is what then loads a site over it.
-        binding.web.loadUrl(Favorites.START_URL)
+        configureStartOverlay()
+        // First launch opens the web homepage, the same as iOS — not a start page.
+        // The favorites page is an overlay the star toggles, not where the app lands.
+        binding.web.loadUrl(favorites.homepage())
         ui.post(statusTicker)
     }
 
@@ -548,8 +552,6 @@ abstract class BrowserActivity : AppCompatActivity() {
         // The page reports long presses on video through this.
         addJavascriptInterface(VideoHook(::onVideoLongPress), VideoHook.BRIDGE)
         addJavascriptInterface(YouTubeBridge(), YouTube.BRIDGE)
-        // The start page reads its tiles and opens them through this.
-        addJavascriptInterface(FavoritesBridge(), Favorites.BRIDGE)
 
         // The YouTube recorder has to be in place before the page's own scripts
         // run. Injecting it when the page finishes loading was too late: the
@@ -588,7 +590,7 @@ abstract class BrowserActivity : AppCompatActivity() {
                 // One arrival, one visit — counted where a page finishes loading,
                 // by host, for the start page's "자주 방문". The start page and other
                 // non-web addresses are filtered out inside recordVisit.
-                favorites.recordVisit(url)
+                favorites.recordVisit(url, pageTitle)
                 view.evaluateJavascript(VideoHook.SCRIPT, null)
                 // Only where the document-start injection is unavailable. Where
                 // it works it has already run, and running the recorder again
@@ -794,22 +796,35 @@ abstract class BrowserActivity : AppCompatActivity() {
         } else {
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
+        // Follow iOS: rotate.right while upright (a turn to landscape), rotate.left
+        // while wide (a turn back). `portrait` here is the state BEFORE the turn.
+        binding.rotate.setImageResource(
+            if (portrait) R.drawable.ic_rotate_left else R.drawable.ic_rotate_right
+        )
     }
 
     private fun wireControls() {
         binding.power.setOnClickListener { setEngine(!engineOn) }
         binding.rotate.setOnClickListener { rotateScreen() }
 
-        // The house goes back to the start page, keeping the site one tile away.
-        binding.home.setOnClickListener { binding.web.loadUrl(Favorites.START_URL) }
+        // Home — the same two gestures iOS gives it. Tap goes to the set homepage;
+        // a long press opens the editor to change it.
+        binding.home.setOnClickListener {
+            showFavorites(false)
+            binding.web.loadUrl(favorites.homepage())
+            hidePanel()
+        }
+        binding.home.setOnLongClickListener { editHomepage(); true }
 
-        // The star pins or unpins the page in front. Toggled here, drawn at once —
-        // the store is the truth, so the icon follows what it returns.
-        binding.star.setOnClickListener {
-            val url = binding.web.url ?: return@setOnClickListener
-            if (url.startsWith(Favorites.START_URL)) return@setOnClickListener
-            favorites.toggle(url, pageTitle)
+        // Star — iOS's two gestures. Tap toggles the favorites page (an overlay);
+        // a long press pins or unpins the page in front.
+        binding.star.setOnClickListener { showFavorites(!favoritesShown) }
+        binding.star.setOnLongClickListener {
+            val url = binding.web.url ?: return@setOnLongClickListener true
+            val added = favorites.toggle(url, pageTitle)
             updateStar(url)
+            toast(if (added) "즐겨찾기에 추가했습니다" else "즐겨찾기에서 뺐습니다")
+            true
         }
 
         // Tapping the address bar should replace what is there, not put a
@@ -851,7 +866,8 @@ abstract class BrowserActivity : AppCompatActivity() {
                 distanceY: Float,
             ): Boolean {
                 val start = down ?: return false
-                if (panelShown) return false
+                // The favorites overlay owns its own touches; leave it alone.
+                if (favoritesShown) return false
 
                 val dx = current.rawX - start.rawX
                 val dy = current.rawY - start.rawY
@@ -861,18 +877,26 @@ abstract class BrowserActivity : AppCompatActivity() {
                     kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.2f
                 if (!sideways) return false
 
-                // Rightward from the left band opens the address panel.
-                if (dx > 0 && startsInAddressBand(start.rawX, start.rawY)) {
-                    showPanel()
-                    return true
-                }
-                // Leftward from the right band opens the library — but only when
-                // the page is the front-most thing (not over a player or an
-                // already-open library).
-                if (dx < 0 && startsInLibraryBand(start.rawX, start.rawY) &&
-                    customView == null && !(libraryMade && library.isOpen)) {
-                    openLibrary()
-                    return true
+                if (dx > 0) {
+                    // Rightward from the left half opens the address panel.
+                    if (!panelShown && startsInAddressBand(start.rawX, start.rawY)) {
+                        showPanel()
+                        return true
+                    }
+                } else {
+                    // Leftward: if the address panel is open, the first swipe just
+                    // puts it away; the next one (panel closed) opens the library —
+                    // the same two-step iOS does. Otherwise open the library from
+                    // the right half, but only over the front-most page.
+                    if (panelShown) {
+                        hidePanel()
+                        return true
+                    }
+                    if (startsInLibraryBand(start.rawX, start.rawY) &&
+                        customView == null && !(libraryMade && library.isOpen)) {
+                        openLibrary()
+                        return true
+                    }
                 }
                 return false
             }
@@ -896,7 +920,9 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (panelShown && !touchIsInside(binding.bar, event)) {
+                    // While the favorites overlay is up the panel is pinned — home and
+                    // star on it are the only way back off that page (as on iOS).
+                    if (panelShown && !favoritesShown && !touchIsInside(binding.bar, event)) {
                         hidePanel()
                     } else if (binding.url.hasFocus() && !touchIsInside(binding.url, event)) {
                         dismissKeyboard()
@@ -908,40 +934,27 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
-     * The vertical band both edge swipes must start in — the middle half of the
-     * screen, a quarter down to three quarters.
-     *
-     * It used to be the top third so the address swipe started under its handle.
-     * But the system back gesture also lives at the top-left, so the two fought;
-     * moving the app's swipe to the centre, and starting it further in than the
-     * back gesture (below), keeps them apart.
-     */
-    private fun inCentreBand(y: Float): Boolean {
-        // The whole height is the band now: the edge swipes are far enough
-        // inside the screen (past the system back gesture) that a page rarely
-        // fights them, and a full-height target is easier to hit than a middle
-        // slice.
-        return true
-    }
-
-    /**
-     * Left band for the address panel: from well inside the edge (past the
-     * system back-gesture strip) to about a third across, in the centre band.
+     * Left half for the address panel: from well inside the edge (past the system
+     * back-gesture strip) to the middle. The two bands used to be a left third and
+     * a right third with a dead strip between them, which read as "only the centre
+     * works"; splitting the width in half at the centre lets the two together cover
+     * the whole screen — a rightward swipe anywhere on the left opens the address,
+     * a leftward swipe anywhere on the right opens the library.
      */
     private fun startsInAddressBand(x: Float, y: Float): Boolean {
         val density = resources.displayMetrics.density
         val w = resources.displayMetrics.widthPixels
-        return x > 48 * density && x < w * 0.32f && inCentreBand(y)
+        return x > 48 * density && x < w * 0.5f
     }
 
     /**
-     * Right band for the library: mirror of the address band on the other edge,
-     * also inset from the system back gesture.
+     * Right half for the library: mirror of the address band, meeting it at the
+     * centre so there is no dead zone between them.
      */
     private fun startsInLibraryBand(x: Float, y: Float): Boolean {
         val density = resources.displayMetrics.density
         val w = resources.displayMetrics.widthPixels
-        return x < w - 48 * density && x > w * 0.68f && inCentreBand(y)
+        return x < w - 48 * density && x >= w * 0.5f
     }
 
     private fun swipeThreshold() = 36 * resources.displayMetrics.density
@@ -1110,12 +1123,11 @@ abstract class BrowserActivity : AppCompatActivity() {
     }
 
     /**
-     * How the start page reaches the pinned sites and opens them.
-     *
-     * `home` is read on the page's own thread and returns at once; `open` and
-     * `hide` change the view or the store, so they hop to the main thread. Opening
-     * a tile navigates this same web view — the start page is the new-tab page,
-     * not a separate screen.
+     * How the favorites overlay reaches the store: the two lists to draw, opening
+     * a row, and the edits (remove one, clear the history). `home` is read on the
+     * page's own thread and returns at once; the rest change the main web view or
+     * the store, so they hop to the main thread. Opening a row navigates the MAIN
+     * web view and closes the overlay — the overlay never becomes the page.
      */
     private inner class FavoritesBridge {
         @android.webkit.JavascriptInterface
@@ -1123,25 +1135,87 @@ abstract class BrowserActivity : AppCompatActivity() {
 
         @android.webkit.JavascriptInterface
         fun open(url: String) {
-            ui.post { binding.web.loadUrl(asUrl(url)) }
+            ui.post { showFavorites(false); binding.web.loadUrl(asUrl(url)); hidePanel() }
         }
 
         @android.webkit.JavascriptInterface
-        fun hide(host: String) {
-            favorites.hide(host)
+        fun removeBookmark(url: String) {
+            favorites.removeBookmark(url)
+            ui.post { binding.web.url?.let { updateStar(it) } }
+        }
+
+        @android.webkit.JavascriptInterface
+        fun removeHistory(url: String) = favorites.removeHistory(url)
+
+        @android.webkit.JavascriptInterface
+        fun clearHistory() = favorites.clearHistory()
+    }
+
+    /**
+     * The favorites overlay (start.html) — a second web view the star toggles over
+     * the page, the way iOS overlays its start page. Configured once; only its
+     * visibility changes after that.
+     */
+    private fun configureStartOverlay() {
+        with(binding.startWeb) {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            addJavascriptInterface(FavoritesBridge(), Favorites.BRIDGE)
+            loadUrl(Favorites.START_URL)
         }
     }
 
     /**
-     * Fill or empty the address-bar star for the page in front, and take it away
-     * on the start page where there is nothing to pin.
+     * Show or hide the favorites overlay. Showing brings the address panel with it
+     * (so home/star stay reachable) and re-renders the page so a just-bookmarked
+     * site appears; hiding puts both away. Mirrors iOS's showStart.
+     */
+    private fun showFavorites(show: Boolean) {
+        favoritesShown = show
+        binding.startWeb.visibility = if (show) View.VISIBLE else View.GONE
+        binding.star.setImageResource(
+            when {
+                show -> R.drawable.ic_star_accent
+                binding.web.url?.let { favorites.isBookmarked(it) } == true -> R.drawable.ic_star_on
+                else -> R.drawable.ic_star
+            }
+        )
+        if (show) {
+            binding.startWeb.evaluateJavascript("window.shardRender && window.shardRender()", null)
+            showPanel()
+        } else {
+            hidePanel()
+        }
+    }
+
+    /** A small dialog to set the homepage, the same as iOS's homepage editor. */
+    private fun editHomepage() {
+        val field = EditText(this).apply {
+            setText(favorites.homepage())
+            setSelection(text.length)
+            inputType = android.text.InputType.TYPE_TEXT_VARIATION_URI
+            setSingleLine()
+        }
+        android.app.AlertDialog.Builder(this)
+            .setTitle("홈페이지")
+            .setMessage("홈 버튼을 누르면 이동할 주소")
+            .setView(field)
+            .setPositiveButton("저장") { _, _ -> favorites.setHomepage(field.text.toString()) }
+            .setNegativeButton("취소", null)
+            .show()
+    }
+
+    /**
+     * Fill or empty the address-bar star for the page in front. Filled while the
+     * page is bookmarked; accent while the favorites overlay is up (iOS's colours).
      */
     private fun updateStar(url: String) {
-        val onStart = url.startsWith(Favorites.START_URL)
-        binding.star.visibility = if (onStart) View.GONE else View.VISIBLE
-        if (onStart) return
+        if (favoritesShown) {
+            binding.star.setImageResource(R.drawable.ic_star_accent)
+            return
+        }
         binding.star.setImageResource(
-            if (favorites.isPinned(url)) R.drawable.ic_star_on else R.drawable.ic_star
+            if (favorites.isBookmarked(url)) R.drawable.ic_star_on else R.drawable.ic_star
         )
     }
 

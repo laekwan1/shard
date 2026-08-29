@@ -6,24 +6,34 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The browser's home: the sites the user pinned and the ones they visit most.
+ * The browser's home and favorites, kept the same shape iOS keeps them
+ * (BookmarksStore + the "shard.homepage" setting): the sites the user pinned, the
+ * pages they have visited (newest first), and the one address the home button
+ * goes to. Persisted in SharedPreferences as JSON — small enough to read and
+ * write whole on every change.
  *
- * The desktop build keeps the same three lists in its config; the phone keeps
- * them in its own preferences rather than in the native engine's config file,
- * so a page opened here does not have to cross the C ABI to be remembered. The
- * start page ([START_URL]) reads [homeJson] over the `Shard` bridge and calls
- * back to open a tile or drop one.
- *
- * Frequency is counted per host, not per page: "자주 방문" answers which sites you
- * keep going to, and a hundred YouTube videos are one place, not a hundred.
+ * The favorites page ([homeJson]) shows two sections, exactly as iOS does minus
+ * the "자주 방문" tiles the user asked to drop here: 즐겨찾기 (the pins) and
+ * 방문기록 (the history). The `Shard` bridge reads this and calls back to open a
+ * row, remove one, or clear the history.
  */
 class Favorites(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences("favorites", Context.MODE_PRIVATE)
 
+    // ---- the homepage ------------------------------------------------------
+
+    /** Where the home button goes and the first page opened. iOS's default too. */
+    fun homepage(): String = prefs.getString(KEY_HOMEPAGE, DEFAULT_HOME) ?: DEFAULT_HOME
+
+    fun setHomepage(url: String) {
+        val v = normalize(url)
+        if (v.isNotBlank()) prefs.edit().putString(KEY_HOMEPAGE, v).apply()
+    }
+
     // ---- the pinned sites --------------------------------------------------
 
-    /** Pin the page, or unpin it if it was already pinned. Returns the new state. */
+    /** Pin the page, or unpin it if already pinned (the star toggles). */
     fun toggle(url: String, title: String): Boolean {
         if (url.isBlank() || !url.startsWith("http")) return false
         val marks = bookmarks()
@@ -31,104 +41,68 @@ class Favorites(context: Context) {
         if (at >= 0) {
             marks.removeAt(at)
         } else {
-            // Newest first, so the most recently pinned reads at the top.
             marks.add(0, Mark(url, title.ifBlank { hostOf(url) }))
         }
         saveBookmarks(marks)
         return at < 0
     }
 
-    fun isPinned(url: String): Boolean = bookmarks().any { it.url == url }
+    fun isBookmarked(url: String): Boolean = bookmarks().any { it.url == url }
 
-    // ---- what gets visited -------------------------------------------------
-
-    /**
-     * Note that a page was reached. Counts the host, and remembers the newest
-     * pages so a later feature could show them; the start page only uses the
-     * counts. The start page itself and other non-web addresses are not places.
-     */
-    fun recordVisit(url: String) {
-        if (!url.startsWith("http")) return
-        val host = hostOf(url)
-        if (host.isBlank()) return
-        val visits = visits()
-        visits.put(host, visits.optInt(host, 0) + 1)
-        prefs.edit().putString(KEY_VISITS, visits.toString()).apply()
-    }
-
-    /** Drop one "자주 방문" tile for good: the host is remembered as hidden. */
-    fun hide(host: String) {
-        val h = hostOf(host).ifBlank { host.trim().lowercase() }
-        if (h.isBlank()) return
-        val visits = visits()
-        visits.remove(h)
-        prefs.edit().putString(KEY_VISITS, visits.toString()).apply()
-        val hidden = hidden()
-        if (!hidden.contains(h)) {
-            hidden.add(h)
-            prefs.edit().putString(KEY_HIDDEN, JSONArray(hidden).toString()).apply()
-        }
-    }
-
-    // ---- what the start page draws -----------------------------------------
-
-    /**
-     * The tiles, as the start page reads them: the pinned sites, then the eight
-     * most-visited hosts. YouTube is always offered unless it is hidden or
-     * already pinned — the browser exists to save from it, so a blank start page
-     * would hide its one sure destination.
-     */
-    fun homeJson(): String {
+    fun removeBookmark(url: String) {
         val marks = bookmarks()
-        val bookmarksJson = JSONArray()
-        for (m in marks) {
-            bookmarksJson.put(JSONObject().put("url", m.url).put("title", m.title))
-        }
-
-        val hidden = hidden()
-        val pinnedHosts = marks.map { hostOf(it.url) }.toSet()
-        val visits = visits()
-        val ranked = visits.keys().asSequence()
-            .filter { it !in hidden }
-            .map { it to visits.optInt(it, 0) }
-            .sortedWith(compareByDescending<Pair<String, Int>> { it.second }.thenBy { it.first })
-            .toList()
-
-        val frequent = JSONArray()
-        val seen = HashSet<String>()
-        // The mobile site's own host, so the always-offered tile is the same place
-        // a real visit records — otherwise "youtube.com" (the default) and
-        // "m.youtube.com" (what actually gets opened and counted) would both show.
-        // The label stays the clean "youtube.com".
-        val youtube = "m.youtube.com"
-        if (youtube !in hidden && youtube !in pinnedHosts) {
-            frequent.put(
-                JSONObject()
-                    .put("url", "https://m.youtube.com/")
-                    .put("title", "youtube.com")
-                    .put("host", youtube)
-            )
-            seen.add(youtube)
-        }
-        for ((host, _) in ranked) {
-            if (frequent.length() >= 8) break
-            if (host in seen || host in pinnedHosts) continue
-            frequent.put(tile("https://$host/", host))
-            seen.add(host)
-        }
-
-        return JSONObject().put("bookmarks", bookmarksJson).put("frequent", frequent).toString()
+        if (marks.removeAll { it.url == url }) saveBookmarks(marks)
     }
 
-    private fun tile(url: String, host: String): JSONObject =
-        JSONObject().put("url", url).put("title", host).put("host", host)
+    // ---- what gets visited (history) ---------------------------------------
+
+    /**
+     * Note a page load: push it onto the history (deduped, newest first, capped),
+     * the way iOS's recordVisit does. The start page and other non-web addresses
+     * are not places.
+     */
+    fun recordVisit(url: String, title: String) {
+        if (!url.startsWith("http")) return
+        val hist = history()
+        hist.removeAll { it.url == url }
+        hist.add(0, Mark(url, title.ifBlank { hostOf(url) }))
+        while (hist.size > 60) hist.removeAt(hist.size - 1)
+        saveHistory(hist)
+    }
+
+    fun removeHistory(url: String) {
+        val hist = history()
+        if (hist.removeAll { it.url == url }) saveHistory(hist)
+    }
+
+    fun clearHistory() {
+        prefs.edit().remove(KEY_HISTORY).apply()
+    }
+
+    // ---- what the favorites page draws -------------------------------------
+
+    /** The two sections the start page reads: the pins and the history. */
+    fun homeJson(): String {
+        val marks = JSONArray()
+        for (m in bookmarks()) {
+            marks.put(JSONObject().put("url", m.url).put("title", m.title))
+        }
+        val hist = JSONArray()
+        for (m in history()) {
+            hist.put(JSONObject().put("url", m.url).put("title", m.title))
+        }
+        return JSONObject().put("bookmarks", marks).put("history", hist).toString()
+    }
 
     // ---- storage -----------------------------------------------------------
 
     private data class Mark(val url: String, val title: String)
 
-    private fun bookmarks(): MutableList<Mark> {
-        val raw = prefs.getString(KEY_BOOKMARKS, null) ?: return mutableListOf()
+    private fun bookmarks(): MutableList<Mark> = readList(KEY_BOOKMARKS)
+    private fun history(): MutableList<Mark> = readList(KEY_HISTORY)
+
+    private fun readList(key: String): MutableList<Mark> {
+        val raw = prefs.getString(key, null) ?: return mutableListOf()
         val out = mutableListOf<Mark>()
         runCatching {
             val arr = JSONArray(raw)
@@ -140,39 +114,46 @@ class Favorites(context: Context) {
         return out
     }
 
-    private fun saveBookmarks(marks: List<Mark>) {
+    private fun saveBookmarks(marks: List<Mark>) = writeList(KEY_BOOKMARKS, marks)
+    private fun saveHistory(hist: List<Mark>) = writeList(KEY_HISTORY, hist)
+
+    private fun writeList(key: String, list: List<Mark>) {
         val arr = JSONArray()
-        for (m in marks) arr.put(JSONObject().put("url", m.url).put("title", m.title))
-        prefs.edit().putString(KEY_BOOKMARKS, arr.toString()).apply()
+        for (m in list) arr.put(JSONObject().put("url", m.url).put("title", m.title))
+        prefs.edit().putString(key, arr.toString()).apply()
     }
 
-    private fun visits(): JSONObject =
-        runCatching { JSONObject(prefs.getString(KEY_VISITS, "{}")!!) }.getOrDefault(JSONObject())
-
-    private fun hidden(): MutableList<String> {
-        val out = mutableListOf<String>()
-        runCatching {
-            val arr = JSONArray(prefs.getString(KEY_HIDDEN, "[]"))
-            for (i in 0 until arr.length()) out.add(arr.getString(i))
-        }
-        return out
-    }
-
-    /** Host without a leading www., lowercased — the key frequency is counted by. */
+    /** Host without a leading www., lowercased — the fallback title/label. */
     private fun hostOf(url: String): String {
         val host = runCatching { Uri.parse(url).host }.getOrNull() ?: return ""
         return host.removePrefix("www.").lowercase()
     }
 
+    /** Turn what the user typed into a URL, the way WebModel.normalize does on iOS. */
+    private fun normalize(input: String): String {
+        val t = input.trim()
+        if (t.isEmpty()) return ""
+        if (t.contains("://")) return t
+        // A single word with a dot is a host; anything else is a search.
+        return if (Regex("^[^\\s]+\\.[^\\s]{2,}").containsMatchIn(t) && !t.contains(' ')) {
+            "https://$t"
+        } else {
+            "https://www.google.com/search?q=" + Uri.encode(t)
+        }
+    }
+
     companion object {
-        /** The local speed-dial page, shown when the browser has no site in front. */
+        /** The local favorites page, shown as an overlay when the star is tapped. */
         const val START_URL = "file:///android_asset/start.html"
 
-        /** The bridge name the start page reaches this through. */
+        /** The bridge name the favorites page reaches this through. */
         const val BRIDGE = "Shard"
 
+        /** iOS's default homepage. */
+        const val DEFAULT_HOME = "https://m.youtube.com"
+
         private const val KEY_BOOKMARKS = "bookmarks"
-        private const val KEY_VISITS = "visits"
-        private const val KEY_HIDDEN = "hidden"
+        private const val KEY_HISTORY = "history"
+        private const val KEY_HOMEPAGE = "homepage"
     }
 }

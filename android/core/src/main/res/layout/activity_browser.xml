@@ -22,6 +22,20 @@
             android:background="@color/surface" />
 
         <!--
+            The favorites page (start.html), shown as an overlay the star toggles —
+            over the web, under the address panel — so the page underneath stays
+            put, the way iOS keeps the web page under its start overlay. Elevation
+            4 sits below the panel's 8 so the home/star buttons stay reachable.
+        -->
+        <WebView
+            android:id="@+id/startWeb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/surface"
+            android:elevation="4dp"
+            android:visibility="gone" />
+
+        <!--
             The reload arrow, for a drag down from the top of the page. It comes
             from above the top edge, so it is parked outside the view rather
             than merely hidden — hidden and then moved would appear at rest and
@@ -136,9 +150,9 @@
                     android:layout_width="40dp"
                     android:layout_height="40dp"
                     android:background="?attr/selectableItemBackgroundBorderless"
-                    android:src="@drawable/ic_rotate"
+                    android:src="@drawable/ic_rotate_right"
                     android:scaleType="fitCenter"
-                    android:padding="8dp"
+                    android:padding="9dp"
                     android:contentDescription="@string/rotate_screen" />
 
                 <!--
