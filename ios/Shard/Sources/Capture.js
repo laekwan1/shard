@@ -617,21 +617,22 @@
 (function () {
   if (window.__shardPageShow) return;
   window.__shardPageShow = true;
-  window.addEventListener('pageshow', function (e) {
-    if (!e.persisted) return;
-    // A resize alone did not repaint the restored page — it came back with black
-    // patches until a real scroll. Nudge the scroll a pixel and back to force WebKit
-    // to repaint the restored compositing layers, a few times as content settles.
-    var repaint = function () {
-      try {
-        window.dispatchEvent(new Event('resize'));
-        var y = window.scrollY || window.pageYOffset || 0;
-        window.scrollTo(0, y + 1);
-        window.scrollTo(0, y);
-      } catch (err) {}
-    };
-    repaint();
-    setTimeout(repaint, 120);
-    setTimeout(repaint, 400);
-  });
+  // Force WebKit to repaint restored compositing layers. A resize alone did not do
+  // it — the page came back with black/grey patches until a real scroll — so nudge
+  // the scroll a pixel and back too, a few times as the content settles.
+  var repaint = function () {
+    try {
+      window.dispatchEvent(new Event('resize'));
+      var y = window.scrollY || window.pageYOffset || 0;
+      window.scrollTo(0, y + 1);
+      window.scrollTo(0, y);
+    } catch (err) {}
+  };
+  var repaintBurst = function () { repaint(); setTimeout(repaint, 120); setTimeout(repaint, 400); };
+  // Full-navigation back restores from the back-forward cache (pageshow persisted).
+  window.addEventListener('pageshow', function (e) { if (e.persisted) repaintBurst(); });
+  // YouTube moves between videos WITHOUT a page load, so back there is a same-document
+  // history pop (popstate), not a bfcache restore — and it left the restored watch page
+  // grey until scrolled. Repaint on popstate too.
+  window.addEventListener('popstate', repaintBurst);
 })();

@@ -357,11 +357,6 @@ pub const RECORDER: &str = r#"
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
             window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
-            // Diagnostic: first videoplayback of this video (an ad's or the real one).
-            if (!window.__shardSabrMarked) {
-              window.__shardSabrMarked = true;
-              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
-            }
           }).catch(function () {});
         }
       }
@@ -938,11 +933,6 @@ pub const CONTROL: &str = r#"
       if (skip) { skip.click(); return; }
       var player = document.querySelector('.html5-video-player');
       if (player && player.classList.contains('ad-showing')) {
-        // Diagnostic: an ad is on this video — so a slow "load" can be read as an ad.
-        if (window.__shardAdMarked !== location.href) {
-          window.__shardAdMarked = location.href;
-          try { window.ipc.postMessage(JSON.stringify({ mark: 'ad' })); } catch (e) {}
-        }
         // No longer seek the ad to its end. That paused the ad (leaving a play
         // button on it) rather than skipping, and — because a skipped/blocked ad
         // does not count as watched — kept YouTube serving fresh ads instead of
