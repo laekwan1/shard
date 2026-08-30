@@ -168,6 +168,42 @@ const bookmarksBar = document.getElementById("bookmarksBar");
 const BOOKMARK_BAR_H = 30;
 let bmBarExtra = 0;
 
+// Dragging a bookmark to reorder. The bar (a horizontal strip) and the favorites
+// page (a vertical list) show the SAME order — cfg.browser.bookmarks — so both
+// drag against it and send bookmark.move {from,to}. Rust does remove(from) then
+// insert(to,·), so `to` is the slot in the list once the dragged item is out; the
+// half-way test picks before/after the drop target, and the shift-down correction
+// keeps that landing exact whichever way the item travels.
+let bmDragFrom = -1;
+function enableBmDrag(el, index, horizontal) {
+  el.draggable = true;
+  el.addEventListener("dragstart", (e) => {
+    bmDragFrom = index;
+    el.classList.add("bmDragging");
+    try {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", String(index));
+    } catch (_) {}
+  });
+  el.addEventListener("dragend", () => {
+    el.classList.remove("bmDragging");
+    bmDragFrom = -1;
+  });
+  el.addEventListener("dragover", (e) => {
+    if (bmDragFrom >= 0) e.preventDefault();
+  });
+  el.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (bmDragFrom < 0) return;
+    const r = el.getBoundingClientRect();
+    const after = horizontal ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+    let to = index + (after ? 1 : 0);
+    if (bmDragFrom < to) to -= 1;
+    if (to !== bmDragFrom) send("bookmark.move", { from: bmDragFrom, to });
+    bmDragFrom = -1;
+  });
+}
+
 // Draw the bookmarks bar under the address row — a chip per pinned site — and tell
 // Rust how much room it needs. Shown only while a site is in front and there is at
 // least one pinned site.
@@ -176,7 +212,7 @@ function paintBookmarksBar() {
   bookmarksBar.hidden = !show;
   bookmarksBar.textContent = "";
   if (show) {
-    for (const b of bookmarksList) {
+    bookmarksList.forEach((b, i) => {
       const chip = document.createElement("button");
       chip.className = "bmChip";
       chip.title = b.url;
@@ -187,8 +223,9 @@ function paintBookmarksBar() {
       label.textContent = b.title || b.url;
       chip.append(icon, label);
       chip.addEventListener("click", () => send("steer", { what: "go", url: b.url }));
+      enableBmDrag(chip, i, true);
       bookmarksBar.appendChild(chip);
-    }
+    });
   }
   const extra = show ? BOOKMARK_BAR_H : 0;
   if (extra !== bmBarExtra) {
@@ -307,7 +344,11 @@ function paintFavorites(message) {
 
   const bm = document.getElementById("favBookmarks");
   bm.textContent = "";
-  bookmarksList.forEach((b) => bm.appendChild(favRow(b, "bookmark")));
+  bookmarksList.forEach((b, i) => {
+    const r = favRow(b, "bookmark");
+    enableBmDrag(r, i, false);
+    bm.appendChild(r);
+  });
   document.getElementById("favBmEmpty").hidden = bookmarksList.length > 0;
 
   const hist = document.getElementById("favHistory");

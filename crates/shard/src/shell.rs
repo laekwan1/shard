@@ -462,6 +462,9 @@ pub enum Ask {
     HistoryClear,
     /// Rename a bookmark (a right-click on the favorites page).
     BookmarkRename { url: String, title: String },
+    /// Reorder bookmarks by dragging: move the one at `from` to sit at `to`. Same
+    /// order backs the bookmarks bar and the favorites page, so both drag to it.
+    BookmarkMove { from: usize, to: usize },
     /// A page answered the download panel — which quality was chosen.
     /// A row on the quality list. `anyway` is set when it was pressed past a
     /// warning that the file is already saved.
@@ -545,6 +548,10 @@ pub fn read_ask(body: &str) -> Ask {
         "bookmark.rename" => Ask::BookmarkRename {
             url: field(body, "url").unwrap_or_default(),
             title: field(body, "title").unwrap_or_default(),
+        },
+        "bookmark.move" => Ask::BookmarkMove {
+            from: number(body, "from").unwrap_or(0) as usize,
+            to: number(body, "to").unwrap_or(0) as usize,
         },
         "steer" => Ask::Steer {
             what: field(body, "what").unwrap_or_else(|| "go".into()),
@@ -1282,6 +1289,21 @@ pub fn preview() -> Result<()> {
                 }
                 engine.borrow().save_config();
             }
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        Ask::BookmarkMove { from, to } => {
+            {
+                let core = engine.borrow();
+                let mut cfg = core.shared.config.write();
+                let marks = &mut cfg.browser.bookmarks;
+                // Bounds-checked: the page's indices could lag a concurrent change.
+                if from < marks.len() && to < marks.len() && from != to {
+                    let m = marks.remove(from);
+                    marks.insert(to, m);
+                }
+            }
+            engine.borrow().save_config();
             let json = browser_home_json(&engine.borrow().shared.config.read().browser);
             shell.tell(&json);
         }

@@ -558,19 +558,20 @@ pub(crate) fn new_view(
 }
 
 /// The ad/tracker host and path fragments to block — identical to iOS/Android.
+const AD_PATTERNS: [&str; 9] = [
+    "doubleclick.net",
+    "googlesyndication.com",
+    "googleadservices.com",
+    "google-analytics.com",
+    "googletagservices.com",
+    "googletagmanager.com",
+    "/pagead/",
+    "/ptracking",
+    "/api/stats/ads",
+];
+
 fn is_ad_url(url: &str) -> bool {
-    const AD: [&str; 9] = [
-        "doubleclick.net",
-        "googlesyndication.com",
-        "googleadservices.com",
-        "google-analytics.com",
-        "googletagservices.com",
-        "googletagmanager.com",
-        "/pagead/",
-        "/ptracking",
-        "/api/stats/ads",
-    ];
-    AD.iter().any(|p| url.contains(p))
+    AD_PATTERNS.iter().any(|p| url.contains(p))
 }
 
 /// Attach a WebView2 WebResourceRequested filter that fails ad requests with an
@@ -581,14 +582,26 @@ fn install_ad_block(view: &wry::WebView) {
         COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL, ICoreWebView2_2,
     };
     use webview2_com::WebResourceRequestedEventHandler;
-    use windows::core::{w, Interface};
+    use windows::core::{w, Interface, HSTRING};
     use wry::WebViewExtWindows;
 
     let wv = view.webview();
+    // Filter by ad pattern, not "*". A "*" filter routes EVERY request — scripts,
+    // images, and above all the video's own media stream — through this host
+    // callback. That delayed the page and, worse, the video start (the long
+    // spinner), and because the stream was held back the SABR request the recorder
+    // waits for arrived late too, so a download begun during the spinner got no
+    // audio and failed. Registering one filter per ad pattern means the callback
+    // fires only for the handful of URLs that might be ads; the video stream is
+    // never touched. Wrapped in '*…*' because the filter matches the whole URL.
     unsafe {
-        if let Err(e) = wv.AddWebResourceRequestedFilter(w!("*"), COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL) {
-            tracing::warn!("could not set ad-block filter: {e}");
-            return;
+        for pattern in AD_PATTERNS {
+            let filter = HSTRING::from(format!("*{pattern}*"));
+            if let Err(e) =
+                wv.AddWebResourceRequestedFilter(&filter, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL)
+            {
+                tracing::warn!("could not set ad-block filter {pattern}: {e}");
+            }
         }
     }
     let handler = WebResourceRequestedEventHandler::create(Box::new(move |wv, args| {

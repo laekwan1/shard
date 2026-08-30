@@ -958,6 +958,20 @@ pub const CONTROL: &str = r#"
   // Not in the capture phase, and passive: this only reads, so the browser is
   // free to scroll without waiting to hear whether it may.
   window.addEventListener('scroll', soon, { passive: true });
+
+  // A click anywhere off the panel puts it away. The panel floats over the page,
+  // and once it was open — a quality list or a download in progress — the only way
+  // out was its own 닫기 row; a click on the video behind it left it sitting there.
+  // Capture phase so it is seen before the page swallows the click; the button is
+  // exempt because that is what opens the panel, and clicks inside the panel are
+  // its own rows.
+  document.addEventListener('pointerdown', function (e) {
+    var p = document.getElementById('shard-p');
+    if (!p || p.contains(e.target)) return;
+    var b = document.getElementById('shard-b');
+    if (b && b.contains(e.target)) return;
+    window.__shardClose();
+  }, true);
 })();
 "#;
 
