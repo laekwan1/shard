@@ -574,20 +574,33 @@
     }
     return best;
   }
-  // Put the bar on the video's bottom edge. Split out so it can run both on the
-  // timer AND on every scroll frame.
+  // Put the bar on the video's bottom edge — but ONLY write a style that actually
+  // changed. On the watch page the player is sticky: it stays put while the comments
+  // scroll, so its rect does not move and this writes nothing — no repaint, no trail.
+  // Writing the same left/top every frame was itself the smear.
   function place() {
     if (!bar || !vid) return;
     var r = vid.getBoundingClientRect();
-    bar.style.left = r.left + 'px';
-    bar.style.width = r.width + 'px';
-    bar.style.top = (r.bottom - 18) + 'px';
+    var left = r.left + 'px', width = r.width + 'px', top = (r.bottom - 18) + 'px';
+    if (bar.style.left !== left) bar.style.left = left;
+    if (bar.style.width !== width) bar.style.width = width;
+    if (bar.style.top !== top) bar.style.top = top;
   }
+  // Shorts swaps to the next video on a swipe (which is a scroll of its pager); the
+  // bar chasing the video mid-swap smears, so hide it for the swipe — it returns in
+  // place. The watch page does NOT hide (its video is sticky and stays visible), and
+  // place() above already writes nothing there while nothing moves.
+  var lastScroll = 0;
+  window.addEventListener('scroll', function () {
+    lastScroll = Date.now();
+    if (bar && /\/shorts/.test(location.pathname)) bar.style.display = 'none';
+  }, { passive: true });
   function tick() {
     try {
       build();
       vid = pick();
-      if (!vid) { bar.style.display = 'none'; return; }
+      var shorts = /\/shorts/.test(location.pathname);
+      if (!vid || (shorts && Date.now() - lastScroll < 240)) { bar.style.display = 'none'; return; }
       bar.style.display = 'block';
       place();
       if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
@@ -596,16 +609,4 @@
     } catch (e) {}
   }
   setInterval(tick, 250);
-  // Follow the video AS the page scrolls, so the bar stays pinned to its bottom
-  // edge rather than lagging a quarter-second behind and smearing a trail. On the
-  // watch page the video stays put while the comments below it scroll, but on a
-  // page that does move the video this keeps the bar on it. Always visible — the
-  // whole point of the bar is that a scrolled, half-cut video can still be scrubbed.
-  // rAF so a burst of scroll events collapses into one reposition per frame.
-  var pending = false;
-  window.addEventListener('scroll', function () {
-    if (pending || !vid) return;
-    pending = true;
-    requestAnimationFrame(function () { pending = false; try { place(); } catch (e) {} });
-  }, { passive: true });
 })();
