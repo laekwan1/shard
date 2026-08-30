@@ -1,96 +1,110 @@
-# SideStore로 Shard 설치·자동 재서명 — 처음부터
+# SideStore로 Shard 설치·자동 재서명 — 처음부터 (iLoader 방식)
 
 무료 Apple ID로 사이드로드한 앱은 **7일마다 재서명**해야 계속 열린다. Sideloadly는
-그걸 매번 케이블로 수동으로 해야 하지만, **SideStore**는 아이폰 안에서 스스로(WiFi/셀룰러)
-재서명해준다. 이 문서는 **처음부터** 설정하는 법이다.
+그걸 매번 케이블로 수동으로(그때마다 PC 필요) 해야 하지만, **SideStore**는 아이폰
+안에서 스스로(인터넷만 있으면) 재서명해준다 — **초기 1회 설치 뒤엔 PC가 필요 없다.**
 
-> 왜 SideStore인가: 오픈소스라 감사 가능하고, **Apple ID 비밀번호는 애플로만** 전송된다
-> (SideStore 서버로 안 감). 알려진 침해 사례도 없다. 재발명하지 말고 그대로 쓰되, 아래
-> **보조 Apple ID**로 위험을 격리한다.
+> **iLoader vs Sideloadly**: 역할은 비슷하지만(윈도우+USB+Apple ID로 .ipa 설치) 목적이
+> 다르다. Sideloadly는 대상 앱을 직접 설치하고 7일마다 PC로 재실행해야 한다. iLoader는
+> **SideStore를 설치하는 1회용 부트스트래퍼**이고, 이후 재서명은 SideStore가 자동으로
+> 한다. **자동 재서명 능력은 iLoader가 아니라 SideStore에서 온다.**
+
+> **왜 SideStore인가**: 오픈소스라 감사 가능, Apple ID 비밀번호는 애플로만 전송(SideStore
+> 서버로 안 감). 아래 **보조 Apple ID**로 위험을 격리한다.
 
 ---
 
 ## 0. 준비물
 
-- **아이폰** (개발자 모드 켜둘 것: 설정 › 개인정보 보호 및 보안 › 개발자 모드 ON)
-- **Windows PC** (초기 1회 페어링에만 필요)
+- **아이폰** (개발자 모드 ON: 설정 › 개인정보 보호 및 보안 › 개발자 모드)
+- **Windows PC (64비트)** — **초기 1회 SideStore 설치에만** 필요. 이후 안 씀.
+  (32비트 Windows, ARM64 Windows 10은 미지원.)
 - **보조 Apple ID** — 아래 1번에서 새로 만든다. **메인 계정은 절대 쓰지 말 것.**
 - USB 케이블
 
 ## 1. 보조 Apple ID 만들기 (보안 격리)
 
-서명 도구에 넣을 **버리는 계정**을 하나 만든다. 이 계정엔 결제수단·iCloud 사진 등
+서명 도구/SideStore에 넣을 **버리는 계정**을 하나 만든다. 결제수단·iCloud 사진 등
 개인정보를 넣지 않는다.
 
-1. [appleid.apple.com](https://appleid.apple.com) → **Apple ID 생성** → 다른 이메일로 가입.
+1. [appleid.apple.com](https://appleid.apple.com) → **Apple ID 생성**(다른 이메일).
 2. **2단계 인증**을 켠다(필수).
-3. (권장) 같은 페이지 › **로그인 및 보안 › 앱 암호**에서 **앱 암호(App-Specific Password)**를
-   하나 만들어 둔다. SideStore가 비밀번호 대신 이걸 받으면, 도구가 털려도 메인 자격증명은 안전.
+3. (권장) **로그인 및 보안 › 앱 암호**에서 **앱 암호(App-Specific Password)**를 만들어 둔다.
+   비밀번호 대신 이걸 넣으면 도구가 털려도 메인 자격증명은 안전.
 
-> 이유: 서명하려면 어떤 도구든 Apple ID로 애플에 인증해야 한다. 보조 계정+앱 암호면
-> 노출 위험이 그 버리는 계정에만 국한된다.
+## 2. PC에 애플 드라이버 (iTunes)
 
-## 2. PC에 드라이버 설치
+- **iTunes**를 설치한다. **apple.com 다운로드판 권장**(Microsoft Store판보다 안정적).
+  기기 인식용 드라이버 때문.
 
-SideStore 설치 도구가 기기를 인식하려면 애플 드라이버가 필요하다.
+## 3. iLoader로 SideStore 설치 (초기 1회, PC 필요)
 
-- **Apple판 iTunes + iCloud**를 apple.com에서 받아 설치한다. **Microsoft Store판이 아니라**
-  apple.com 다운로드판이어야 한다.
+정확한 최신 절차는 **[docs.sidestore.io](https://docs.sidestore.io/docs/installation/prerequisites)**
+가 기준이다(버전에 따라 UI가 바뀐다). 큰 흐름:
 
-## 3. SideStore 설치 (초기 1회, PC 필요)
+1. **iLoader**(SideStore의 공식 Windows 설치 도구)를 GitHub에서 받는다 — **MSI 권장**(EXE도 있음).
+2. iLoader 실행. 아이폰을 **USB로 연결** → 아이폰에서 **"이 컴퓨터를 신뢰"** → 암호.
+3. iLoader에서 **Apple 계정 로그인**(👉 **보조 Apple ID + 앱 암호**). 기기 선택 →
+   **"Install SideStore (Stable)"**.
+4. 아이폰: 설정 › 일반 › **VPN 및 기기 관리** → "개발자 앱"에서 **본인 Apple 계정 이름**
+   → **신뢰**.
+5. SideStore 앱을 열고 **같은 Apple ID로 로그인**한다(SideStore가 자신·다른 앱을 재서명하려면
+   계정이 필요하다).
 
-정확한 최신 절차는 **[sidestore.io](https://sidestore.io)** 화면이 기준이다(버전에 따라 UI가
-조금씩 바뀐다). 큰 흐름은:
+## 4. LocalDevVPN — 온디바이스 재서명 통로 (핵심)
 
-1. sidestore.io 안내에 따라 **PC 도구(SideServer 등)**를 받는다.
-2. 아이폰을 **USB로 연결** → 아이폰에서 **"이 컴퓨터를 신뢰"** → 암호 입력.
-3. PC 도구로 **기기 페어링 파일**을 만들고 **SideStore.ipa를 설치**한다. 이때 **보조 Apple ID**
-   (+앱 암호)를 입력한다.
-4. 아이폰: 설정 › 일반 › **VPN 및 기기 관리** → 방금 개발자 인증서 **신뢰**.
+SideStore는 **LocalDevVPN**(로컬/루프백 VPN)으로 폰이 "자신을 신뢰된 컴퓨터"처럼 여기게
+해, PC 없이 스스로 설치·재서명한다.
 
-## 4. 온디바이스 재서명 통로(VPN) 켜기 — 핵심
-
-SideStore는 **온디바이스 WireGuard 루프백 VPN**으로 폰이 "자신을 신뢰된 컴퓨터"처럼
-여기게 해 스스로 설치·재서명한다.
-
-1. SideStore가 안내하는 대로 **VPN 프로파일을 설치**하고 **켠다**.
-   (설정 › VPN에 SideStore 항목이 생긴다.)
-2. 이 VPN은 **외부로 트래픽을 보내는 게 아니라**(로컬 루프백), 재서명 통로일 뿐이다.
+1. 아이폰 App Store(또는 AltStore PAL 소스)에서 **LocalDevVPN** 설치 → 실행 → **연결(ON)**.
+   "VPN 구성 허용" 뜨면 **허용** + 암호.
+2. 이 VPN은 **외부로 트래픽을 보내지 않는다**(로컬 루프백). 설치/업데이트/재서명 API를 여는
+   통로일 뿐이다. **SideStore로 설치·갱신할 때는 반드시 켜져 있어야 한다.**
 
 ## 5. Shard 설치 (앞으로는 Sideloadly 대신 이걸로)
 
-1. 새 `Shard-unsigned.ipa`를 아이폰으로 옮긴다(AirDrop/파일 앱/클라우드 등).
-2. **SideStore 앱 → ＋(내 앱) → `Shard-unsigned.ipa` 선택** → 설치.
-3. 이제 서명 갱신을 **SideStore가 관리**한다.
+1. **LocalDevVPN이 ON인지 확인.**
+2. 새 `Shard-unsigned.ipa`를 아이폰으로 옮긴다(iCloud Drive/파일 앱/이메일/클라우드 등.
+   윈도우라 AirDrop 없음).
+3. **SideStore 앱 → My Apps → ＋ →** 옮긴 `Shard-unsigned.ipa` 선택 → 설치.
+   서명 갱신을 이제 **SideStore가 관리**한다.
 
-## 6. 자동 재서명 확인
+## 6. 자동 재서명 — 운용법
 
-- 폰에 **인터넷만 있으면**(WiFi/셀룰러 무관 — 특정 WiFi 필요 없음), SideStore가 7일 만료 전
-  **자동으로 재서명**한다. 수동으로 **SideStore → Refresh All**도 가능.
-- SideStore 앱이 **가끔 실행/백그라운드 동작**해야 갱신 스케줄이 돈다(iOS 백그라운드 제약).
-  며칠에 한 번 열어보면 확실하다.
+재서명이 일어나려면 **① LocalDevVPN ON + ② SideStore가 실행(도는 순간)** 둘 다 필요하다.
+
+- **LocalDevVPN은 항상 켜두고, SideStore를 며칠에 한 번 열어**준다(iOS 백그라운드가
+  불확실해서). 열면 만료 임박 앱을 자동 갱신한다. 수동 **Refresh All**도 있다.
+- 인터넷(WiFi/셀룰러 무관)만 있으면 7일 만료 전에 갱신된다.
+
+## 7. Shard 우회와 충돌하지 않는다
+
+- **iOS Shard의 우회는 시스템 VPN이 아니라 앱 내부 "로컬 프록시"** 다(WKWebView를 그
+  프록시로 가리킨다, iOS 17+; `WebView.swift`의 bypass proxy). VPN 슬롯을 안 쓰므로
+  **LocalDevVPN과 공존**한다 — 둘 다 켜도 된다.
+- ⚠️ 다만 **제3의 진짜 VPN 앱(시스템 VPN)** 을 쓰면 그건 LocalDevVPN과 슬롯이 충돌한다
+  (iOS는 VPN 동시 하나). Shard 우회는 해당 없음.
 
 ---
 
 ## 알아둘 한계 (애플이 강제 — 무엇으로도 못 바꿈)
 
-- **무료 계정은 7일 만료**. SideStore는 **만료 전 자동 갱신**해줄 뿐, 만료 자체를 없애지 못한다.
-- **동시 설치 앱 3개** 제한(SideStore 자체가 슬롯 하나 차지할 수 있음).
-- **주당 앱 ID 10개** 제한 — 새 빌드를 하루에 여러 번 갈아끼우면 걸릴 수 있다.
+- **무료 계정은 7일 만료.** SideStore는 **만료 전 자동 갱신**만, 만료 자체는 못 없앤다.
+- **동시 설치 앱 3개** 제한(SideStore가 슬롯 하나 차지할 수 있음).
+- **주당 앱 ID 10개** 제한 — 새 빌드를 하루에 여러 번 갈면 걸릴 수 있다.
 - 이 한계들을 없애는 유일한 합법적 길은 **유료 개발자 계정(1년 서명)** 뿐이다.
 
 ## 새 빌드(내가 주는 새 .ipa) 반영
 
 - 자동 재서명은 "서명 만료"를 막는 것이고, **"새 버전 설치"는 별개**다.
-- 새 `.ipa`가 나오면 **SideStore → ＋로 다시 설치**하면 된다(그 순간 재서명도 됨).
+- 새 `.ipa`가 나오면 **LocalDevVPN 켠 채 SideStore → ＋로 다시 설치**하면 된다(그 순간
+  재서명도 됨).
 
 ## 문제 해결
 
-- **"Apple ID 또는 암호가 올바르지 않음"**: 앱 암호를 쓰거나, 2단계 인증 코드를 정확히 입력.
+- **"Apple ID 또는 암호가 올바르지 않음"**: 앱 암호를 쓰거나 2단계 인증 코드를 정확히.
   보조 계정이 잠기면 appleid.apple.com에서 풀 것.
-- **VPN이 꺼져 갱신 안 됨**: 설정 › VPN에서 SideStore VPN이 켜져 있는지 확인.
-- **7일 지나 앱이 안 열림**: SideStore를 열어 Refresh All. 그래도 안 되면 ＋로 재설치.
-- **anisette 관련 오류**: SideStore 문서의 anisette 서버 설정을 따르거나, 자체 anisette 호스팅.
-
-> 보안이 특히 걱정되면: SideStore를 **오픈소스에서 직접 빌드**해 쓰면 바이너리까지 자가통제
-> 가능하다(재발명 아님 — 그대로 빌드). 다만 위 7일/3앱 한계와 Apple ID 인증 요구는 동일하다.
+- **설치/갱신이 안 됨**: LocalDevVPN이 **연결(ON)** 인지 먼저 확인. 그다음 SideStore를 열어
+  **Refresh All**.
+- **7일 지나 앱이 안 열림**: SideStore를 열어 Refresh All. 안 되면 ＋로 재설치.
+- **anisette 관련 오류**: SideStore 문서(docs.sidestore.io)의 anisette 안내를 따른다.
