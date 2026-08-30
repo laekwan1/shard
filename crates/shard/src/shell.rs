@@ -1857,7 +1857,11 @@ impl Shell {
                 // flickering between sites. Each page reports its own address
                 // and names itself when it does.
                 // The URL bar is each page's own business; nothing to do on a plain navigate.
-                crate::download::browser::Event::Navigated(_) => {}
+                // (Diagnostic: timestamped to measure the spinner against the page marks
+                // below. Remove once the ad-strip timing is settled.)
+                crate::download::browser::Event::Navigated(url) => {
+                    tracing::info!("nav: {url}");
+                }
                 // The back/forward list changed (navigation, shorts pushState, or a
                 // GoBack/GoForward) — re-check the front tab's arrows so they grey out with
                 // nowhere to go and light up once there is somewhere.
@@ -1940,6 +1944,12 @@ impl Shell {
             if changed {
                 self.say_tabs();
             }
+            return;
+        }
+        // Diagnostic markers the page posts (dom loaded, ad-strip wrapped, first
+        // videoplayback) — timestamped here to locate the spinner. Remove later.
+        if payload.contains("\"mark\"") {
+            tracing::info!("page mark: {payload}");
             return;
         }
         if payload.contains("\"ask\"") {

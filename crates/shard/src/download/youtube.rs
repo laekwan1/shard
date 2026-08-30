@@ -357,6 +357,11 @@ pub const RECORDER: &str = r#"
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
             window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
+            // Diagnostic: first videoplayback of this video (the spinner's end).
+            if (!window.__shardSabrMarked) {
+              window.__shardSabrMarked = true;
+              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
+            }
           }).catch(function () {});
         }
       }
@@ -745,7 +750,12 @@ pub const AD_STRIP: &str = r#"
     // mere presence is the tell, so it has to actually come off.
     window.__shardSetStrip = function (on) {
       if (!on) { try { JSON.parse = _parse; } catch (e) {} return; }
-      var apply = function () { try { JSON.parse = wrapped; } catch (e) {} };
+      var apply = function () {
+        try { JSON.parse = wrapped; } catch (e) {}
+        // Diagnostic: when the strip actually took hold, to see if the spinner
+        // starts before or after it.
+        try { window.ipc.postMessage(JSON.stringify({ mark: 'wrap' })); } catch (e) {}
+      };
       if (document.readyState === 'complete') apply();
       else window.addEventListener('load', apply, { once: true });
     };
