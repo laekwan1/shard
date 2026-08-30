@@ -647,9 +647,15 @@ function humanBytes(n) {
   return Math.max(1, Math.round(b / 1024)) + " KB";
 }
 
+// Downloads the user pressed ✕ on. The engine stops between requests, so it can
+// take a moment; the row is hidden the instant it is pressed and kept hidden here
+// so the next progress update — which may still list it — does not bring it back.
+const canceling = new Set();
+
 function paintDownloads(list) {
   downloads.textContent = "";
   for (const item of list) {
+    if (canceling.has(item.id)) continue;
     const row = document.createElement("div");
     row.className = "download";
 
@@ -689,10 +695,20 @@ function paintDownloads(list) {
     stop.className = "stop";
     stop.title = "받기 취소";
     stop.textContent = "✕";
-    stop.addEventListener("click", () => send("download.cancel", { id: item.id }));
+    stop.addEventListener("click", () => {
+      // Show it gone at once; the engine catches up when it can.
+      canceling.add(item.id);
+      row.remove();
+      send("download.cancel", { id: item.id });
+    });
 
     row.append(name, track, size, rate, percent, stop);
     downloads.appendChild(row);
+  }
+  // Once the engine has actually dropped a cancelled download from the list, stop
+  // holding its id — so a later download that reuses the id is not hidden too.
+  for (const id of [...canceling]) {
+    if (!list.some((item) => item.id === id)) canceling.delete(id);
   }
 }
 
