@@ -562,12 +562,9 @@
     bar.addEventListener('touchend', function (e) { dragging = false; e.stopPropagation(); }, { passive: false });
   }
   function pick() {
-    // The WATCH page only. Not the feed (its hovered thumbnails are playing <video>s
-    // that scroll, and the bar chasing them smeared a trail), and not Shorts — Shorts
-    // has YouTube's own bottom progress bar, and its swipe-to-next-video is not a
-    // scroll event, so no scroll-hide caught the smear our bar left as it chased the
-    // swapped video. The watch player is the only one worth, and safe to, draw on.
-    if (!/\/watch/.test(location.pathname)) return null;
+    // Watch and Shorts. Not the feed — its hovered thumbnails are playing <video>s
+    // that scroll, and the bar chasing them smeared a trail down the page.
+    if (!/\/watch|\/shorts/.test(location.pathname)) return null;
     var best = null, area = 0, vids = document.getElementsByTagName('video');
     for (var i = 0; i < vids.length; i++) {
       var v = vids[i], r = v.getBoundingClientRect(), a = r.width * r.height;
@@ -599,7 +596,18 @@
       }
     } catch (e) {}
   }
-  setInterval(tick, 250);
+  // Pick the video and update progress a few times a second — a bit quicker than
+  // before so a Shorts swap is noticed sooner.
+  setInterval(tick, 150);
+  // Reposition EVERY frame, so the bar keeps up with a Shorts swipe (which moves the
+  // video fast and is a touch-pager, not a scroll event — the old 250ms timer lagged
+  // behind it and smeared a trail). place() writes only the coordinates that actually
+  // changed, so a still, sticky watch video costs a rect read and no repaint.
+  function frame() {
+    try { if (vid && bar && bar.style.display !== 'none') place(); } catch (e) {}
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 })();
 
 // Back-navigation to a watch page can be restored from WebKit's back-forward cache
