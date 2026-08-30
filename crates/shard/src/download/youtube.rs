@@ -732,11 +732,22 @@ pub const AD_STRIP: &str = r#"
       } catch (e) {}
     };
     var _parse = JSON.parse;
-    JSON.parse = function (text, reviver) {
+    var wrapped = function (text, reviver) {
       var o = _parse.call(this, text, reviver);
       strip(o);
       return o;
     };
+    // Live on/off, called from Rust when the "영상 광고 차단" setting changes.
+    // Turning off restores the NATIVE parser, not just a no-op wrapper: wrapping
+    // JSON.parse is itself what YouTube's anti-adblock looks for, so leaving a
+    // wrapper in place would keep the delay. The current video is already parsed,
+    // so the change shows on the next one — no restart needed.
+    window.__shardSetStrip = function (on) {
+      try { JSON.parse = on ? wrapped : _parse; } catch (e) {}
+    };
+    // Initial state: the flag is set just ahead of this script per tab, from the
+    // setting at the time the tab opened. Absent means off.
+    window.__shardSetStrip(window.__shardStripAds === true);
   } catch (e) {}
 })();
 "#;

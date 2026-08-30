@@ -599,7 +599,7 @@ pub fn is_ad_block_on() -> bool {
 /// YouTube detects and penalises with a delay. Injected at document-start, so it
 /// only takes effect on tabs opened after a change — the 403 flag above is the
 /// live one.
-static AD_STRIP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+static AD_STRIP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn set_ad_strip(on: bool) {
     AD_STRIP_ON.store(on, std::sync::atomic::Ordering::Relaxed);

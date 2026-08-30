@@ -116,7 +116,7 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 Item {
                     key: "browser.block_video_ads",
                     label: "영상 광고 차단",
-                    help: "유튜브 영상 앞 광고까지 없앱니다. 유튜브가 이를 감지해 영상이 몇 초 늦게 뜰 때가 있습니다. 느리면 끄세요(끄면 광고가 잠깐 떴다 자동으로 넘어갑니다).",
+                    help: "유튜브 영상 앞 광고까지 없앱니다. 기본은 꺼짐 — 유튜브가 이를 감지해 영상이 몇 초 늦게 뜰 때가 있어서입니다(끄면 광고가 잠깐 떴다 자동으로 넘어갑니다). 바꾸면 다음 영상부터 바로 적용됩니다.",
                     kind: Kind::Toggle(cfg.browser.block_video_ads),
                 },
                 Item {
