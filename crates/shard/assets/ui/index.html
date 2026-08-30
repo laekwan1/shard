@@ -11,8 +11,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- img-src also allows Google's favicon service, so a bookmark shows the site's
+     real icon (the YouTube mark, etc.) the way iOS does — images only, and it
+     falls back to a coloured initial if the icon does not load. -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; media-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'">
+      content="default-src 'self'; media-src 'self'; img-src 'self' data: https://www.google.com https://*.gstatic.com; style-src 'self'; script-src 'self'">
 <title>Shard</title>
 <link rel="stylesheet" href="/app.css">
 </head>

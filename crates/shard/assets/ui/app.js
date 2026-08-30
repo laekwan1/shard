@@ -328,18 +328,31 @@ favHpInput.addEventListener("keydown", (e) => {
   favHpInput.blur();
 });
 
-// A round badge with the site's first letter — a self-contained "icon" (the
-// window's strict CSP blocks fetching real favicons, and this needs no request).
+// The site's real favicon (from Google's service, the same source iOS uses),
+// over a coloured initial that shows while it loads or if it never does.
 function favBadge(item) {
   const badge = document.createElement("span");
   badge.className = "favBadge";
-  const t = String(item.title || item.url).replace(/^https?:\/\//, "").replace(/^www\./, "").trim();
-  badge.textContent = (t[0] || "?").toUpperCase();
+  const host = String(item.url || item.title)
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .split("/")[0];
+  badge.textContent = (host[0] || "?").toUpperCase();
   let h = 0;
-  const host = t.split("/")[0];
   for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) | 0;
   const hues = [7, 32, 47, 119, 191, 209, 270, 299, 331];
   badge.style.background = "hsl(" + hues[Math.abs(h) % hues.length] + ",50%,42%)";
+
+  const img = new Image();
+  img.className = "favIco";
+  img.src = "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(host) + "&sz=64";
+  img.addEventListener("load", () => {
+    // Real icon arrived: clear the initial and show it on a neutral tile.
+    badge.textContent = "";
+    badge.style.background = "#ffffff10";
+    badge.appendChild(img);
+  });
+  // On error the coloured initial simply stays.
   return badge;
 }
 
@@ -372,6 +385,13 @@ function favRow(item, kind) {
       send("tab.new", { url: item.url });
     }
   });
+  // Right-click a bookmark to rename it, in place.
+  if (kind === "bookmark") {
+    open.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      renameBookmark(name, item);
+    });
+  }
 
   const del = document.createElement("button");
   del.className = "favDel";
@@ -388,6 +408,30 @@ function favRow(item, kind) {
 }
 
 document.getElementById("favClear").addEventListener("click", () => send("history.clear"));
+
+// Rename a bookmark in place: the name becomes an input; Enter saves, Escape or
+// clicking away cancels. Either way the list is re-read so it settles back.
+function renameBookmark(nameEl, item) {
+  const input = document.createElement("input");
+  input.className = "favRename";
+  input.value = item.title || "";
+  nameEl.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const v = input.value.trim();
+    if (save && v) send("bookmark.rename", { url: item.url, title: v });
+    else send("browser.home");
+  };
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") finish(true);
+    else if (e.key === "Escape") finish(false);
+  });
+  input.addEventListener("blur", () => finish(false));
+}
 
 urlBox.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;

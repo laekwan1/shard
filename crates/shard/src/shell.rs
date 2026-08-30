@@ -460,6 +460,8 @@ pub enum Ask {
     /// The favorites page's history: drop one entry, or clear it all.
     HistoryRemove(String),
     HistoryClear,
+    /// Rename a bookmark (a right-click on the favorites page).
+    BookmarkRename { url: String, title: String },
     /// A page answered the download panel — which quality was chosen.
     /// A row on the quality list. `anyway` is set when it was pressed past a
     /// warning that the file is already saved.
@@ -540,6 +542,10 @@ pub fn read_ask(body: &str) -> Ask {
         "home.set" => Ask::HomeSet(field(body, "url").unwrap_or_default()),
         "history.remove" => Ask::HistoryRemove(field(body, "url").unwrap_or_default()),
         "history.clear" => Ask::HistoryClear,
+        "bookmark.rename" => Ask::BookmarkRename {
+            url: field(body, "url").unwrap_or_default(),
+            title: field(body, "title").unwrap_or_default(),
+        },
         "steer" => Ask::Steer {
             what: field(body, "what").unwrap_or_else(|| "go".into()),
             url: field(body, "url").unwrap_or_default(),
@@ -846,7 +852,11 @@ pub fn respond(uri: &str, range: Option<&str>) -> http::Response<std::borrow::Co
         // the cover) at the END, so a music file bigger than that head had its
         // cover missed. A music file is a few MB, read once when the tile shows.
         let Ok(head) = std::fs::read(&file) else { return not_found() };
-        let Some((picture, kind)) = crate::download::mp4::cover(&head) else {
+        // MP4/.m4a keep the cover in a `covr` box; an MP3 keeps it in an ID3 APIC
+        // frame at the front. Try the box first, then the tag.
+        let Some((picture, kind)) = crate::download::mp4::cover(&head)
+            .or_else(|| crate::download::mp3::id3_cover(&head))
+        else {
             return not_found();
         };
         return build
@@ -1257,6 +1267,21 @@ pub fn preview() -> Result<()> {
                 core.shared.config.write().browser.history.clear();
             }
             engine.borrow().save_config();
+            let json = browser_home_json(&engine.borrow().shared.config.read().browser);
+            shell.tell(&json);
+        }
+        Ask::BookmarkRename { url, title } => {
+            let title = title.trim().to_string();
+            if !url.is_empty() && !title.is_empty() {
+                {
+                    let core = engine.borrow();
+                    let mut cfg = core.shared.config.write();
+                    if let Some(m) = cfg.browser.bookmarks.iter_mut().find(|m| m.url == url) {
+                        m.title = title;
+                    }
+                }
+                engine.borrow().save_config();
+            }
             let json = browser_home_json(&engine.borrow().shared.config.read().browser);
             shell.tell(&json);
         }

@@ -51,6 +51,72 @@ pub fn with_cover_id3(mp3: &[u8], picture: &[u8], kind: &str) -> Vec<u8> {
     out
 }
 
+/// Read the cover back out of an ID3v2 tag — the counterpart to [with_cover_id3],
+/// so the library's cover route can serve an MP3's art the same way it serves an
+/// .m4a's. Returns the picture and whether it is a JPEG or PNG.
+pub fn id3_cover(file: &[u8]) -> Option<(Vec<u8>, &'static str)> {
+    if file.len() < 10 || &file[0..3] != b"ID3" {
+        return None;
+    }
+    let version_major = file[3];
+    let tag_end = (10 + unsyncsafe(&file[6..10]) as usize).min(file.len());
+    let mut pos = 10usize;
+    while pos + 10 <= tag_end {
+        let id = &file[pos..pos + 4];
+        // v2.4 frame sizes are syncsafe; v2.3's are plain. We write v2.4.
+        let size = if version_major >= 4 {
+            unsyncsafe(&file[pos + 4..pos + 8]) as usize
+        } else {
+            u32::from_be_bytes([file[pos + 4], file[pos + 5], file[pos + 6], file[pos + 7]]) as usize
+        };
+        let data_start = pos + 10;
+        if size == 0 || data_start + size > file.len() {
+            break;
+        }
+        if id == b"APIC" {
+            return parse_apic(&file[data_start..data_start + size]);
+        }
+        pos = data_start + size;
+    }
+    None
+}
+
+/// Pull the picture out of an APIC frame body: encoding, MIME\0, type,
+/// description\0, then the image bytes (see [with_cover_id3]).
+fn parse_apic(data: &[u8]) -> Option<(Vec<u8>, &'static str)> {
+    if data.is_empty() {
+        return None;
+    }
+    let mut i = 1; // skip the text-encoding byte
+    let mime_start = i;
+    while i < data.len() && data[i] != 0 {
+        i += 1;
+    }
+    let mime = &data[mime_start..i];
+    i += 1; // the MIME's null
+    if i >= data.len() {
+        return None;
+    }
+    i += 1; // the picture-type byte
+    while i < data.len() && data[i] != 0 {
+        i += 1; // the description (latin1, so a single-byte null terminates it)
+    }
+    i += 1; // the description's null
+    if i > data.len() {
+        return None;
+    }
+    let kind = if mime.windows(3).any(|w| w.eq_ignore_ascii_case(b"png")) { "png" } else { "jpg" };
+    Some((data[i..].to_vec(), kind))
+}
+
+/// Decode ID3's syncsafe 28-bit size (the inverse of [syncsafe]).
+fn unsyncsafe(b: &[u8]) -> u32 {
+    ((b[0] as u32 & 0x7f) << 21)
+        | ((b[1] as u32 & 0x7f) << 14)
+        | ((b[2] as u32 & 0x7f) << 7)
+        | (b[3] as u32 & 0x7f)
+}
+
 /// A 28-bit size spread over four bytes with the top bit of each left clear —
 /// the encoding ID3 uses so a size can never be mistaken for an MP3 frame sync.
 fn syncsafe(n: u32) -> [u8; 4] {

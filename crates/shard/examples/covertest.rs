@@ -57,8 +57,17 @@ fn main() -> anyhow::Result<()> {
 
     // And the extracted picture round-trips.
     match mp4::cover(&withc) {
-        Some((p, k)) => eprintln!("extracted cover: {} bytes, kind={}", p.len(), k),
+        Some((p, k)) => eprintln!("extracted cover (mp4): {} bytes, kind={}", p.len(), k),
         None => eprintln!("extract FAILED"),
+    }
+
+    // MP3 path: an ID3 APIC cover, read back by id3_cover.
+    let pic = std::fs::read(cover)?;
+    let mp3_with = shard::download::mp3::with_cover_id3(b"\xff\xfbfakeaudio", &pic, "jpg");
+    eprintln!("mp3 head starts ID3: {}", mp3_with.starts_with(b"ID3"));
+    match shard::download::mp3::id3_cover(&mp3_with) {
+        Some((p, k)) => eprintln!("extracted cover (id3): {} bytes, kind={}", p.len(), k),
+        None => eprintln!("id3 extract FAILED"),
     }
     Ok(())
 }

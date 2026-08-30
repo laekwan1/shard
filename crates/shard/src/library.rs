@@ -173,13 +173,21 @@ const COVER_KINDS: [&str; 3] = ["jpg", "webp", "png"];
 /// The header is at the front of everything saved here, so this reads the front
 /// of the file rather than the whole of it — a shelf of forty songs is forty of
 /// these every time it is opened.
+/// An MP3's cover rides in an ID3v2 APIC frame at the very FRONT of the file (our
+/// mp3 writer prepends it), not in an MP4 `covr` box — so `mp4::has_cover` never
+/// saw it. A quick, dependency-free check: an ID3 tag up front with an APIC frame.
+fn has_id3_cover(head: &[u8]) -> bool {
+    head.starts_with(b"ID3")
+        && head[..head.len().min(64 * 1024)].windows(4).any(|w| w == b"APIC")
+}
+
 fn carries_cover(path: &Path) -> bool {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else { return false };
     let mut head = vec![0u8; 256 * 1024];
     let Ok(read) = file.read(&mut head) else { return false };
     head.truncate(read);
-    if crate::download::mp4::has_cover(&head) {
+    if crate::download::mp4::has_cover(&head) || has_id3_cover(&head) {
         return true;
     }
     // Our own writer (mp4mux) lays the `moov` — which holds the cover — at the END

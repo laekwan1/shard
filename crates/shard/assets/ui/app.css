@@ -1213,14 +1213,30 @@ button svg { display: block; }
   margin: 0 auto;
   padding: 28px 24px 40px;
 }
+/* A divider above each section header marks the three areas apart. */
 .favHead {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin: 22px 2px 8px;
+  margin: 20px 2px 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--divider);
 }
-.favHead:first-child { margin-top: 6px; }
+.favHead:first-child { margin-top: 4px; padding-top: 0; border-top: none; }
 .favHead h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--on-surface); }
+/* The inline rename box on a bookmark row. */
+.favRename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--on-surface);
+  background: var(--field);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-xs);
+  padding: 2px 6px;
+  outline: none;
+}
 #favClear {
   font-size: 12px;
   color: var(--muted);
@@ -1275,6 +1291,9 @@ button svg { display: block; }
   font-weight: 600;
 }
 .favText { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+/* The real favicon, filling the badge over the coloured initial. */
+.favBadge .favIco { width: 100%; height: 100%; object-fit: contain; padding: 4px; box-sizing: border-box; border-radius: inherit; }
+.bmChip .bmIcon .favIco { padding: 2px; }
 .favName {
   max-width: 100%;
   font-size: 13.5px;
