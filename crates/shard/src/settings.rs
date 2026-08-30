@@ -141,18 +141,9 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                     help: "비워 두면 영상의 기본 언어를 씁니다. 예: ko, en",
                     kind: Kind::Text(cfg.download.audio_language.clone()),
                 },
-                Item {
-                    key: "download.music_format",
-                    label: "음악 저장 형식",
-                    help: "음악만 저장할 때의 형식입니다. AAC는 원본 그대로 담아 고음질이고, MP3는 어디서나 열리지만 다시 인코딩하므로 저음질입니다.",
-                    kind: Kind::Choice(
-                        if cfg.download.music_mp3 { "mp3" } else { "aac" }.to_string(),
-                        vec![
-                            ("aac".to_string(), "AAC · 고음질".to_string()),
-                            ("mp3".to_string(), "MP3 · 저음질".to_string()),
-                        ],
-                    ),
-                },
+                // The music format (AAC vs MP3) is no longer a setting: the
+                // download list offers "음악만 저장 (M4A)" and "음악만 저장 (MP3)"
+                // as two rows, so it is chosen per download, where the choice is.
             ],
         ),
         (
@@ -547,7 +538,6 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
             }
         }
         "download.audio_language" => cfg.download.audio_language = value.trim().to_string(),
-        "download.music_format" => cfg.download.music_mp3 = value == "mp3",
         _ => return false,
     }
     true
