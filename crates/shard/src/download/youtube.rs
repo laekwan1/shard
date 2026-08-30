@@ -930,7 +930,6 @@ pub const CONTROL: &str = r#"
 
   // Best-effort YouTube ad skipping — parity with iOS/Android. Defensive: acts only when an
   // ad is actually shown, all in try/catch, so a markup change just makes it a no-op.
-  var lastAdSeek = 0;
   function skipAds() {
     if (document.hidden) return;
     if (window.__shardBlockAds === false) return; // ad blocking off: leave ads alone
@@ -944,18 +943,12 @@ pub const CONTROL: &str = r#"
           window.__shardAdMarked = location.href;
           try { window.ipc.postMessage(JSON.stringify({ mark: 'ad' })); } catch (e) {}
         }
-        var v = player.querySelector('video');
-        // Jump to the ad's end — but ONLY when there is real ad left to skip, and at
-        // most a few times a second. Seeking it on every 350ms poll (and on every
-        // MutationObserver hit) re-buffered the ad constantly and froze the page
-        // instead of skipping it. `duration - currentTime > 0.5` naturally stops once
-        // we are at the end, and handles an ad pod (each new ad has time left again).
-        var now = Date.now();
-        if (v && isFinite(v.duration) && v.duration > 0 &&
-            v.duration - v.currentTime > 0.5 && now - lastAdSeek > 800) {
-          lastAdSeek = now;
-          v.currentTime = v.duration;
-        }
+        // No longer seek the ad to its end. That paused the ad (leaving a play
+        // button on it) rather than skipping, and — because a skipped/blocked ad
+        // does not count as watched — kept YouTube serving fresh ads instead of
+        // hitting its own frequency cap. The skip BUTTON above is clicked when it
+        // appears; an unskippable ad is left to play out (and to count), which is
+        // what lets the ads stop after a few.
       }
       var overlayClose = document.querySelector('.ytp-ad-overlay-close-button');
       if (overlayClose) { try { overlayClose.click(); } catch (e) {} }

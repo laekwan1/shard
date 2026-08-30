@@ -619,9 +619,19 @@
   window.__shardPageShow = true;
   window.addEventListener('pageshow', function (e) {
     if (!e.persisted) return;
-    try {
-      window.dispatchEvent(new Event('resize'));
-      setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 200);
-    } catch (err) {}
+    // A resize alone did not repaint the restored page — it came back with black
+    // patches until a real scroll. Nudge the scroll a pixel and back to force WebKit
+    // to repaint the restored compositing layers, a few times as content settles.
+    var repaint = function () {
+      try {
+        window.dispatchEvent(new Event('resize'));
+        var y = window.scrollY || window.pageYOffset || 0;
+        window.scrollTo(0, y + 1);
+        window.scrollTo(0, y);
+      } catch (err) {}
+    };
+    repaint();
+    setTimeout(repaint, 120);
+    setTimeout(repaint, 400);
   });
 })();
