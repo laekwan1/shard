@@ -357,12 +357,6 @@ pub const RECORDER: &str = r#"
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
             window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
-            // Once, the first time the video's stream is requested — Rust logs it
-            // to time the spinner (see shell.rs "page mark"). Diagnostic.
-            if (!window.__shardSabrMarked) {
-              window.__shardSabrMarked = true;
-              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
-            }
           }).catch(function () {});
         }
       }

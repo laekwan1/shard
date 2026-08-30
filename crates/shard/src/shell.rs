@@ -1857,13 +1857,7 @@ impl Shell {
                 // flickering between sites. Each page reports its own address
                 // and names itself when it does.
                 // The URL bar is each page's own business; nothing to do on a plain navigate.
-                // Logged (with the tracing timestamp) only to measure how long a video
-                // takes to start: this line against the "page mark: sabr" line below is
-                // the spinner's length, which is what tells engine-DNS from ad-block from
-                // YouTube's own anti-adblock delay. Remove once that is settled.
-                crate::download::browser::Event::Navigated(url) => {
-                    tracing::info!("nav: {url}");
-                }
+                crate::download::browser::Event::Navigated(_) => {}
                 // The back/forward list changed (navigation, shorts pushState, or a
                 // GoBack/GoForward) — re-check the front tab's arrows so they grey out with
                 // nowhere to go and light up once there is somewhere.
@@ -1946,13 +1940,6 @@ impl Shell {
             if changed {
                 self.say_tabs();
             }
-            return;
-        }
-        // A one-time marker the recorder posts the first time the player sends its
-        // videoplayback request — i.e. the moment the video actually starts. Logged
-        // with a timestamp so its gap from "nav:" measures the spinner. Diagnostic.
-        if payload.contains("\"mark\"") {
-            tracing::info!("page mark: {payload}");
             return;
         }
         if payload.contains("\"ask\"") {
