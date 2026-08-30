@@ -1118,6 +1118,9 @@ pub fn preview() -> Result<()> {
         core.borrow_mut().start();
     }
 
+    // Match the ad-block filter to the saved setting before the first tab opens.
+    crate::download::browser::set_ad_block(core.borrow().shared.config.read().browser.block_ads);
+
     // The switch in the notification area. It is what lets the window be put
     // away while the bypass keeps running — closing the window is tidying it
     // out of the way, not stopping the program.
@@ -1334,6 +1337,11 @@ pub fn preview() -> Result<()> {
                 // Written the moment it is changed: a setting that only survives
                 // a tidy exit is a setting that goes missing after a crash.
                 engine.borrow().save_config();
+                // Ad blocking takes effect at once, on tabs already open: the 403
+                // filter reads this flag per request.
+                crate::download::browser::set_ad_block(
+                    engine.borrow().shared.config.read().browser.block_ads,
+                );
                 // Some of them are read when the engine starts, so a change made
                 // while it is running means nothing until it is started again.
                 if crate::settings::needs_restart(&key) {
@@ -1360,6 +1368,9 @@ pub fn preview() -> Result<()> {
                 cfg.overrides = learned;
             }
             engine.borrow().save_config();
+            crate::download::browser::set_ad_block(
+                engine.borrow().shared.config.read().browser.block_ads,
+            );
             engine.borrow_mut().restart_if_running();
             let json = crate::settings::as_json(&engine.borrow().shared.config.read());
             shell.tell(&json);
@@ -1940,10 +1951,17 @@ impl Shell {
         // the recorder that captures the SABR request, and the control that puts
         // the download button on the page. Without the last two a page never
         // offers anything and nothing can be saved.
+        // AD_STRIP is left out when ad blocking is off, so a fresh tab carries no
+        // ad interference at all (the 403 filter already checks the same flag live).
+        let ad_strip = if crate::download::browser::is_ad_block_on() {
+            crate::download::youtube::AD_STRIP
+        } else {
+            ""
+        };
         let startup = format!(
             "{}\n{}\n{}\n{}",
             crate::download::browser::PAGE_HOOKS,
-            crate::download::youtube::AD_STRIP,
+            ad_strip,
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
         );

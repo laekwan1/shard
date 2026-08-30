@@ -78,7 +78,7 @@ pub struct Bookmark {
 
 /// The browser's home page: what the user pinned, where they have been, and the page
 /// the home button opens — the desktop half of the phone's home/favorites.
-#[derive(Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Browser {
     /// The page the home button opens; empty means the start page (bookmarks).
@@ -90,6 +90,25 @@ pub struct Browser {
     pub visits: BTreeMap<String, u32>,
     /// Hosts removed from "자주 방문", so a deleted tile does not return.
     pub hidden_frequent: Vec<String>,
+    /// Block ad/tracker requests (the WebResourceRequested 403 and the AD_STRIP
+    /// injection). On by default. A toggle because blocking can make YouTube's
+    /// player wait for the ad it cannot load — turning it off is how that is told
+    /// apart from a slow page. Default is true, so a custom `Default` (not derived,
+    /// which would give false) and `#[serde(default)]` keep old configs blocking.
+    pub block_ads: bool,
+}
+
+impl Default for Browser {
+    fn default() -> Self {
+        Self {
+            homepage: String::new(),
+            bookmarks: Vec::new(),
+            history: Vec::new(),
+            visits: BTreeMap::new(),
+            hidden_frequent: Vec::new(),
+            block_ads: true,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

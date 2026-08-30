@@ -574,6 +574,19 @@ fn is_ad_url(url: &str) -> bool {
     AD_PATTERNS.iter().any(|p| url.contains(p))
 }
 
+/// Whether ad requests are actually failed. The filter and handler are always
+/// installed; this decides, per request, whether to block — so the setting takes
+/// effect on tabs already open, not only new ones. On by default.
+static AD_BLOCK_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_ad_block(on: bool) {
+    AD_BLOCK_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_ad_block_on() -> bool {
+    AD_BLOCK_ON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Attach a WebView2 WebResourceRequested filter that fails ad requests with an
 /// empty 403, so they never load. Best-effort: a failure to install just leaves
 /// the DOM skipAds as the only defense, as before.
@@ -611,7 +624,7 @@ fn install_ad_block(view: &wry::WebView) {
             let mut uri = windows::core::PWSTR::null();
             request.Uri(&mut uri)?;
             let url = uri.to_string().unwrap_or_default();
-            if is_ad_url(&url) {
+            if AD_BLOCK_ON.load(std::sync::atomic::Ordering::Relaxed) && is_ad_url(&url) {
                 // An empty 403 in place of the ad. The response is built from the
                 // environment, reached through ICoreWebView2_2. No content stream.
                 if let Ok(env) = wv.cast::<ICoreWebView2_2>().and_then(|w2| w2.Environment()) {
