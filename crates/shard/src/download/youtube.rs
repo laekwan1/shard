@@ -357,11 +357,6 @@ pub const RECORDER: &str = r#"
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
             window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
-            // Diagnostic: first videoplayback of this video (the spinner's end).
-            if (!window.__shardSabrMarked) {
-              window.__shardSabrMarked = true;
-              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
-            }
           }).catch(function () {});
         }
       }
@@ -707,64 +702,6 @@ mod tests {
         assert!(found.template().is_none());
     }
 }
-
-/// Strip YouTube's ads from the player response, the way uBlock does — at the
-/// source, before the player schedules them, rather than clicking "skip" after an
-/// ad has begun (which is all the DOM skipAds could do, and which still shows the
-/// unskippable head of every ad). Injected at document-start so it wraps the
-/// page's own JSON.parse before any player response is read.
-///
-/// It deletes ONLY the ad fields (adPlacements / playerAds / adSlots). It never
-/// touches `streamingData` — the download reads that same player response, so
-/// leaving it intact keeps saving working. Defensive throughout: any error falls
-/// back to the untouched object, so a YouTube change makes it a no-op, not a break.
-pub const AD_STRIP: &str = r#"
-(function () {
-  try {
-    if (window.__shardAdStrip) return;
-    window.__shardAdStrip = true;
-    var strip = function (o) {
-      if (!o || typeof o !== 'object') return;
-      try {
-        delete o.adPlacements; delete o.adSlots; delete o.playerAds;
-        if (o.playerResponse) { delete o.playerResponse.adPlacements; delete o.playerResponse.adSlots; delete o.playerResponse.playerAds; }
-      } catch (e) {}
-    };
-    var _parse = JSON.parse;
-    var wrapped = function (text, reviver) {
-      var o = _parse.call(this, text, reviver);
-      strip(o);
-      return o;
-    };
-    // Live on/off, called from Rust when the "영상 광고 차단" setting changes.
-    //
-    // Crucially, turning ON wraps JSON.parse only AFTER the page has loaded — never
-    // at document-start. Wrapping before the player initialises is exactly what
-    // YouTube's anti-adblock catches, and it answers with a several-second delay
-    // (the spinner). Observed: applied after load (as the live toggle did) the page
-    // starts at once and later videos still have their ad data stripped — the
-    // detection seems to run at initial load, which a late wrap passes. The first
-    // video keeps its (skippable, auto-skipped) ad; the ones opened after do not.
-    //
-    // Turning OFF restores the NATIVE parser, not a no-op wrapper: the wrapper's
-    // mere presence is the tell, so it has to actually come off.
-    window.__shardSetStrip = function (on) {
-      if (!on) { try { JSON.parse = _parse; } catch (e) {} return; }
-      var apply = function () {
-        try { JSON.parse = wrapped; } catch (e) {}
-        // Diagnostic: when the strip actually took hold, to see if the spinner
-        // starts before or after it.
-        try { window.ipc.postMessage(JSON.stringify({ mark: 'wrap' })); } catch (e) {}
-      };
-      if (document.readyState === 'complete') apply();
-      else window.addEventListener('load', apply, { once: true });
-    };
-    // Initial state: the flag is set just ahead of this script per tab, from the
-    // setting at the time the tab opened. Absent means off.
-    window.__shardSetStrip(window.__shardStripAds === true);
-  } catch (e) {}
-})();
-"#;
 
 /// The download control, injected into every page.
 ///

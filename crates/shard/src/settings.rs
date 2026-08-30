@@ -109,15 +109,9 @@ fn groups(cfg: &Config) -> Vec<(&'static str, Vec<Item>)> {
                 },
                 Item {
                     key: "browser.block_ads",
-                    label: "광고·추적 차단",
-                    help: "광고·추적 서버 요청을 막습니다. 영상 재생 속도에는 영향이 없습니다.",
+                    label: "광고 차단",
+                    help: "광고·추적 서버 요청을 막고, 영상 앞 광고는 자동으로 넘깁니다(iOS와 같은 방식). 영상 재생 속도에는 영향이 없습니다.",
                     kind: Kind::Toggle(cfg.browser.block_ads),
-                },
-                Item {
-                    key: "browser.block_video_ads",
-                    label: "영상 광고 차단",
-                    help: "유튜브 영상 앞 광고까지 없앱니다. 기본은 꺼짐 — 유튜브가 이를 감지해 영상이 몇 초 늦게 뜰 때가 있어서입니다(끄면 광고가 잠깐 떴다 자동으로 넘어갑니다). 바꾸면 다음 영상부터 바로 적용됩니다.",
-                    kind: Kind::Toggle(cfg.browser.block_video_ads),
                 },
                 Item {
                     key: "worker_threads",
@@ -444,7 +438,6 @@ pub fn apply(cfg: &mut Config, key: &str, value: &str) -> bool {
         "start_engine_on_launch" => cfg.start_engine_on_launch = on,
         "detect_silent_drops" => cfg.detect_silent_drops = on,
         "browser.block_ads" => cfg.browser.block_ads = on,
-        "browser.block_video_ads" => cfg.browser.block_video_ads = on,
         "worker_threads" => match number(1, 8) {
             Some(n) => cfg.worker_threads = n as u8,
             None => return false,

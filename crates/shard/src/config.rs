@@ -92,14 +92,10 @@ pub struct Browser {
     pub hidden_frequent: Vec<String>,
     /// Block ad/tracker network requests (the WebResourceRequested 403). Cheap and
     /// safe — it never touches the video stream, so it has no effect on load speed.
+    /// This mirrors iOS (WKContentRuleList): host blocking plus the DOM ad-skip,
+    /// and no player-response tampering — that tampering (once tried here) is what
+    /// YouTube detects and punishes with a multi-second delay, so it is gone.
     pub block_ads: bool,
-    /// Also strip YouTube's own ad data from the player response (AD_STRIP), which
-    /// removes the pre-roll video ad. **Off by default**: YouTube detects this
-    /// tampering and delays the video by several seconds (measured: the player
-    /// takes ~6s instead of ~1.5s to request the stream), so it is opt-in. With it
-    /// off, 403 + the DOM skip handle ads instead — fast, the ad auto-skipped.
-    /// `block_ads` (the 403) stays on by default because it never costs speed.
-    pub block_video_ads: bool,
 }
 
 impl Default for Browser {
@@ -111,7 +107,6 @@ impl Default for Browser {
             visits: BTreeMap::new(),
             hidden_frequent: Vec::new(),
             block_ads: true,
-            block_video_ads: false,
         }
     }
 }

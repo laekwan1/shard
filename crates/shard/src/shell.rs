@@ -1118,13 +1118,8 @@ pub fn preview() -> Result<()> {
         core.borrow_mut().start();
     }
 
-    // Match the ad-block flags to the saved settings before the first tab opens.
-    {
-        let core = core.borrow();
-        let cfg = core.shared.config.read();
-        crate::download::browser::set_ad_block(cfg.browser.block_ads);
-        crate::download::browser::set_ad_strip(cfg.browser.block_video_ads);
-    }
+    // Match the ad-block filter to the saved setting before the first tab opens.
+    crate::download::browser::set_ad_block(core.borrow().shared.config.read().browser.block_ads);
 
     // The switch in the notification area. It is what lets the window be put
     // away while the bypass keeps running — closing the window is tidying it
@@ -1342,20 +1337,11 @@ pub fn preview() -> Result<()> {
                 // Written the moment it is changed: a setting that only survives
                 // a tidy exit is a setting that goes missing after a crash.
                 engine.borrow().save_config();
-                // Both take effect at once on tabs already open: the 403 filter reads
-                // its flag per request, and the ad strip is flipped live in every page
-                // via __shardSetStrip (the change shows on the next video, since the
-                // current one is already parsed).
-                let video_ads = {
-                    let core = engine.borrow();
-                    let cfg = core.shared.config.read();
-                    crate::download::browser::set_ad_block(cfg.browser.block_ads);
-                    crate::download::browser::set_ad_strip(cfg.browser.block_video_ads);
-                    cfg.browser.block_video_ads
-                };
-                shell.tell_all_pages(&format!(
-                    "window.__shardStripAds={video_ads};window.__shardSetStrip&&window.__shardSetStrip({video_ads})"
-                ));
+                // Takes effect at once on tabs already open: the 403 filter reads its
+                // flag per request.
+                crate::download::browser::set_ad_block(
+                    engine.borrow().shared.config.read().browser.block_ads,
+                );
                 // Some of them are read when the engine starts, so a change made
                 // while it is running means nothing until it is started again.
                 if crate::settings::needs_restart(&key) {
@@ -1382,16 +1368,9 @@ pub fn preview() -> Result<()> {
                 cfg.overrides = learned;
             }
             engine.borrow().save_config();
-            let video_ads = {
-                let core = engine.borrow();
-                let cfg = core.shared.config.read();
-                crate::download::browser::set_ad_block(cfg.browser.block_ads);
-                crate::download::browser::set_ad_strip(cfg.browser.block_video_ads);
-                cfg.browser.block_video_ads
-            };
-            shell.tell_all_pages(&format!(
-                "window.__shardStripAds={video_ads};window.__shardSetStrip&&window.__shardSetStrip({video_ads})"
-            ));
+            crate::download::browser::set_ad_block(
+                engine.borrow().shared.config.read().browser.block_ads,
+            );
             engine.borrow_mut().restart_if_running();
             let json = crate::settings::as_json(&engine.borrow().shared.config.read());
             shell.tell(&json);
@@ -1857,11 +1836,7 @@ impl Shell {
                 // flickering between sites. Each page reports its own address
                 // and names itself when it does.
                 // The URL bar is each page's own business; nothing to do on a plain navigate.
-                // (Diagnostic: timestamped to measure the spinner against the page marks
-                // below. Remove once the ad-strip timing is settled.)
-                crate::download::browser::Event::Navigated(url) => {
-                    tracing::info!("nav: {url}");
-                }
+                crate::download::browser::Event::Navigated(_) => {}
                 // The back/forward list changed (navigation, shorts pushState, or a
                 // GoBack/GoForward) — re-check the front tab's arrows so they grey out with
                 // nowhere to go and light up once there is somewhere.
@@ -1946,12 +1921,6 @@ impl Shell {
             }
             return;
         }
-        // Diagnostic markers the page posts (dom loaded, ad-strip wrapped, first
-        // videoplayback) — timestamped here to locate the spinner. Remove later.
-        if payload.contains("\"mark\"") {
-            tracing::info!("page mark: {payload}");
-            return;
-        }
         if payload.contains("\"ask\"") {
             self.tell_page(crate::download::youtube::ASK);
         } else if let Some(itag) = crate::downloads::chosen(payload) {
@@ -1969,17 +1938,9 @@ impl Shell {
         // the recorder that captures the SABR request, and the control that puts
         // the download button on the page. Without the last two a page never
         // offers anything and nothing can be saved.
-        // AD_STRIP (the player-response strip that removes the video ad) is always
-        // injected, but it only wraps JSON.parse when this flag says so — the flag
-        // carries the setting as it was when the tab opened, and Rust can flip it
-        // live afterwards via __shardSetStrip. Off by default: YouTube's detection
-        // of the strip is what delays the video, so the 403 + DOM skip carry ads
-        // instead unless the user opts in.
-        let strip_flag = crate::download::browser::is_ad_strip_on();
         let startup = format!(
-            "window.__shardStripAds = {strip_flag};\n{}\n{}\n{}\n{}",
+            "{}\n{}\n{}",
             crate::download::browser::PAGE_HOOKS,
-            crate::download::youtube::AD_STRIP,
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
         );
@@ -2136,14 +2097,6 @@ impl Shell {
     pub fn tell_page(&self, script: &str) {
         let tabs = self.tabs.borrow();
         if let Some(tab) = self.showing.get().and_then(|at| tabs.get(at)) {
-            let _ = tab.view.evaluate_script(script);
-        }
-    }
-
-    /// Run a script in every open tab — for a setting that has to reach pages that
-    /// are already loaded, like turning the ad strip on or off without a restart.
-    pub fn tell_all_pages(&self, script: &str) {
-        for tab in self.tabs.borrow().iter() {
             let _ = tab.view.evaluate_script(script);
         }
     }
