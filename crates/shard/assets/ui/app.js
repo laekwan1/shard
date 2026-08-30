@@ -175,16 +175,33 @@ let bmBarExtra = 0;
 // half-way test picks before/after the drop target, and the shift-down correction
 // keeps that landing exact whichever way the item travels.
 let bmDragFrom = -1;
-// Clear the drop marks from every item — only one gap shows at a time.
-function clearBmDropMarks() {
-  document.querySelectorAll(".bmDropBefore, .bmDropAfter").forEach((n) => {
-    n.classList.remove("bmDropBefore", "bmDropAfter");
-  });
+// A single insertion line that floats in the gap where the drop would land —
+// one mark between two items, not a highlight on an item's edge. Fixed position
+// so it never shifts the row it sits between. Reused across drags.
+let bmMarker = null;
+function showBmMarker(el, after, horizontal) {
+  if (!bmMarker) {
+    bmMarker = document.createElement("div");
+    bmMarker.className = "bmDropMark";
+    document.body.appendChild(bmMarker);
+  }
+  const r = el.getBoundingClientRect();
+  if (horizontal) {
+    const x = (after ? r.right : r.left) - 1;
+    bmMarker.style.cssText = `left:${x}px;top:${r.top}px;width:2px;height:${r.height}px;`;
+  } else {
+    const y = (after ? r.bottom : r.top) - 1;
+    bmMarker.style.cssText = `left:${r.left}px;top:${y}px;height:2px;width:${r.width}px;`;
+  }
+  bmMarker.style.display = "block";
+}
+function hideBmMarker() {
+  if (bmMarker) bmMarker.style.display = "none";
 }
 function enableBmDrag(el, index, horizontal) {
   el.draggable = true;
   // Which side of the target the drop would land on — the shared before/after
-  // test, used to both draw the mark and compute the move.
+  // test, used to both place the mark and compute the move.
   const side = (e) => {
     const r = el.getBoundingClientRect();
     return horizontal ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
@@ -201,23 +218,18 @@ function enableBmDrag(el, index, horizontal) {
   el.addEventListener("dragend", () => {
     el.classList.remove("bmDragging");
     document.body.classList.remove("bmDragActive");
-    clearBmDropMarks();
+    hideBmMarker();
     bmDragFrom = -1;
   });
-  // Draw the gap where it would land, on the near side of the item under the cursor.
+  // Float the single line at the gap the drop would land in.
   el.addEventListener("dragover", (e) => {
     if (bmDragFrom < 0) return;
     e.preventDefault();
-    const after = side(e);
-    clearBmDropMarks();
-    el.classList.add(after ? "bmDropAfter" : "bmDropBefore");
-  });
-  el.addEventListener("dragleave", () => {
-    el.classList.remove("bmDropBefore", "bmDropAfter");
+    showBmMarker(el, side(e), horizontal);
   });
   el.addEventListener("drop", (e) => {
     e.preventDefault();
-    clearBmDropMarks();
+    hideBmMarker();
     if (bmDragFrom < 0) return;
     let to = index + (side(e) ? 1 : 0);
     if (bmDragFrom < to) to -= 1;

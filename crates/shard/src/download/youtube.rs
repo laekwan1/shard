@@ -530,13 +530,27 @@ pub const ASK: &str = r#"
     }
   }
 
-  // Only use the captured request if it belongs to THIS video. After moving
-  // between videos without a page load, a leftover template from the previous one
-  // would otherwise be handed over and download the wrong audio — a failure —
-  // instead of the honest "play it first" that a missing template gives.
+  // The video must have actually started before its request is usable. While it
+  // is still buffering (the spinner) the player DOES send a videoplayback request
+  // — so a template exists — but the SABR session is not yet delivering media, and
+  // a download against it comes back with no audio and fails. Measured: every
+  // failure had the player not playing; every success had it playing. currentTime
+  // past zero means media has flowed and the request will answer, so gate on it
+  // and let the missing-template path say "play it first" instead.
+  function started() {
+    try {
+      var vs = document.getElementsByTagName('video');
+      for (var i = 0; i < vs.length; i++) if (vs[i].currentTime > 0.1) return true;
+      return false;
+    } catch (e) { return true; }
+  }
+  // Only use the captured request if it belongs to THIS video (a template left
+  // over from a previous one, after moving between videos without a page load,
+  // would download the wrong audio) AND the video has begun playing.
   var here = (window.__shardVid ? window.__shardVid() : '');
   var captured = window.__shardSabr;
   if (captured && captured.vid && here && captured.vid !== here) captured = null;
+  if (captured && !started()) captured = null;
   send({
     formats: out,
     title: (data.videoDetails || {}).title || '',
@@ -979,7 +993,20 @@ pub const CONTROL: &str = r#"
     if (!p || p.contains(e.target)) return;
     var b = document.getElementById('shard-b');
     if (b && b.contains(e.target)) return;
+    // Close ONLY — the click that dismisses the panel must not also reach the page
+    // under it (playing the video, following a link). Stop this pointerdown, and
+    // eat the click that would otherwise follow it. The timeout drops the eater if
+    // no click comes (a drag, say), so an unrelated later click is not swallowed.
+    e.preventDefault();
+    e.stopPropagation();
     window.__shardClose();
+    var eat = function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      document.removeEventListener('click', eat, true);
+    };
+    document.addEventListener('click', eat, true);
+    setTimeout(function () { document.removeEventListener('click', eat, true); }, 400);
   }, true);
 })();
 "#;
