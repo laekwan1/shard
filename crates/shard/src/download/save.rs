@@ -93,63 +93,33 @@ pub fn run(
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()?;
-
-        let done = if job.audio_only {
-            // Music fetches several audio segments per round-trip (pull_audio),
-            // because one at a time the round-trip dominates a small segment and
-            // audio crawls at a seventh of video's rate. If the concurrency falls
-            // short for any reason, the proven one-at-a-time path still delivers —
-            // so a change to a core download can only make music faster, not break
-            // it. The file is truncated before the retry so nothing the fast path
-            // wrote is left dangling past what the sequential path fills.
-            let post = |url: &str, body: &[u8]| sabr_post(&client, url, body);
-            let fast = pull::pull_audio(
-                &job.template,
-                &job.audio,
-                &job.decoy,
-                &mut audio_sink,
-                &post,
-                on_progress,
-                cancelled,
-            );
-            match fast {
-                Ok(d) if job.audio.bytes > 0 && d.audio >= job.audio.bytes => d,
-                other => {
-                    match &other {
-                        Err(e) => tracing::warn!("parallel audio pull failed ({e:#}), sequential"),
-                        Ok(_) => tracing::warn!("parallel audio pull fell short, sequential"),
-                    }
-                    audio_sink = FileAt::create(&audio_path)?;
-                    let mut post = |url: &str, body: &[u8]| sabr_post(&client, url, body);
-                    pull::pull(
-                        &job.template,
-                        &job.decoy,
-                        &job.audio,
-                        &job.decoy,
-                        &mut video_sink,
-                        &mut audio_sink,
-                        &mut post,
-                        on_progress,
-                        cancelled,
-                        true,
-                    )?
-                }
+        let mut post = |url: &str, body: &[u8]| -> Result<Vec<u8>> {
+            let response = client
+                .post(url)
+                .header("Content-Type", "application/x-protobuf")
+                .header("Origin", "https://www.youtube.com")
+                .header("Referer", "https://www.youtube.com/")
+                .body(body.to_vec())
+                .send()?;
+            let status = response.status();
+            if !status.is_success() {
+                bail!("서버가 {} 로 응답했습니다", status.as_u16());
             }
-        } else {
-            let mut post = |url: &str, body: &[u8]| sabr_post(&client, url, body);
-            pull::pull(
-                &job.template,
-                &job.video,
-                &job.audio,
-                &job.decoy,
-                &mut video_sink,
-                &mut audio_sink,
-                &mut post,
-                on_progress,
-                cancelled,
-                false,
-            )?
+            Ok(response.bytes()?.to_vec())
         };
+
+        let done = pull::pull(
+            &job.template,
+            &job.video,
+            &job.audio,
+            &job.decoy,
+            &mut video_sink,
+            &mut audio_sink,
+            &mut post,
+            on_progress,
+            cancelled,
+            job.audio_only,
+        )?;
         video_sink.flush()?;
         audio_sink.flush()?;
 
@@ -197,26 +167,6 @@ pub fn run(
     let _ = std::fs::remove_file(&video_path);
     let _ = std::fs::remove_file(&audio_path);
     outcome
-}
-
-/// One SABR request: the captured `videoplayback` POST with our rewritten body.
-///
-/// A free function, not the closure it was, so both the sequential and the
-/// several-at-once audio paths can call it — the latter from more than one thread,
-/// which a closure borrowing the client cannot be while it also mutates.
-fn sabr_post(client: &reqwest::blocking::Client, url: &str, body: &[u8]) -> Result<Vec<u8>> {
-    let response = client
-        .post(url)
-        .header("Content-Type", "application/x-protobuf")
-        .header("Origin", "https://www.youtube.com")
-        .header("Referer", "https://www.youtube.com/")
-        .body(body.to_vec())
-        .send()?;
-    let status = response.status();
-    if !status.is_success() {
-        bail!("서버가 {} 로 응답했습니다", status.as_u16());
-    }
-    Ok(response.bytes()?.to_vec())
 }
 
 /// Fetch a picture and put it into the saved file's own header.
