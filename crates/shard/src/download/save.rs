@@ -190,11 +190,22 @@ fn keep_cover(client: &reqwest::blocking::Client, url: &str, saved: &Path) -> Re
     bail!("{}", tried.join(" / "));
 }
 
-/// The same picture at smaller sizes, for when the largest is missing.
+/// The same picture as JPEG, and at smaller sizes, for when the one the page
+/// named is a format we cannot embed or is missing.
+///
+/// YouTube often lists the thumbnail on the `/vi_webp/…/maxresdefault.webp` path.
+/// We can only embed JPEG/PNG (the MP4 `covr` and ID3 `APIC` formats), and a WebP
+/// was refused — while the .jpg fallbacks kept the `/vi_webp/` path and 404'd. The
+/// plain `/vi/…/*.jpg` path serves the same picture as JPEG, so rewrite to it.
 fn also_try(url: &str) -> Vec<String> {
+    let jpg = url.replace("/vi_webp/", "/vi/").replace(".webp", ".jpg");
     let mut all = vec![url.to_string()];
-    if let Some((base, name)) = url.rsplit_once('/') {
-        for other in ["hqdefault.jpg", "mqdefault.jpg"] {
+    if jpg != url {
+        all.push(jpg.clone());
+    }
+    let base_url = if jpg != url { jpg.as_str() } else { url };
+    if let Some((base, name)) = base_url.rsplit_once('/') {
+        for other in ["maxresdefault.jpg", "hqdefault.jpg", "mqdefault.jpg"] {
             if name != other {
                 all.push(format!("{base}/{other}"));
             }
