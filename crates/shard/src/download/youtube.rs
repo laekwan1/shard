@@ -732,12 +732,22 @@ pub const AD_STRIP: &str = r#"
       return o;
     };
     // Live on/off, called from Rust when the "영상 광고 차단" setting changes.
-    // Turning off restores the NATIVE parser, not just a no-op wrapper: wrapping
-    // JSON.parse is itself what YouTube's anti-adblock looks for, so leaving a
-    // wrapper in place would keep the delay. The current video is already parsed,
-    // so the change shows on the next one — no restart needed.
+    //
+    // Crucially, turning ON wraps JSON.parse only AFTER the page has loaded — never
+    // at document-start. Wrapping before the player initialises is exactly what
+    // YouTube's anti-adblock catches, and it answers with a several-second delay
+    // (the spinner). Observed: applied after load (as the live toggle did) the page
+    // starts at once and later videos still have their ad data stripped — the
+    // detection seems to run at initial load, which a late wrap passes. The first
+    // video keeps its (skippable, auto-skipped) ad; the ones opened after do not.
+    //
+    // Turning OFF restores the NATIVE parser, not a no-op wrapper: the wrapper's
+    // mere presence is the tell, so it has to actually come off.
     window.__shardSetStrip = function (on) {
-      try { JSON.parse = on ? wrapped : _parse; } catch (e) {}
+      if (!on) { try { JSON.parse = _parse; } catch (e) {} return; }
+      var apply = function () { try { JSON.parse = wrapped; } catch (e) {} };
+      if (document.readyState === 'complete') apply();
+      else window.addEventListener('load', apply, { once: true });
     };
     // Initial state: the flag is set just ahead of this script per tab, from the
     // setting at the time the tab opened. Absent means off.
