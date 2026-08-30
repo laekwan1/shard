@@ -594,6 +594,21 @@ pub fn is_ad_block_on() -> bool {
     AD_BLOCK_ON.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Whether AD_STRIP (the player-response strip that removes the video ad) is
+/// injected into new tabs. Separate from the 403 block because this is the part
+/// YouTube detects and penalises with a delay. Injected at document-start, so it
+/// only takes effect on tabs opened after a change — the 403 flag above is the
+/// live one.
+static AD_STRIP_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_ad_strip(on: bool) {
+    AD_STRIP_ON.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn is_ad_strip_on() -> bool {
+    AD_STRIP_ON.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Attach a WebView2 WebResourceRequested filter that fails ad requests with an
 /// empty 403, so they never load. Best-effort: a failure to install just leaves
 /// the DOM skipAds as the only defense, as before.

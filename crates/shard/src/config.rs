@@ -90,12 +90,17 @@ pub struct Browser {
     pub visits: BTreeMap<String, u32>,
     /// Hosts removed from "자주 방문", so a deleted tile does not return.
     pub hidden_frequent: Vec<String>,
-    /// Block ad/tracker requests (the WebResourceRequested 403 and the AD_STRIP
-    /// injection). On by default. A toggle because blocking can make YouTube's
-    /// player wait for the ad it cannot load — turning it off is how that is told
-    /// apart from a slow page. Default is true, so a custom `Default` (not derived,
-    /// which would give false) and `#[serde(default)]` keep old configs blocking.
+    /// Block ad/tracker network requests (the WebResourceRequested 403). Cheap and
+    /// safe — it never touches the video stream, so it has no effect on load speed.
     pub block_ads: bool,
+    /// Also strip YouTube's own ad data from the player response (AD_STRIP), which
+    /// removes the pre-roll video ad. Separate from `block_ads` because YouTube
+    /// detects this tampering and sometimes delays the video by several seconds
+    /// (measured: the player takes ~6s instead of ~1.5s to request the stream, and
+    /// only sometimes). Off gives 403 + the DOM skip instead: fast, ad auto-skipped.
+    /// Both default true (a custom `Default`, since the derived one gives false, and
+    /// `#[serde(default)]` keeps old configs on).
+    pub block_video_ads: bool,
 }
 
 impl Default for Browser {
@@ -107,6 +112,7 @@ impl Default for Browser {
             visits: BTreeMap::new(),
             hidden_frequent: Vec::new(),
             block_ads: true,
+            block_video_ads: true,
         }
     }
 }
