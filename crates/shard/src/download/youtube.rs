@@ -940,6 +940,22 @@ pub const CONTROL: &str = r#"
     } catch (e) {}
   }
   setInterval(skipAds, 350);
+  // React the instant an ad appears rather than up to 350ms later — that poll gap
+  // is why an ad sometimes flashed for a frame before being skipped. The player
+  // gains the `ad-showing` class and the skip button is inserted; watching for both
+  // catches them immediately. The player is rebuilt on SPA navigation, so re-attach.
+  try {
+    var adWatch = new MutationObserver(function () { skipAds(); });
+    var watchPlayer = function () {
+      var p = document.querySelector('.html5-video-player');
+      if (p && p.__shardAdWatched !== true) {
+        p.__shardAdWatched = true;
+        adWatch.observe(p, { attributes: true, attributeFilter: ['class'], childList: true, subtree: true });
+      }
+    };
+    watchPlayer();
+    setInterval(watchPlayer, 2000);
+  } catch (e) {}
 
   // Live chat opens itself on a stream/premiere and takes a column of the page,
   // which is in the way when scrolling. Collapse it — but ONCE per video, so a

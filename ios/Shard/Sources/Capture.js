@@ -245,7 +245,11 @@
       "position:fixed;width:26px;height:26px;z-index:2147483646;display:none;" +
       "border:1.5px solid rgba(255,255,255,0.7);border-radius:7px;" +
       "align-items:center;justify-content:center;cursor:pointer;" +
-      "color:rgba(255,255,255,0.9);font:600 15px system-ui;background:transparent;";
+      "color:rgba(255,255,255,0.9);font:600 15px system-ui;background:transparent;" +
+      // Keep it on its own stable GPU layer. A fixed element repositioned during
+      // WebKit's async scroll otherwise repaints out of sync and smears a trail in
+      // the top row on a hard scroll.
+      "transform:translateZ(0);will-change:transform;backface-visibility:hidden;";
     b.textContent = "↓"; // down arrow
     b.setAttribute("data-shard", "dl");
     b.addEventListener("click", function (e) {
@@ -539,7 +543,7 @@
   function build() {
     if (bar) return;
     bar = document.createElement('div');
-    bar.style.cssText = 'position:fixed;left:0;height:18px;z-index:2147483000;display:none;touch-action:none;background:transparent;';
+    bar.style.cssText = 'position:fixed;left:0;height:18px;z-index:2147483000;display:none;touch-action:none;background:transparent;transform:translateZ(0);will-change:transform;backface-visibility:hidden;';
     var track = document.createElement('div');
     track.style.cssText = 'position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.28);';
     played = document.createElement('div');
@@ -570,28 +574,38 @@
     }
     return best;
   }
-  // While the page is scrolling, hide the bar outright: a fixed element chasing a
-  // moving video by a 250ms timer leaves a trail. It comes back the moment scrolling
-  // settles, in the right place.
-  var lastScroll = 0;
-  window.addEventListener('scroll', function () {
-    lastScroll = Date.now();
-    if (bar) bar.style.display = 'none';
-  }, { passive: true });
+  // Put the bar on the video's bottom edge. Split out so it can run both on the
+  // timer AND on every scroll frame.
+  function place() {
+    if (!bar || !vid) return;
+    var r = vid.getBoundingClientRect();
+    bar.style.left = r.left + 'px';
+    bar.style.width = r.width + 'px';
+    bar.style.top = (r.bottom - 18) + 'px';
+  }
   function tick() {
     try {
       build();
       vid = pick();
-      if (!vid || Date.now() - lastScroll < 160) { bar.style.display = 'none'; return; }
-      var r = vid.getBoundingClientRect();
+      if (!vid) { bar.style.display = 'none'; return; }
       bar.style.display = 'block';
-      bar.style.left = r.left + 'px';
-      bar.style.width = r.width + 'px';
-      bar.style.top = (r.bottom - 18) + 'px';
+      place();
       if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
         played.style.width = ((vid.currentTime / vid.duration) * 100) + '%';
       }
     } catch (e) {}
   }
   setInterval(tick, 250);
+  // Follow the video AS the page scrolls, so the bar stays pinned to its bottom
+  // edge rather than lagging a quarter-second behind and smearing a trail. On the
+  // watch page the video stays put while the comments below it scroll, but on a
+  // page that does move the video this keeps the bar on it. Always visible — the
+  // whole point of the bar is that a scrolled, half-cut video can still be scrubbed.
+  // rAF so a burst of scroll events collapses into one reposition per frame.
+  var pending = false;
+  window.addEventListener('scroll', function () {
+    if (pending || !vid) return;
+    pending = true;
+    requestAnimationFrame(function () { pending = false; try { place(); } catch (e) {} });
+  }, { passive: true });
 })();

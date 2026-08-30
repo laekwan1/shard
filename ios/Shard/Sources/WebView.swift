@@ -12,6 +12,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
+    /// When a navigation last began. A back-swipe on a watch page settles its scroll
+    /// position afterwards, which can bounce the pull-to-refresh at the top and fire
+    /// an unwanted reload; the refresh handler ignores a trigger this close to a
+    /// navigation so back reads as back, not back-then-reload.
+    var lastNavAt: Date = .distantPast
     /// Page load progress 0…1, for the thin bar that shows whether a page is still
     /// connecting or done — asked for after a blocked site left only a white screen
     /// with no sign of whether it was still trying.
@@ -292,6 +297,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         isLoading = true
+        lastNavAt = Date()
         if suppressNavigatedClose { suppressNavigatedClose = false }
         else { onNavigated?() }
         sync()
@@ -299,6 +305,14 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Reflect the URL as soon as the new page commits, not only on finish — a
         // reload/redirect updates the bar sooner and more reliably.
+        //
+        // Drop the loading bar here, at commit, rather than at didFinish. A YouTube
+        // watch page commits (its document is up and usable) and then keeps
+        // `estimatedProgress` plateaued near 0.9 for seconds while it pulls the video
+        // manifest and streaming subresources — so a bar tied to didFinish sat frozen
+        // partway across, reading as a lag. Once committed the page is what the user
+        // sees; the trailing media load is the video buffering, not the page loading.
+        isLoading = false
         sync()
     }
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -418,6 +432,13 @@ struct WebViewContainer: UIViewRepresentable {
         init(_ model: WebModel) { self.model = model }
 
         @objc func reload() {
+            // Ignore a pull-to-refresh that fires right after a navigation — that is
+            // the scroll settling after a back-swipe bouncing the control, not the
+            // user pulling to refresh. A real refresh comes well after the page loaded.
+            if Date().timeIntervalSince(model.lastNavAt) < 1.2 {
+                refresh?.endRefreshing()
+                return
+            }
             model.reload()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.refresh?.endRefreshing() }
         }
