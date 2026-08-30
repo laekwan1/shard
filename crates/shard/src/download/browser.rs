@@ -169,6 +169,9 @@ pub(crate) const PAGE_HOOKS: &str = r#"
     if (document.hidden) return;
     if (location.href === told) return;
     told = location.href;
+    // A new page (or a single-page move to a new video): let the recorder mark
+    // the next videoplayback again, so the spinner is measured per video, not once.
+    window.__shardSabrMarked = false;
     say({ frame: 'url', text: told });
   }
   if (window.top === window) {
@@ -178,6 +181,10 @@ pub(crate) const PAGE_HOOKS: &str = r#"
     document.addEventListener('DOMContentLoaded', title);
     window.addEventListener('load', title);
     setTimeout(title, 800);
+    // Diagnostic: the moment the HTML is parsed, timestamped by Rust. Its gap from
+    // "nav:" is the page-load time; the gap from there to "page mark: sabr" is the
+    // player start. Splits the spinner into network vs player. Remove once settled.
+    document.addEventListener('DOMContentLoaded', function () { say({ mark: 'dom' }); });
     // Single-page sites change their title, and their address, without loading
     // anything.
     setInterval(title, 2000);
