@@ -917,6 +917,19 @@ pub const CONTROL: &str = r#"
     } catch (e) {}
   }
   window.addEventListener('load', nudgeLayout);
+  // YouTube moves between videos WITHOUT a page load, so `load` never fires again
+  // and the new watch page's secondary content (related, comments, description) is
+  // laid out once, early, then never nudged into recomputing — it stayed blank and
+  // the page never settled its scroll onto the video. Re-run the nudge on YouTube's
+  // own SPA lifecycle events, and — as a fallback for when those change — whenever
+  // the address changes.
+  ['yt-navigate-finish', 'yt-page-data-updated', 'yt-page-type-changed'].forEach(function (ev) {
+    try { document.addEventListener(ev, function () { nudgeLayout(); }, true); } catch (e) {}
+  });
+  var lastNudgePath = location.href;
+  setInterval(function () {
+    if (location.href !== lastNudgePath) { lastNudgePath = location.href; nudgeLayout(); }
+  }, 400);
   document.addEventListener('DOMContentLoaded', soon);
   // Often enough to follow a player that resizes or moves, rarely enough to
   // cost nothing on a page with no video on it.
