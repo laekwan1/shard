@@ -300,22 +300,19 @@ fn best_match<'a>(map: &'a BTreeMap<String, Strategy>, host: &str) -> Option<&'a
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Download {
-    /// Off means the sound alone — a music file rather than a video.
-    pub include_video: bool,
     pub audio: AudioQuality,
     /// Language to prefer, as YouTube spells it — "ko", "en", and so on.
     /// Empty means whatever the video treats as its default track.
     pub audio_language: String,
-    // The music format (AAC vs MP3) used to live here as `music_mp3`; it is now a
-    // per-download choice — the list offers an M4A row and an MP3 row — so the
-    // field is gone. `#[serde(default)]` on this struct means an old config that
-    // still carries "music_mp3" simply ignores it.
+    // Two former fields lived here and are gone: `include_video` (video-vs-music
+    // is now a per-download row, not a preference) and `music_mp3` (the M4A/MP3
+    // choice, now two rows in the download list). `#[serde(default)]` means an old
+    // config still carrying either key simply ignores it.
 }
 
 impl Default for Download {
     fn default() -> Self {
         Self {
-            include_video: true,
             audio: AudioQuality::Best,
             audio_language: String::new(),
         }

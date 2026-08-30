@@ -123,7 +123,7 @@ pub struct ShardApp {
 /// What a running download has to report.
 enum SaveStep {
     Progress(u64, u64),
-    Done(String),
+    Done,
     Failed(String),
 }
 
@@ -797,7 +797,7 @@ impl ShardApp {
                 stop.load(std::sync::atomic::Ordering::Relaxed)
             });
             let _ = tx.send(match outcome {
-                Ok(path) => SaveStep::Done(path.display().to_string()),
+                Ok(_) => SaveStep::Done,
                 Err(e) => SaveStep::Failed(format!("{e:#}")),
             });
         });
@@ -830,7 +830,7 @@ impl ShardApp {
                             download.total = total;
                         }
                     }
-                    SaveStep::Done(_) => {
+                    SaveStep::Done => {
                         download.state = DownloadState::Done;
                         download.note = "저장했습니다".into();
                         // There is a new file on a shelf: the library reads it

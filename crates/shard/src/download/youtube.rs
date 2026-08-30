@@ -243,21 +243,6 @@ impl Offer {
             AudioQuality::Small => candidates.iter().min_by_key(|f| f.bitrate).copied(),
         }
     }
-
-    /// Every language the video offers, for the settings list.
-    pub fn languages(&self) -> Vec<(String, String)> {
-        let mut found: Vec<(String, String)> = Vec::new();
-        for format in self.formats.iter().filter(|f| f.is_audio()) {
-            if format.audio_language.is_empty() {
-                continue;
-            }
-            if found.iter().any(|(code, _)| *code == format.audio_language) {
-                continue;
-            }
-            found.push((format.audio_language.clone(), format.audio_name.clone()));
-        }
-        found
-    }
 }
 
 /// What the user asked for, as the chooser needs it.

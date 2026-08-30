@@ -6,12 +6,10 @@
 pub const PROTO_TCP: u8 = 6;
 pub const PROTO_UDP: u8 = 17;
 
-pub const TCP_FIN: u8 = 0x01;
 pub const TCP_SYN: u8 = 0x02;
 pub const TCP_RST: u8 = 0x04;
 pub const TCP_PSH: u8 = 0x08;
 pub const TCP_ACK: u8 = 0x10;
-pub const TCP_URG: u8 = 0x20;
 
 const IPV4_MIN_HDR: usize = 20;
 const IPV6_HDR: usize = 40;
@@ -192,10 +190,6 @@ pub fn set_tcp_seq(pkt: &mut [u8], l: &Layout, seq: u32) {
 
 pub fn tcp_flags(pkt: &[u8], l: &Layout) -> u8 {
     pkt[l.l4_off + 13]
-}
-
-pub fn set_tcp_flags(pkt: &mut [u8], l: &Layout, flags: u8) {
-    pkt[l.l4_off + 13] = flags;
 }
 
 pub fn set_tcp_checksum(pkt: &mut [u8], l: &Layout, sum: u16) {

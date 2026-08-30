@@ -53,7 +53,6 @@ pub const TIMESTAMP: Id = 0xE7;
 pub const SIMPLE_BLOCK: Id = 0xA3;
 pub const BLOCK_GROUP: Id = 0xA0;
 pub const BLOCK: Id = 0xA1;
-pub const BLOCK_DURATION: Id = 0x9B;
 
 pub const CUES: Id = 0x1C53_BB6B;
 
