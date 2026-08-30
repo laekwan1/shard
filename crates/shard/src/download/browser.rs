@@ -169,6 +169,7 @@ pub(crate) const PAGE_HOOKS: &str = r#"
     if (document.hidden) return;
     if (location.href === told) return;
     told = location.href;
+    window.__shardSabrMarked = false; // diagnostic: mark the next video's start too
     say({ frame: 'url', text: told });
   }
   if (window.top === window) {
@@ -178,6 +179,7 @@ pub(crate) const PAGE_HOOKS: &str = r#"
     document.addEventListener('DOMContentLoaded', title);
     window.addEventListener('load', title);
     setTimeout(title, 800);
+    document.addEventListener('DOMContentLoaded', function () { say({ mark: 'dom' }); }); // diagnostic
     // Single-page sites change their title, and their address, without loading
     // anything.
     setInterval(title, 2000);

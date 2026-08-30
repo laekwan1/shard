@@ -357,6 +357,11 @@ pub const RECORDER: &str = r#"
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
             window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
+            // Diagnostic: first videoplayback of this video (an ad's or the real one).
+            if (!window.__shardSabrMarked) {
+              window.__shardSabrMarked = true;
+              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
+            }
           }).catch(function () {});
         }
       }
@@ -917,19 +922,6 @@ pub const CONTROL: &str = r#"
     } catch (e) {}
   }
   window.addEventListener('load', nudgeLayout);
-  // YouTube moves between videos WITHOUT a page load, so `load` never fires again
-  // and the new watch page's secondary content (related, comments, description) is
-  // laid out once, early, then never nudged into recomputing — it stayed blank and
-  // the page never settled its scroll onto the video. Re-run the nudge on YouTube's
-  // own SPA lifecycle events, and — as a fallback for when those change — whenever
-  // the address changes.
-  ['yt-navigate-finish', 'yt-page-data-updated', 'yt-page-type-changed'].forEach(function (ev) {
-    try { document.addEventListener(ev, function () { nudgeLayout(); }, true); } catch (e) {}
-  });
-  var lastNudgePath = location.href;
-  setInterval(function () {
-    if (location.href !== lastNudgePath) { lastNudgePath = location.href; nudgeLayout(); }
-  }, 400);
   document.addEventListener('DOMContentLoaded', soon);
   // Often enough to follow a player that resizes or moves, rarely enough to
   // cost nothing on a page with no video on it.
@@ -938,6 +930,7 @@ pub const CONTROL: &str = r#"
 
   // Best-effort YouTube ad skipping — parity with iOS/Android. Defensive: acts only when an
   // ad is actually shown, all in try/catch, so a markup change just makes it a no-op.
+  var lastAdSeek = 0;
   function skipAds() {
     if (document.hidden) return;
     if (window.__shardBlockAds === false) return; // ad blocking off: leave ads alone
@@ -946,8 +939,23 @@ pub const CONTROL: &str = r#"
       if (skip) { skip.click(); return; }
       var player = document.querySelector('.html5-video-player');
       if (player && player.classList.contains('ad-showing')) {
+        // Diagnostic: an ad is on this video — so a slow "load" can be read as an ad.
+        if (window.__shardAdMarked !== location.href) {
+          window.__shardAdMarked = location.href;
+          try { window.ipc.postMessage(JSON.stringify({ mark: 'ad' })); } catch (e) {}
+        }
         var v = player.querySelector('video');
-        if (v && isFinite(v.duration) && v.duration > 0) v.currentTime = v.duration;
+        // Jump to the ad's end — but ONLY when there is real ad left to skip, and at
+        // most a few times a second. Seeking it on every 350ms poll (and on every
+        // MutationObserver hit) re-buffered the ad constantly and froze the page
+        // instead of skipping it. `duration - currentTime > 0.5` naturally stops once
+        // we are at the end, and handles an ad pod (each new ad has time left again).
+        var now = Date.now();
+        if (v && isFinite(v.duration) && v.duration > 0 &&
+            v.duration - v.currentTime > 0.5 && now - lastAdSeek > 800) {
+          lastAdSeek = now;
+          v.currentTime = v.duration;
+        }
       }
       var overlayClose = document.querySelector('.ytp-ad-overlay-close-button');
       if (overlayClose) { try { overlayClose.click(); } catch (e) {} }

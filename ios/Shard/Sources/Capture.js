@@ -562,11 +562,12 @@
     bar.addEventListener('touchend', function (e) { dragging = false; e.stopPropagation(); }, { passive: false });
   }
   function pick() {
-    // Only on a watch/shorts page. On the feed, the hovered thumbnails are
-    // playing <video>s too, and the bar — repositioned every 250ms — lagged behind
-    // them as they scrolled, smearing a trail down the page. The real player is the
-    // only one worth a scrub bar.
-    if (!/\/watch|\/shorts/.test(location.pathname)) return null;
+    // The WATCH page only. Not the feed (its hovered thumbnails are playing <video>s
+    // that scroll, and the bar chasing them smeared a trail), and not Shorts — Shorts
+    // has YouTube's own bottom progress bar, and its swipe-to-next-video is not a
+    // scroll event, so no scroll-hide caught the smear our bar left as it chased the
+    // swapped video. The watch player is the only one worth, and safe to, draw on.
+    if (!/\/watch/.test(location.pathname)) return null;
     var best = null, area = 0, vids = document.getElementsByTagName('video');
     for (var i = 0; i < vids.length; i++) {
       var v = vids[i], r = v.getBoundingClientRect(), a = r.width * r.height;
@@ -586,27 +587,33 @@
     if (bar.style.width !== width) bar.style.width = width;
     if (bar.style.top !== top) bar.style.top = top;
   }
-  // Shorts swaps to the next video on a swipe (which is a scroll of its pager); the
-  // bar chasing the video mid-swap smears, so hide it for the swipe — it returns in
-  // place. The watch page does NOT hide (its video is sticky and stays visible), and
-  // place() above already writes nothing there while nothing moves.
-  var lastScroll = 0;
-  window.addEventListener('scroll', function () {
-    lastScroll = Date.now();
-    if (bar && /\/shorts/.test(location.pathname)) bar.style.display = 'none';
-  }, { passive: true });
   function tick() {
     try {
       build();
       vid = pick();
-      var shorts = /\/shorts/.test(location.pathname);
-      if (!vid || (shorts && Date.now() - lastScroll < 240)) { bar.style.display = 'none'; return; }
+      if (!vid) { bar.style.display = 'none'; return; }
       bar.style.display = 'block';
-      place();
+      place(); // writes nothing while the sticky watch player stays put — no trail
       if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
         played.style.width = ((vid.currentTime / vid.duration) * 100) + '%';
       }
     } catch (e) {}
   }
   setInterval(tick, 250);
+})();
+
+// Back-navigation to a watch page can be restored from WebKit's back-forward cache
+// with parts left unpainted — black patches where the layout did not recompute. A
+// synthetic resize on pageshow (fired on bfcache restore, with persisted=true) makes
+// the page relayout and repaint, so back shows the page rather than black.
+(function () {
+  if (window.__shardPageShow) return;
+  window.__shardPageShow = true;
+  window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    try {
+      window.dispatchEvent(new Event('resize'));
+      setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 200);
+    } catch (err) {}
+  });
 })();
