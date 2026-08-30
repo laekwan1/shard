@@ -34,6 +34,18 @@ pub struct Job {
     /// The finished line: that it saved, or why it did not.
     pub note: String,
     cancel: Arc<AtomicBool>,
+    /// When it started, and how long it has run — for the speed the row shows, so
+    /// a slow download (music vs video) can actually be measured, not just felt.
+    started: std::time::Instant,
+    pub elapsed_ms: u64,
+}
+
+impl Job {
+    /// Bytes per second so far — done over the time it has run.
+    pub fn speed_bps(&self) -> u64 {
+        let secs = self.elapsed_ms as f64 / 1000.0;
+        if secs <= 0.0 { 0 } else { (self.done as f64 / secs) as u64 }
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -459,6 +471,8 @@ impl Downloads {
             state: State::Running,
             note: String::new(),
             cancel,
+            started: std::time::Instant::now(),
+            elapsed_ms: 0,
         });
         youtube::flash_script("받는 중")
     }
@@ -523,6 +537,8 @@ impl Downloads {
             state: State::Running,
             note: String::new(),
             cancel,
+            started: std::time::Instant::now(),
+            elapsed_ms: 0,
         });
         youtube::flash_script("받는 중")
     }
@@ -545,10 +561,14 @@ impl Downloads {
                         if total > 0 {
                             job.total = total;
                         }
+                        job.elapsed_ms = job.started.elapsed().as_millis() as u64;
                     }
                     Step::Done => {
                         job.state = State::Done;
                         job.note = "저장했습니다".into();
+                        // Freeze the elapsed time at the finish, so the row shows how
+                        // long it actually took.
+                        job.elapsed_ms = job.started.elapsed().as_millis() as u64;
                         // There is a new file on a shelf; the library reads it
                         // again rather than polling to notice what this program
                         // has just put there.

@@ -2136,12 +2136,15 @@ impl Shell {
             .iter()
             .map(|job| {
                 format!(
-                    r#"{{"id":{},"title":"{}","fraction":{:.4},"done":{},"total":{}}}"#,
+                    r#"{{"id":{},"title":"{}","fraction":{:.4},"done":{},"total":{},"speed":{},"elapsed":{},"done_state":{}}}"#,
                     job.id,
                     escape(&job.title),
                     job.fraction(),
                     job.done,
-                    job.total
+                    job.total,
+                    job.speed_bps(),
+                    job.elapsed_ms,
+                    matches!(job.state, crate::downloads::State::Done)
                 )
             })
             .collect();

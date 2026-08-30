@@ -401,6 +401,7 @@ button svg { display: block; }
    one width: without both, the bar grew and shrank as the number changed. */
 .download .track { flex: none; width: 96px; height: 4px; border-radius: var(--r-pill); background: var(--field); overflow: hidden; }
 .download .size { flex: none; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; opacity: .85; }
+.download .rate { flex: none; min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--accent); opacity: .9; }
 .download .percent { flex: none; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
 /* Told to be a block. A span is inline, and a width set on an inline box is
    ignored — which is why the track was there and the colour in it never was. */

@@ -65,6 +65,10 @@ fn main() -> anyhow::Result<()> {
     let pic = std::fs::read(cover)?;
     let mp3_with = shard::download::mp3::with_cover_id3(b"\xff\xfbfakeaudio", &pic, "jpg");
     eprintln!("mp3 head starts ID3: {}", mp3_with.starts_with(b"ID3"));
+    // Replicate library::has_id3_cover: does the detector notice it?
+    let id3_detected = mp3_with.starts_with(b"ID3")
+        && mp3_with[..mp3_with.len().min(64 * 1024)].windows(4).any(|w| w == b"APIC");
+    eprintln!("has_id3_cover would detect: {}", id3_detected);
     match shard::download::mp3::id3_cover(&mp3_with) {
         Some((p, k)) => eprintln!("extracted cover (id3): {} bytes, kind={}", p.len(), k),
         None => eprintln!("id3 extract FAILED"),

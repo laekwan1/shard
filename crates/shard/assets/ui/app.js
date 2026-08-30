@@ -595,6 +595,17 @@ function paintDownloads(list) {
     size.className = "size";
     if (item.total > 0) size.textContent = humanBytes(item.done) + " / " + humanBytes(item.total);
 
+    // The speed while it runs, or how long it took once done — so a slow download
+    // (music vs video) can be measured, not just felt.
+    const rate = document.createElement("span");
+    rate.className = "rate";
+    const secs = (item.elapsed || 0) / 1000;
+    if (item.done_state) {
+      rate.textContent = secs > 0 ? secs.toFixed(1) + "초" : "";
+    } else if (item.speed > 0) {
+      rate.textContent = humanBytes(item.speed) + "/s";
+    }
+
     const percent = document.createElement("span");
     percent.className = "percent";
     percent.textContent = Math.round((item.fraction || 0) * 100) + "%";
@@ -605,7 +616,7 @@ function paintDownloads(list) {
     stop.textContent = "✕";
     stop.addEventListener("click", () => send("download.cancel", { id: item.id }));
 
-    row.append(name, track, size, percent, stop);
+    row.append(name, track, size, rate, percent, stop);
     downloads.appendChild(row);
   }
 }

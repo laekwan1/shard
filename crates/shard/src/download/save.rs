@@ -148,9 +148,17 @@ pub fn run(
         // — the list takes a frame out of the film itself — and a second file
         // for every download is a folder nobody wants to look at. Failure here
         // is not the download's failure; the sound is saved either way.
-        if job.audio_only && !job.cover.is_empty() {
-            if let Err(e) = keep_cover(&client, &job.cover, &saved) {
-                tracing::warn!("could not put the cover in: {e:#}");
+        if job.audio_only {
+            // Logged so a missing music thumbnail can be traced: was there a cover
+            // URL at all, did it fetch, did it embed?
+            if job.cover.is_empty() {
+                tracing::warn!("cover: no thumbnail URL on the offer — nothing to embed");
+            } else {
+                tracing::info!("cover: embedding {} into {}", job.cover, saved.display());
+                match keep_cover(&client, &job.cover, &saved) {
+                    Ok(()) => tracing::info!("cover: embedded ok"),
+                    Err(e) => tracing::warn!("cover: could not put it in: {e:#}"),
+                }
             }
         }
         Ok(saved)
