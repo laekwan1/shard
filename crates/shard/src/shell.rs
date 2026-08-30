@@ -1338,10 +1338,10 @@ pub fn preview() -> Result<()> {
                 // a tidy exit is a setting that goes missing after a crash.
                 engine.borrow().save_config();
                 // Takes effect at once on tabs already open: the 403 filter reads its
-                // flag per request.
-                crate::download::browser::set_ad_block(
-                    engine.borrow().shared.config.read().browser.block_ads,
-                );
+                // flag per request, and the page's ad-skip flag is flipped live.
+                let block_ads = engine.borrow().shared.config.read().browser.block_ads;
+                crate::download::browser::set_ad_block(block_ads);
+                shell.tell_all_pages(&format!("window.__shardBlockAds = {block_ads};"));
                 // Some of them are read when the engine starts, so a change made
                 // while it is running means nothing until it is started again.
                 if crate::settings::needs_restart(&key) {
@@ -1368,9 +1368,9 @@ pub fn preview() -> Result<()> {
                 cfg.overrides = learned;
             }
             engine.borrow().save_config();
-            crate::download::browser::set_ad_block(
-                engine.borrow().shared.config.read().browser.block_ads,
-            );
+            let block_ads = engine.borrow().shared.config.read().browser.block_ads;
+            crate::download::browser::set_ad_block(block_ads);
+            shell.tell_all_pages(&format!("window.__shardBlockAds = {block_ads};"));
             engine.borrow_mut().restart_if_running();
             let json = crate::settings::as_json(&engine.borrow().shared.config.read());
             shell.tell(&json);
@@ -1938,8 +1938,12 @@ impl Shell {
         // the recorder that captures the SABR request, and the control that puts
         // the download button on the page. Without the last two a page never
         // offers anything and nothing can be saved.
+        // The "광고 차단" setting reaches the page as this flag: it gates the DOM
+        // ad-skip (skipAds), the same as the 403 filter it rides with — so the one
+        // toggle is the whole of ad blocking, network AND video, not just trackers.
+        let block_ads = crate::download::browser::is_ad_block_on();
         let startup = format!(
-            "{}\n{}\n{}",
+            "window.__shardBlockAds = {block_ads};\n{}\n{}\n{}",
             crate::download::browser::PAGE_HOOKS,
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
@@ -2097,6 +2101,14 @@ impl Shell {
     pub fn tell_page(&self, script: &str) {
         let tabs = self.tabs.borrow();
         if let Some(tab) = self.showing.get().and_then(|at| tabs.get(at)) {
+            let _ = tab.view.evaluate_script(script);
+        }
+    }
+
+    /// Run a script in every open tab — for a setting that must reach pages already
+    /// loaded, like flipping ad blocking without reopening them.
+    pub fn tell_all_pages(&self, script: &str) {
+        for tab in self.tabs.borrow().iter() {
             let _ = tab.view.evaluate_script(script);
         }
     }

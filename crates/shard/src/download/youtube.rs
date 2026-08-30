@@ -927,6 +927,7 @@ pub const CONTROL: &str = r#"
   // ad is actually shown, all in try/catch, so a markup change just makes it a no-op.
   function skipAds() {
     if (document.hidden) return;
+    if (window.__shardBlockAds === false) return; // ad blocking off: leave ads alone
     try {
       var skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-container button');
       if (skip) { skip.click(); return; }
