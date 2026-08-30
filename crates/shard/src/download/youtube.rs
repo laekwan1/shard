@@ -1003,6 +1003,25 @@ pub const CONTROL: &str = r#"
     } catch (e) {}
   }
   setInterval(skipAds, 350);
+
+  // Live chat opens itself on a stream/premiere and takes a column of the page,
+  // which is in the way when scrolling. Collapse it — but ONCE per video, so a
+  // user who opens it back up is left alone (tracked by URL, which changes as
+  // YouTube moves between videos without loading a page). Best-effort: the
+  // `collapsed` attribute is how the frame's own button toggles it.
+  var chatDoneFor = '';
+  function collapseChat() {
+    try {
+      var chat = document.querySelector('ytd-live-chat-frame');
+      if (!chat) return;
+      if (chatDoneFor !== location.href && !chat.hasAttribute('collapsed')) {
+        chat.setAttribute('collapsed', '');
+        chatDoneFor = location.href;
+      }
+    } catch (e) {}
+  }
+  setInterval(collapseChat, 500);
+
   // Not in the capture phase, and passive: this only reads, so the browser is
   // free to scroll without waiting to hear whether it may.
   window.addEventListener('scroll', soon, { passive: true });

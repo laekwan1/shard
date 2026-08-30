@@ -558,6 +558,11 @@
     bar.addEventListener('touchend', function (e) { dragging = false; e.stopPropagation(); }, { passive: false });
   }
   function pick() {
+    // Only on a watch/shorts page. On the feed, the hovered thumbnails are
+    // playing <video>s too, and the bar — repositioned every 250ms — lagged behind
+    // them as they scrolled, smearing a trail down the page. The real player is the
+    // only one worth a scrub bar.
+    if (!/\/watch|\/shorts/.test(location.pathname)) return null;
     var best = null, area = 0, vids = document.getElementsByTagName('video');
     for (var i = 0; i < vids.length; i++) {
       var v = vids[i], r = v.getBoundingClientRect(), a = r.width * r.height;
@@ -565,11 +570,19 @@
     }
     return best;
   }
+  // While the page is scrolling, hide the bar outright: a fixed element chasing a
+  // moving video by a 250ms timer leaves a trail. It comes back the moment scrolling
+  // settles, in the right place.
+  var lastScroll = 0;
+  window.addEventListener('scroll', function () {
+    lastScroll = Date.now();
+    if (bar) bar.style.display = 'none';
+  }, { passive: true });
   function tick() {
     try {
       build();
       vid = pick();
-      if (!vid) { bar.style.display = 'none'; return; }
+      if (!vid || Date.now() - lastScroll < 160) { bar.style.display = 'none'; return; }
       var r = vid.getBoundingClientRect();
       bar.style.display = 'block';
       bar.style.left = r.left + 'px';
