@@ -175,11 +175,24 @@ let bmBarExtra = 0;
 // half-way test picks before/after the drop target, and the shift-down correction
 // keeps that landing exact whichever way the item travels.
 let bmDragFrom = -1;
+// Clear the drop marks from every item — only one gap shows at a time.
+function clearBmDropMarks() {
+  document.querySelectorAll(".bmDropBefore, .bmDropAfter").forEach((n) => {
+    n.classList.remove("bmDropBefore", "bmDropAfter");
+  });
+}
 function enableBmDrag(el, index, horizontal) {
   el.draggable = true;
+  // Which side of the target the drop would land on — the shared before/after
+  // test, used to both draw the mark and compute the move.
+  const side = (e) => {
+    const r = el.getBoundingClientRect();
+    return horizontal ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
+  };
   el.addEventListener("dragstart", (e) => {
     bmDragFrom = index;
     el.classList.add("bmDragging");
+    document.body.classList.add("bmDragActive");
     try {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", String(index));
@@ -187,17 +200,26 @@ function enableBmDrag(el, index, horizontal) {
   });
   el.addEventListener("dragend", () => {
     el.classList.remove("bmDragging");
+    document.body.classList.remove("bmDragActive");
+    clearBmDropMarks();
     bmDragFrom = -1;
   });
+  // Draw the gap where it would land, on the near side of the item under the cursor.
   el.addEventListener("dragover", (e) => {
-    if (bmDragFrom >= 0) e.preventDefault();
+    if (bmDragFrom < 0) return;
+    e.preventDefault();
+    const after = side(e);
+    clearBmDropMarks();
+    el.classList.add(after ? "bmDropAfter" : "bmDropBefore");
+  });
+  el.addEventListener("dragleave", () => {
+    el.classList.remove("bmDropBefore", "bmDropAfter");
   });
   el.addEventListener("drop", (e) => {
     e.preventDefault();
+    clearBmDropMarks();
     if (bmDragFrom < 0) return;
-    const r = el.getBoundingClientRect();
-    const after = horizontal ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2;
-    let to = index + (after ? 1 : 0);
+    let to = index + (side(e) ? 1 : 0);
     if (bmDragFrom < to) to -= 1;
     if (to !== bmDragFrom) send("bookmark.move", { from: bmDragFrom, to });
     bmDragFrom = -1;

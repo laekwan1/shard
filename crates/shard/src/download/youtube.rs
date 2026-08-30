@@ -320,6 +320,18 @@ pub const RECORDER: &str = r#"
   // request underneath it — the .mp4 or the .m3u8 — is caught here instead.
   window.__shardMedia = window.__shardMedia || { mp4: '', m3u8: '' };
 
+  // Which video the page is on. YouTube moves between videos without reloading,
+  // so the captured request has to be tagged with the video it belongs to — a
+  // template left over from the previous video downloads its audio into the new
+  // one and the file fails ("음성 데이터를 받지 못했습니다").
+  function shardVid() {
+    try {
+      var m = location.href.match(/[?&]v=([^&]+)/) || location.href.match(/\/shorts\/([^/?#]+)/);
+      return m ? m[1] : location.pathname;
+    } catch (e) { return ''; }
+  }
+  window.__shardVid = shardVid;
+
   function noteMedia(url) {
     try {
       if (typeof url !== 'string') return;
@@ -359,7 +371,13 @@ pub const RECORDER: &str = r#"
             if (!u8) return;
             var s = '';
             for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-            window.__shardSabr = { url: url, body: btoa(s) };
+            window.__shardSabr = { url: url, body: btoa(s), vid: shardVid() };
+            // Once, the first time the video's stream is requested — Rust logs it
+            // to time the spinner (see shell.rs "page mark"). Diagnostic.
+            if (!window.__shardSabrMarked) {
+              window.__shardSabrMarked = true;
+              try { window.ipc.postMessage(JSON.stringify({ mark: 'sabr' })); } catch (e) {}
+            }
           }).catch(function () {});
         }
       }
@@ -527,7 +545,13 @@ pub const ASK: &str = r#"
     }
   }
 
+  // Only use the captured request if it belongs to THIS video. After moving
+  // between videos without a page load, a leftover template from the previous one
+  // would otherwise be handed over and download the wrong audio — a failure —
+  // instead of the honest "play it first" that a missing template gives.
+  var here = (window.__shardVid ? window.__shardVid() : '');
   var captured = window.__shardSabr;
+  if (captured && captured.vid && here && captured.vid !== here) captured = null;
   send({
     formats: out,
     title: (data.videoDetails || {}).title || '',

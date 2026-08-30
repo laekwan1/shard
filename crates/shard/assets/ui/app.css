@@ -289,6 +289,14 @@ button svg { display: block; }
 .bmChip:hover { background: #ffffff0f; }
 /* The one being dragged to a new spot — dimmed so the gap it leaves reads. */
 .bmDragging { opacity: .4; }
+/* Where the drop would land: an accent line on the near side of the item under
+   the cursor. Vertical for the bar (a horizontal strip), horizontal for the
+   favorites page (a vertical list). A grabbing cursor while a drag is on. */
+body.bmDragActive, body.bmDragActive * { cursor: grabbing !important; }
+.bmChip.bmDropBefore { box-shadow: inset 2px 0 0 0 var(--accent); }
+.bmChip.bmDropAfter { box-shadow: inset -2px 0 0 0 var(--accent); }
+.favRow.bmDropBefore { box-shadow: inset 0 2px 0 0 var(--accent); }
+.favRow.bmDropAfter { box-shadow: inset 0 -2px 0 0 var(--accent); }
 .bmChip .bmIcon { width: 17px; height: 17px; border-radius: 4px; font-size: 10px; }
 .bmChip .bmLabel { font-size: 11.5px; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
