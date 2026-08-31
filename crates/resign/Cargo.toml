@@ -13,6 +13,13 @@ anyhow = "1"
 # 불필요하고 iOS 빌드에 무겁다. 서명 코어는 feature-gate가 아니라 항상 들어온다.
 apple-codesign = { version = "0.29.0", default-features = false }
 zip = "8.6.0"
+
+# ③ Apple ID 로그인 + anisette = SideStore apple-private-apis 포팅(개인 사용이라 라이선스 무관).
+# icloud_auth(로그인·2FA·GSA)와 omnisette(anisette 헤더)는 실제 구현이라 그대로 의존한다 —
+# 호스트 컴파일 확인됨. rev 고정(재현성). 트림/버전정리는 폰 동작 확인 뒤(동작 전 최적화 금지).
+# ② Developer API는 apple-private-apis에 스텁(todo!)뿐이라 여기서 안 씀 — dev_api.rs에 우리가 직접 구현.
+icloud_auth = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
+omnisette   = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
 chrono = "0.4"
