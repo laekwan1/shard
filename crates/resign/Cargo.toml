@@ -31,6 +31,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 hmac = "0.12"
 sha2 = "0.10"
 aes-gcm = "0.10"
+# ④ 설치/갱신: idevice(jkcoxson)로 폰 lockdownd에 붙어 misagent(㉮ 프로파일)·installation_proxy(㉯
+# 앱)를 호출. ring 프로바이더가 iOS 크로스컴파일에 덜 까다롭다. **검증 0 — 폰에서만.**
+# master(0.1.66)에 pin — 읽은 API(install_package/MisagentClient/TcpProvider)가 master 기준.
+idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5", default-features = false, features = ["ring", "installation_proxy", "misagent", "tcp", "afc"] }
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
 chrono = "0.4"

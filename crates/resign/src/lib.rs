@@ -15,3 +15,4 @@
 pub mod auth;
 pub mod dev_api;
 pub mod engine;
+pub mod install;
