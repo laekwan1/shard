@@ -9,7 +9,9 @@ license.workspace = true
 
 [dependencies]
 anyhow = "1"
-apple-codesign = "0.29.0"
+# default features(notarize)는 AWS SDK+App Store Connect+reqwest(공증용)를 끈다 — 우리 서명엔
+# 불필요하고 iOS 빌드에 무겁다. 서명 코어는 feature-gate가 아니라 항상 들어온다.
+apple-codesign = { version = "0.29.0", default-features = false }
 zip = "8.6.0"
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
