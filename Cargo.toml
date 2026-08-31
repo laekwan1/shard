@@ -8,6 +8,7 @@ members = [
     "crates/veil-core",
     "crates/veil-mobile",
     "crates/veil-server",
+    "crates/resign",
 ]
 
 [workspace.package]

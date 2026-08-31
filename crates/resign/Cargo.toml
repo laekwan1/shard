@@ -1,0 +1,13 @@
+[package]
+name = "resign"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# iOS 자체 서명 엔진 (1단계 PoC). ① 서명은 apple-codesign(관대 라이선스)으로.
+# 이 크레이트는 실기기 없이 PC에서도 서명 메커니즘을 검증하는 자리다.
+
+[dependencies]
+anyhow = "1"
+apple-codesign = "0.29.0"
+zip = "8.6.0"
