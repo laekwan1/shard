@@ -4970,6 +4970,8 @@ dependencies = [
  "chrono",
  "icloud_auth",
  "omnisette",
+ "plist",
+ "uuid",
  "x509-certificate",
  "zip 8.6.0",
 ]

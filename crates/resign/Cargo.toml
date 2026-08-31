@@ -20,6 +20,10 @@ zip = "8.6.0"
 # ② Developer API는 apple-private-apis에 스텁(todo!)뿐이라 여기서 안 씀 — dev_api.rs에 우리가 직접 구현.
 icloud_auth = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
 omnisette   = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
+# ② Developer API는 애플 개발자 서비스에 plist를 POST한다. 요청/응답이 전부 plist라 이 크레이트로
+# 인코딩·파싱한다(데이터 포맷 원시함수라 예외). uuid는 requestId/machineId 생성용.
+plist = "1"
+uuid = { version = "1", features = ["v4"] }
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
 chrono = "0.4"
