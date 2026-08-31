@@ -110,8 +110,18 @@ struct ResignView: View {
     @State private var tfaInput = ""
     @Environment(\.dismiss) private var dismiss
 
+    // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
+    // 인라인 2FA 입력으로 짠다.
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            HStack {
+                Text("자체 서명 — 발급 테스트").font(.headline).foregroundColor(.onSurface)
+                Spacer()
+                Button("닫기") { dismiss() }.foregroundColor(.accent)
+            }
+            .padding()
+            Divider().background(Color.toolbar)
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     Text("Apple ID로 로그인해 개발 인증서·프로비저닝 프로파일이 발급되는지 확인합니다. (.ipa 서명·설치는 다음 단계)")
@@ -140,6 +150,30 @@ struct ResignView: View {
                     }
                     .disabled(!runnable)
 
+                    // 2FA 코드 입력 — 로그인 중 코드가 필요할 때만 나타난다(alert 대신 인라인).
+                    if model.needs2FA {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("2단계 인증 코드 — 기기로 전송된 코드를 입력하세요")
+                                .font(.caption).foregroundColor(.accent)
+                            HStack(spacing: 8) {
+                                TextField("6자리 코드", text: $tfaInput)
+                                    .keyboardType(.numberPad)
+                                    .foregroundColor(.onSurface)
+                                    .padding(.horizontal, 12).padding(.vertical, 10)
+                                    .background(Color.chrome)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                                Button("확인") {
+                                    model.submit2FA(tfaInput)
+                                    tfaInput = ""
+                                }
+                                .font(.body.weight(.semibold)).foregroundColor(.onAccent)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.accent)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                        }
+                    }
+
                     if let s = model.summary {
                         Text("성공 — \(s)").font(.footnote).foregroundColor(.accent)
                     }
@@ -161,24 +195,8 @@ struct ResignView: View {
                 }
                 .padding()
             }
-            .background(Color.surface.ignoresSafeArea())
-            .navigationTitle("자체 서명 — 발급 테스트")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("닫기") { dismiss() }.foregroundColor(.accent)
-                }
-            }
-            .alert("2단계 인증 코드", isPresented: $model.needs2FA) {
-                TextField("6자리 코드", text: $tfaInput).keyboardType(.numberPad)
-                Button("확인") {
-                    model.submit2FA(tfaInput)
-                    tfaInput = ""
-                }
-            } message: {
-                Text("기기로 전송된 코드를 입력하세요.")
-            }
         }
+        .background(Color.surface.ignoresSafeArea())
     }
 
     private var runnable: Bool {
