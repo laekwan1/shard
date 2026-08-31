@@ -39,6 +39,8 @@ struct BrowserScreen: View {
     // The bypass toggle is hidden until asked for: a right-swipe on the open
     // address panel reveals it.
     @State private var engineRevealed = false
+    // 재서명(자체 서명) 시트 — 우회 토글이 뜰 때 함께 나오는 모래시계로 연다.
+    @State private var showResign = false
 
     @State private var landscape = false
 
@@ -273,6 +275,13 @@ struct BrowserScreen: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.engineOn ? Color.accent : Color.toolbar, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture { model.toggleEngine() }
+                // 자체 서명(재서명) — 남은 기간·수동 재서명. 우회 토글과 함께 노출(사용자 확정).
+                Image(systemName: "hourglass")
+                    .foregroundColor(.onSurface)
+                    .frame(width: 32, height: 30)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.toolbar, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { showResign = true }
                 Divider().frame(height: 22).background(Color.toolbar)
             }
             // Home: tap → the set homepage; hold → make the current page the homepage.
@@ -317,6 +326,7 @@ struct BrowserScreen: View {
                 else if !showStart { showAddress = false }
             }
         )
+        .sheet(isPresented: $showResign) { ResignView() }
     }
 
     /// A small dialog for the homepage URL. Uses URLField so it grabs focus and

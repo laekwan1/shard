@@ -71,6 +71,14 @@ char *shard_resign_run(const char *email, const char *password,
                        const char *pairing_path, ShardTfa tfa, ShardLog log,
                        void *ctx);
 
+// 첫 테스트: .ipa/설치 없이 로그인→인증서→App ID→프로파일 발급(②③)만 검증. 소유 JSON 반환
+// {"ok":true,"path":"team=...; appId=...; profile=...B"} 또는 {"ok":false,"error":"..."};
+// shard_string_free로 해제.
+char *shard_resign_verify(const char *email, const char *password,
+                          const char *bundle_id, const char *app_name,
+                          const char *state_dir, ShardTfa tfa, ShardLog log,
+                          void *ctx);
+
 // The bypass engine: a local HTTP/CONNECT proxy that applies the DPI/SNI
 // desync. shard_start binds 127.0.0.1:<port> (0 = any free port) and returns the
 // bound port, or a negative error. The WebView is then pointed at that port.

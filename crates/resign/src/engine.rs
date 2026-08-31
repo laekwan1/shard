@@ -172,6 +172,63 @@ pub fn resign_and_install_blocking(
     })
 }
 
+/// 첫 폰 테스트용 — .ipa/설치 없이 **애플 실서버 왕복(②③)만** 검증한다:
+/// 로그인 → 팀 → 인증서(CSR 제출) → App ID → 프로파일 발급. 성공하면 요약 문자열.
+/// 이게 되면 가장 어려운 인증·발급이 폰에서 실증된 것 — 서명·설치는 그 다음.
+pub fn verify_apple_flow_blocking(
+    email: String,
+    password: String,
+    bundle_id: String,
+    app_name: String,
+    state_dir: PathBuf,
+    tfa: &dyn Fn() -> String,
+    log: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
+    rt.block_on(async {
+        log("Apple ID 로그인 중...");
+        let session = AppleSession::login(email, password, || tfa(), state_dir).await?;
+        let dev = DeveloperApi::new(session);
+
+        log("팀 조회...");
+        let team = dev
+            .list_teams()
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정 확인)"))?;
+        log(&format!("팀: {} ({})", team.name, team.team_id));
+
+        log("인증서 확보(CSR 제출)...");
+        let key = InMemorySigningKeyPair::generate_random(KeyAlgorithm::Rsa)
+            .map_err(|e| anyhow!("키 생성: {e:?}"))?;
+        let _cert = ensure_certificate(&dev, &team, &app_name, &key).await?;
+        log("인증서 OK.");
+
+        log("App ID 확보...");
+        let app_id = ensure_app_id(&dev, &team, &bundle_id, &app_name).await?;
+        log(&format!("App ID: {}", app_id.identifier));
+
+        log("프로파일 발급...");
+        let profile = dev.download_profile(&team, &app_id).await?;
+        log(&format!(
+            "프로파일: {} ({} bytes)",
+            profile.name,
+            profile.encoded_profile.len()
+        ));
+
+        Ok(format!(
+            "team={}; appId={}; profile={}B",
+            team.team_id,
+            app_id.identifier,
+            profile.encoded_profile.len()
+        ))
+    })
+}
+
 /// 인증서 확보: 키로 CSR을 만들어 제출하고, 발급된 애플 인증서 DER을 취득한다.
 /// (Dadoum certificateidentity.d: submitDevelopmentCSR → listAllDevelopmentCerts에서 매칭.)
 async fn ensure_certificate(
