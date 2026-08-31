@@ -18,6 +18,9 @@
 // `download` feature (reqwest) is off there, so the module is too.
 #[cfg(not(target_os = "android"))]
 pub mod download;
+// iOS 자체 서명 엔진의 C ABI. feature = "resign"일 때만(iOS 빌드에서 켬).
+#[cfg(feature = "resign")]
+pub mod resign_ffi;
 pub mod http_proxy;
 pub mod jni;
 pub mod resolve;

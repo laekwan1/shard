@@ -8,6 +8,11 @@ license.workspace = true
 # staticlib for iOS (linked into the Network Extension), cdylib for Android JNI.
 crate-type = ["lib", "staticlib", "cdylib"]
 
+[features]
+# iOS 자체 서명 엔진의 C ABI를 켠다(build-xcframework.sh가 --features resign로 켬). Android/기본
+# 빌드엔 안 들어간다 — 무겁고(idevice·apple-codesign·icloud_auth 등) iOS 전용이라.
+resign = ["dep:resign"]
+
 [dependencies]
 # The portable core only: no packet driver, no window, no async runtime.
 shard = { path = "../shard", default-features = false }
@@ -16,6 +21,8 @@ tracing = "0.1.44"
 # For the encrypted resolver only. Blocking rustls, no async runtime.
 rustls = { version = "0.23.43", default-features = false, features = ["std", "ring", "tls12"] }
 webpki-roots = "1.0.9"
+# iOS 자체 서명 엔진(feature = "resign"에서만). C ABI는 resign_ffi.rs.
+resign = { path = "../resign", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock", "Win32_Foundation"] }

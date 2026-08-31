@@ -10,6 +10,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Write};
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -129,6 +130,46 @@ fn add_dir_to_zip(
         }
     }
     Ok(())
+}
+
+/// iOS C ABI(동기)에서 부르는 블로킹 진입점의 입력.
+pub struct ResignAndInstall {
+    pub req: ResignRequest,
+    /// 미서명 .ipa 경로.
+    pub ipa: PathBuf,
+    /// anisette·세션 캐시 디렉터리(기기별).
+    pub state_dir: PathBuf,
+    /// 작업 폴더(추출·서명·재포장).
+    pub work_dir: PathBuf,
+    /// 설치까지 하려면 기기 연결(LocalDevVPN 터널 주소 + 페어링 파일). 없으면 서명만 하고 반환.
+    pub device_addr: Option<IpAddr>,
+    pub pairing_path: Option<PathBuf>,
+}
+
+/// 로그인→재서명(→설치)을 **동기로** 실행한다(iOS C ABI용). current-thread 런타임이라 Send 불필요.
+/// `tfa`는 2FA 코드를 돌려주는 콜백(Swift 다이얼로그), `log`는 진행 로그(Swift 화면 표시).
+pub fn resign_and_install_blocking(
+    p: ResignAndInstall,
+    tfa: &dyn Fn() -> String,
+    log: &mut dyn FnMut(&str),
+) -> Result<PathBuf> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
+    rt.block_on(async {
+        log("Apple ID 로그인 중...");
+        let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir).await?;
+        log("서명 완료.");
+        if let (Some(addr), Some(pairing_path)) = (p.device_addr, p.pairing_path.as_ref()) {
+            log("기기에 설치 중...");
+            let pairing = fs::read(pairing_path).context("페어링 파일 읽기")?;
+            let provider = crate::install::tcp_provider(addr, &pairing, "shard-resign")?;
+            crate::install::install_or_upgrade_app(&provider, &signed).await?;
+            log("설치 완료.");
+        }
+        Ok(signed)
+    })
 }
 
 /// 인증서 확보: 키로 CSR을 만들어 제출하고, 발급된 애플 인증서 DER을 취득한다.

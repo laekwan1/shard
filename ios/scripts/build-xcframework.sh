@@ -6,8 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 echo "== building libshard_mobile for device + simulator =="
-cargo build -p shard-mobile --release --target aarch64-apple-ios
-cargo build -p shard-mobile --release --target aarch64-apple-ios-sim
+# --features resign: iOS 자체 서명 엔진(①②③④⑤)의 C ABI를 staticlib에 포함(resign_ffi.rs).
+cargo build -p shard-mobile --release --features resign --target aarch64-apple-ios
+cargo build -p shard-mobile --release --features resign --target aarch64-apple-ios-sim
 
 HEADERS="ios/build/headers"
 OUT="ios/build/ShardCore.xcframework"

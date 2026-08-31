@@ -55,6 +55,22 @@ char *shard_download_youtube(const char *offer_json, uint32_t itag,
                              const char *into_dir, ShardProgress progress,
                              ShardCancel cancel, void *ctx);
 
+// ── iOS 자체 서명 엔진 (libshard_mobile을 --features resign로 빌드할 때만) ──────────
+// 2FA 코드를 돌려주는 콜백. 반환 문자열은 콜백이 리턴할 때까지 유효하면 되고 Rust가 복사한다.
+typedef const char *(*ShardTfa)(void *ctx);
+// 진행 로그 한 줄(화면에 표시). line은 이 호출 동안만 유효.
+typedef void (*ShardLog)(void *ctx, const char *line);
+
+// 로그인 → 재서명 → (device_addr+pairing_path가 있으면) 설치를 이 스레드에서 동기로 실행.
+// 소유 JSON C 문자열 {"ok":true,"path":"<서명된 .ipa>"} 또는 {"ok":false,"error":"..."} 반환;
+// shard_string_free로 해제. device_addr/pairing_path는 NULL 가능(그러면 서명만).
+char *shard_resign_run(const char *email, const char *password,
+                       const char *bundle_id, const char *app_name,
+                       const char *ipa_path, const char *state_dir,
+                       const char *work_dir, const char *device_addr,
+                       const char *pairing_path, ShardTfa tfa, ShardLog log,
+                       void *ctx);
+
 // The bypass engine: a local HTTP/CONNECT proxy that applies the DPI/SNI
 // desync. shard_start binds 127.0.0.1:<port> (0 = any free port) and returns the
 // bound port, or a negative error. The WebView is then pointed at that port.
