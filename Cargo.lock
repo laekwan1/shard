@@ -4965,12 +4965,16 @@ dependencies = [
 name = "resign"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "anyhow",
  "apple-codesign",
  "chrono",
+ "hmac 0.12.1",
  "icloud_auth",
  "omnisette",
  "plist",
+ "reqwest 0.12.28",
+ "sha2 0.10.9",
  "uuid",
  "x509-certificate",
  "zip 8.6.0",

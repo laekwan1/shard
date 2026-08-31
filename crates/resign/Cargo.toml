@@ -24,6 +24,13 @@ omnisette   = { git = "https://github.com/SideStore/apple-private-apis", rev = "
 # 인코딩·파싱한다(데이터 포맷 원시함수라 예외). uuid는 requestId/machineId 생성용.
 plist = "1"
 uuid = { version = "1", features = ["v4"] }
+# ② 전송층: 개발자 포털/GSA에 plist를 POST(reqwest), Xcode 앱토큰 완성용 HMAC-SHA256(checksum)과
+# AES-GCM 복호(icloud_auth의 get_app_token이 복호 직전 todo!()라 우리가 마저 한다 — spd public이라
+# fork 불필요). 전부 서명/암호 원시함수라 의존 예외 허용.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+hmac = "0.12"
+sha2 = "0.10"
+aes-gcm = "0.10"
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
 chrono = "0.4"
