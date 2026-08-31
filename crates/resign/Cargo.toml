@@ -4,10 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-# iOS 자체 서명 엔진 (1단계 PoC). ① 서명은 apple-codesign(관대 라이선스)으로.
-# 이 크레이트는 실기기 없이 PC에서도 서명 메커니즘을 검증하는 자리다.
+# iOS 자체 서명 엔진 — ① 서명. apple-codesign(관대 라이선스)으로 실제 iOS 번들을
+# PC에서 재서명·검증한다. 실기기 없이 여기까지 검증되는 조각.
 
 [dependencies]
 anyhow = "1"
 apple-codesign = "0.29.0"
 zip = "8.6.0"
+# create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을
+# 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
+chrono = "0.4"
+x509-certificate = "0.24"

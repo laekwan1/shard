@@ -5203,6 +5203,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apple-codesign",
+ "chrono",
+ "x509-certificate",
  "zip 8.6.0",
 ]
 
