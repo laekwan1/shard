@@ -9,7 +9,7 @@
 //! 지점이다.
 
 use std::fs::{self, File};
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -86,7 +86,49 @@ pub async fn resign_app(
         .sign_path(&app_dir, &signed)
         .map_err(|e| anyhow!("재서명 실패: {e:?}"))?;
 
-    Ok(signed)
+    // 7) 설치용 .ipa로 재포장(Payload/<app>).
+    let out_ipa = work.join("Shard-signed.ipa");
+    repackage_ipa(&signed, &out_ipa)?;
+    Ok(out_ipa)
+}
+
+/// 서명된 `.app`을 `Payload/<app>` 구조의 .ipa(zip)로 묶는다.
+fn repackage_ipa(app_dir: &Path, out: &Path) -> Result<()> {
+    let app_name = app_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow!("앱 이름 없음"))?;
+    let mut zip = zip::ZipWriter::new(File::create(out).context("ipa 생성")?);
+    let base = format!("Payload/{app_name}");
+    add_dir_to_zip(&mut zip, app_dir, &base)?;
+    zip.finish().context("ipa 마무리")?;
+    Ok(())
+}
+
+/// 디렉터리를 재귀로 zip에 넣는다. zip 경로는 슬래시(/)로.
+fn add_dir_to_zip(
+    zip: &mut zip::ZipWriter<File>,
+    dir: &Path,
+    zip_prefix: &str,
+) -> Result<()> {
+    let opts: zip::write::FileOptions<()> =
+        zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_str().ok_or_else(|| anyhow!("비 UTF-8 파일명"))?;
+        let zip_path = format!("{zip_prefix}/{name}");
+        if path.is_dir() {
+            add_dir_to_zip(zip, &path, &zip_path)?;
+        } else {
+            zip.start_file(&zip_path, opts)
+                .with_context(|| format!("zip 항목 {zip_path}"))?;
+            let bytes = fs::read(&path)?;
+            zip.write_all(&bytes)?;
+        }
+    }
+    Ok(())
 }
 
 /// 인증서 확보: 키로 CSR을 만들어 제출하고, 발급된 애플 인증서 DER을 취득한다.
@@ -171,6 +213,38 @@ fn find_sub(hay: &[u8], needle: &[u8]) -> Option<usize> {
         return None;
     }
     hay.windows(needle.len()).position(|w| w == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // 재포장이 iOS가 요구하는 Payload/<app>/... 구조를(중첩 프레임워크 포함) 만드는지 지킨다.
+    // 이걸 틀리면 .ipa가 설치 불가라 되돌아온다.
+    #[test]
+    fn a_repackaged_ipa_nests_the_app_and_its_frameworks_under_payload() {
+        let tmp = std::env::temp_dir().join("resign-repack-test");
+        let _ = fs::remove_dir_all(&tmp);
+        let app = tmp.join("Foo.app");
+        fs::create_dir_all(app.join("Frameworks/Bar.framework")).unwrap();
+        fs::write(app.join("Foo"), b"macho").unwrap();
+        fs::write(app.join("Frameworks/Bar.framework/Bar"), b"fw").unwrap();
+
+        let out = tmp.join("out.ipa");
+        repackage_ipa(&app, &out).unwrap();
+
+        let mut zip = zip::ZipArchive::new(File::open(&out).unwrap()).unwrap();
+        let names: Vec<String> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.iter().any(|n| n == "Payload/Foo.app/Foo"), "{names:?}");
+        assert!(
+            names
+                .iter()
+                .any(|n| n == "Payload/Foo.app/Frameworks/Bar.framework/Bar"),
+            "{names:?}"
+        );
+    }
 }
 
 /// .ipa를 풀고 Payload/*.app 경로를 돌려준다. (main.rs의 것과 같은 로직 — 엔진용 사본.)
