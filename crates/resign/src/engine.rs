@@ -41,10 +41,11 @@ pub async fn resign_app(
     tfa: impl Fn() -> String,
     state_dir: PathBuf,
     work: &Path,
+    log: &mut dyn FnMut(&str),
 ) -> Result<PathBuf> {
     // 1) 로그인 (③)
     let session =
-        AppleSession::login(req.email.clone(), req.password.clone(), tfa, state_dir).await?;
+        AppleSession::login(req.email.clone(), req.password.clone(), tfa, state_dir, log).await?;
     let dev = DeveloperApi::new(session);
 
     // 2) 팀 (무료 개인 팀은 대개 하나)
@@ -158,8 +159,7 @@ pub fn resign_and_install_blocking(
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
     rt.block_on(async {
-        log("Apple ID 로그인 중...");
-        let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir).await?;
+        let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await?;
         log("서명 완료.");
         if let (Some(addr), Some(pairing_path)) = (p.device_addr, p.pairing_path.as_ref()) {
             log("기기에 설치 중...");
@@ -189,8 +189,7 @@ pub fn verify_apple_flow_blocking(
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
     rt.block_on(async {
-        log("Apple ID 로그인 중...");
-        let session = AppleSession::login(email, password, || tfa(), state_dir).await?;
+        let session = AppleSession::login(email, password, || tfa(), state_dir, log).await?;
         let dev = DeveloperApi::new(session);
 
         log("팀 조회...");

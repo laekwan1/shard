@@ -47,17 +47,30 @@ pub struct AppleSession {
 
 impl AppleSession {
     /// Apple ID로 로그인. `tfa`는 2FA 코드를 돌려주는 콜백(폰 UI가 사용자에게 물어봄).
-    /// anisette 상태는 `state_dir`에 기기별로 캐시된다.
+    /// anisette 상태는 `state_dir`에 기기별로 캐시된다. `log`로 단계를 알린다(어디서 막히는지 보이게).
+    ///
+    /// anisette를 로그인과 분리해 먼저 받는다 — 사이드로드 iOS에선 온디바이스 ADI(SSC)가 막혀
+    /// 이 단계에서 멈추는 일이 잦아, 로그로 정확히 짚기 위함.
     pub async fn login(
         email: String,
         password: String,
         tfa: impl Fn() -> String,
         state_dir: PathBuf,
+        log: &mut dyn FnMut(&str),
     ) -> Result<Self> {
         let config = AnisetteConfiguration::new().set_configuration_path(state_dir);
-        let account = AppleAccount::login(move || (email.clone(), password.clone()), tfa, config)
+        log("anisette 준비 중(기기 인증 헤더; 온디바이스 실패 시 원격 ani.sidestore.io)...");
+        let anisette = icloud_auth::anisette::AnisetteData::new(config)
             .await
-            .map_err(|e| anyhow!("apple login failed: {e:?}"))?;
+            .map_err(|e| anyhow!("anisette 실패: {e:?}"))?;
+        log("anisette OK. Apple ID 로그인 요청 중...");
+        let account = AppleAccount::login_with_anisette(
+            move || (email.clone(), password.clone()),
+            tfa,
+            anisette,
+        )
+        .await
+        .map_err(|e| anyhow!("apple login failed: {e:?}"))?;
         Ok(Self {
             account,
             cached_gs_token: Mutex::new(None),
