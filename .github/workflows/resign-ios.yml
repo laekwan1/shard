@@ -1,0 +1,40 @@
+# 재서명 엔진(crates/resign)이 iOS로 크로스컴파일되는지만 확인한다. Swift/C ABI를 얹기 전에,
+# 엔진+무거운 의존(idevice·apple-codesign·omnisette·icloud_auth·aes-gcm·reqwest)이 aarch64-apple-ios로
+# 빌드되는지가 최대 미지수다. Windows 호스트로는 못 하니 CI(macOS)로 먼저 통과시킨다.
+name: resign iOS cross-compile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/resign/**'
+      - 'Cargo.lock'
+      - '.github/workflows/resign-ios.yml'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain + iOS targets
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: resign-ios-cargo-${{ hashFiles('Cargo.lock') }}
+
+      # 라이브러리만(--lib): iOS 앱이 링크하는 건 lib이다. bin(main.rs)은 PC PoC 전용.
+      - name: Cross-compile resign for a device (aarch64-apple-ios)
+        run: cargo build -p resign --lib --release --target aarch64-apple-ios
+
+      - name: Cross-compile resign for the simulator (aarch64-apple-ios-sim)
+        run: cargo build -p resign --lib --release --target aarch64-apple-ios-sim
