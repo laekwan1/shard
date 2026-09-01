@@ -58,8 +58,12 @@ impl AppleSession {
         state_dir: PathBuf,
         log: &mut dyn FnMut(&str),
     ) -> Result<Self> {
-        let config = AnisetteConfiguration::new().set_configuration_path(state_dir);
-        log("anisette 준비 중(기기 인증 헤더; 온디바이스 실패 시 원격 ani.sidestore.io)...");
+        // anisette_url을 두면 (fork 패치가) v1 원격을 쓴다. ani.sidestore.io는 v1(GET)을 지원 —
+        // v3 프로비저닝(EndProvisioningError로 실패)을 피한다.
+        let config = AnisetteConfiguration::new()
+            .set_configuration_path(state_dir)
+            .set_anisette_url("https://ani.sidestore.io".to_string());
+        log("anisette 준비 중(원격 v1: ani.sidestore.io)...");
         let anisette = icloud_auth::anisette::AnisetteData::new(config)
             .await
             .map_err(|e| anyhow!("anisette 실패: {e:?}"))?;

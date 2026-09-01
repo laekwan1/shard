@@ -18,8 +18,11 @@ zip = "8.6.0"
 # icloud_auth(로그인·2FA·GSA)와 omnisette(anisette 헤더)는 실제 구현이라 그대로 의존한다 —
 # 호스트 컴파일 확인됨. rev 고정(재현성). 트림/버전정리는 폰 동작 확인 뒤(동작 전 최적화 금지).
 # ② Developer API는 apple-private-apis에 스텁(todo!)뿐이라 여기서 안 씀 — dev_api.rs에 우리가 직접 구현.
-icloud_auth = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
-omnisette   = { git = "https://github.com/SideStore/apple-private-apis", rev = "03beb1aa42991ccdad6214dee77e72282bef461f" }
+# fork(laekwan1): omnisette가 anisette_url이 있으면 v1 원격을 우선하도록 패치 — iOS에서 온디바이스
+# (SSC)·v3 프로비저닝이 ani.sidestore.io와 안 맞아(EndProvisioningError) 로그인이 막히던 것을,
+# 잘 되는 v1(단순 GET)로 우회. auth.rs가 anisette_url을 ani.sidestore.io로 설정한다.
+icloud_auth = { git = "https://github.com/laekwan1/apple-private-apis", rev = "27a1a6969daa1fdd41dc7593da36396f00e916bf" }
+omnisette   = { git = "https://github.com/laekwan1/apple-private-apis", rev = "27a1a6969daa1fdd41dc7593da36396f00e916bf", features = ["remote-anisette"] }
 # ② Developer API는 애플 개발자 서비스에 plist를 POST한다. 요청/응답이 전부 plist라 이 크레이트로
 # 인코딩·파싱한다(데이터 포맷 원시함수라 예외). uuid는 requestId/machineId 생성용.
 plist = "1"
