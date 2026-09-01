@@ -2760,7 +2760,7 @@ dependencies = [
 [[package]]
 name = "icloud_auth"
 version = "0.1.0"
-source = "git+https://github.com/laekwan1/apple-private-apis?rev=7f6b7d723e289949e4177259a8c768d7c05519f2#7f6b7d723e289949e4177259a8c768d7c05519f2"
+source = "git+https://github.com/laekwan1/apple-private-apis?rev=0dd665bc2a0e4531a064bc07fabb92dda18689fe#0dd665bc2a0e4531a064bc07fabb92dda18689fe"
 dependencies = [
  "aes 0.8.4",
  "base64 0.13.1",
@@ -4017,7 +4017,7 @@ dependencies = [
 [[package]]
 name = "omnisette"
 version = "0.1.0"
-source = "git+https://github.com/laekwan1/apple-private-apis?rev=7f6b7d723e289949e4177259a8c768d7c05519f2#7f6b7d723e289949e4177259a8c768d7c05519f2"
+source = "git+https://github.com/laekwan1/apple-private-apis?rev=0dd665bc2a0e4531a064bc07fabb92dda18689fe#0dd665bc2a0e4531a064bc07fabb92dda18689fe"
 dependencies = [
  "android-loader",
  "anyhow",
@@ -5921,7 +5921,7 @@ dependencies = [
 [[package]]
 name = "srp"
 version = "0.6.0"
-source = "git+https://github.com/laekwan1/apple-private-apis?rev=7f6b7d723e289949e4177259a8c768d7c05519f2#7f6b7d723e289949e4177259a8c768d7c05519f2"
+source = "git+https://github.com/laekwan1/apple-private-apis?rev=0dd665bc2a0e4531a064bc07fabb92dda18689fe#0dd665bc2a0e4531a064bc07fabb92dda18689fe"
 dependencies = [
  "base64 0.21.7",
  "digest 0.10.7",
