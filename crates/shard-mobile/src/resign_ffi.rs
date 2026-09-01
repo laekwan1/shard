@@ -86,7 +86,7 @@ pub unsafe extern "C" fn shard_resign_run(
 
     match resign::engine::resign_and_install_blocking(params, &tfa_fn, &mut log_fn) {
         Ok(path) => ok(&path.to_string_lossy()),
-        Err(e) => err(&e.to_string()),
+        Err(e) => err(&format!("{e:#}")),
     }
 }
 
@@ -144,7 +144,7 @@ pub unsafe extern "C" fn shard_resign_verify(
         &mut log_fn,
     ) {
         Ok(summary) => ok(&summary),
-        Err(e) => err(&e.to_string()),
+        Err(e) => err(&format!("{e:#}")),
     }
 }
 
