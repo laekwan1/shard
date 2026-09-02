@@ -46,9 +46,10 @@ pub async fn resign_app(
     work: &Path,
     log: &mut dyn FnMut(&str),
 ) -> Result<PathBuf> {
-    // 1) 로그인 (③)
-    let session =
-        AppleSession::login(req.email.clone(), req.password.clone(), tfa, state_dir, log).await?;
+    // 1) 로그인 (③) — 저장된 세션이 있으면 재로그인 없이 복원(계정 잠금 위험 감소).
+    let (session, _resumed) =
+        AppleSession::resume_or_login(req.email.clone(), req.password.clone(), tfa, state_dir, log)
+            .await?;
     let dev = DeveloperApi::new(session);
 
     // 2) 팀 (무료 개인 팀은 대개 하나)
@@ -160,7 +161,7 @@ pub fn resign_and_install_blocking(
         .enable_all()
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
-    rt.block_on(async {
+    let result = rt.block_on(async {
         let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await?;
         log("서명 완료.");
         if let (Some(addr), Some(pairing_path)) = (p.device_addr, p.pairing_path.as_ref()) {
@@ -171,7 +172,12 @@ pub fn resign_and_install_blocking(
             log("설치 완료.");
         }
         Ok(signed)
-    })
+    });
+    // 실패 시 저장 세션이 만료됐을 수 있으니 지운다 — 다음 실행이 새로 로그인하게.
+    if result.is_err() {
+        crate::auth::AppleSession::clear_session(&p.state_dir);
+    }
+    result
 }
 
 /// 첫 폰 테스트용 — .ipa/설치 없이 **애플 실서버 왕복(②③)만** 검증한다:
@@ -190,8 +196,11 @@ pub fn verify_apple_flow_blocking(
         .enable_all()
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
-    rt.block_on(async {
-        let session = AppleSession::login(email, password, || tfa(), state_dir, log).await?;
+    let mut resumed = false;
+    let result = rt.block_on(async {
+        let (session, r) =
+            AppleSession::resume_or_login(email, password, || tfa(), state_dir.clone(), log).await?;
+        resumed = r;
         let dev = DeveloperApi::new(session);
 
         log("팀 조회...");
@@ -226,7 +235,12 @@ pub fn verify_apple_flow_blocking(
             app_id.identifier,
             profile.encoded_profile.len()
         ))
-    })
+    });
+    // 복원한 세션으로 실패했다면 만료로 보고 지운다 — 다음 실행이 새로 로그인하게.
+    if result.is_err() && resumed {
+        AppleSession::clear_session(&state_dir);
+    }
+    result
 }
 
 /// RSA 서명 키를 만든다. x509-certificate의 `generate_random`은 RSA를 지원하지 않아

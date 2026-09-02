@@ -13,7 +13,7 @@
 //! 폰 왕복으로만 드러난다 — 그 build-test-fix 루프가 이 층의 검증 방식이다.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use aes_gcm::aead::generic_array::GenericArray;
@@ -73,7 +73,7 @@ impl AppleSession {
         // anisette_url을 두면 (fork 패치가) v1 원격을 쓴다. ani.sidestore.io는 v1(GET)을 지원 —
         // v3 프로비저닝(EndProvisioningError로 실패)을 피한다.
         let config = AnisetteConfiguration::new()
-            .set_configuration_path(state_dir)
+            .set_configuration_path(state_dir.clone())
             .set_anisette_url("https://ani.sidestore.io".to_string());
         log("anisette 준비 중(원격 v1: ani.sidestore.io)...");
         let anisette = icloud_auth::anisette::AnisetteData::new(config)
@@ -87,10 +87,65 @@ impl AppleSession {
         )
         .await
         .map_err(|e| anyhow!("apple login failed: {e:?}"))?;
-        Ok(Self {
+        let session = Self {
+            account,
+            cached_gs_token: Mutex::new(None),
+        };
+        // 세션을 저장해 다음엔 재로그인을 피한다 — 반복 로그인이 계정 잠금의 최대 원인.
+        session.save_session(&state_dir);
+        Ok(session)
+    }
+
+    /// 저장된 세션(spd)이 있으면 로그인 없이 복원한다. anisette만 가볍게 새로 받고(로그인 아님)
+    /// 저장해 둔 세션 데이터를 붙인다. 없거나 못 읽으면 None → 호출자가 로그인.
+    /// **반복 로그인이 애플의 "낯선 기기 반복 접근" 잠금을 유발하므로, 가능하면 이걸로 건너뛴다.**
+    pub async fn resume(state_dir: &Path, log: &mut dyn FnMut(&str)) -> Option<Self> {
+        let path = state_dir.join("session.plist");
+        let spd = plist::Value::from_reader_xml(std::fs::File::open(&path).ok()?)
+            .ok()?
+            .into_dictionary()?;
+        log("저장된 세션 발견 — 로그인 생략(anisette만 갱신)...");
+        let config = AnisetteConfiguration::new()
+            .set_configuration_path(state_dir.to_path_buf())
+            .set_anisette_url("https://ani.sidestore.io".to_string());
+        let anisette = icloud_auth::anisette::AnisetteData::new(config).await.ok()?;
+        let mut account = AppleAccount::new_with_anisette(anisette).ok()?;
+        account.spd = Some(spd);
+        Some(Self {
             account,
             cached_gs_token: Mutex::new(None),
         })
+    }
+
+    /// 저장된 세션이 있으면 복원, 없으면 로그인. 반환의 bool은 "복원했나"(true=로그인 안 함).
+    pub async fn resume_or_login(
+        email: String,
+        password: String,
+        tfa: impl Fn() -> String,
+        state_dir: PathBuf,
+        log: &mut dyn FnMut(&str),
+    ) -> Result<(Self, bool)> {
+        if let Some(s) = Self::resume(&state_dir, log).await {
+            return Ok((s, true));
+        }
+        log("저장된 세션 없음 — 로그인합니다.");
+        let s = Self::login(email, password, tfa, state_dir, log).await?;
+        Ok((s, false))
+    }
+
+    /// spd(로그인 세션)를 파일로 저장. 다음 실행이 재로그인 없이 복원하게. (제품은 Keychain 권장.)
+    fn save_session(&self, state_dir: &Path) {
+        if let Some(spd) = &self.account.spd {
+            let path = state_dir.join("session.plist");
+            if let Ok(f) = std::fs::File::create(&path) {
+                let _ = plist::to_writer_xml(f, &Value::Dictionary(spd.clone()));
+            }
+        }
+    }
+
+    /// 저장된 세션 삭제 — 만료/실패로 못 쓸 때 호출해 다음 실행이 새로 로그인하게.
+    pub fn clear_session(state_dir: &Path) {
+        let _ = std::fs::remove_file(state_dir.join("session.plist"));
     }
 
     /// spd(로그인 후 서버가 준 세션 데이터)에서 문자열 필드. adsid/GsIdmsToken 등.
