@@ -14,7 +14,10 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
-use apple_codesign::{SettingsScope, SigningSettings, UnifiedSigner};
+use apple_codesign::{
+    create_self_signed_code_signing_certificate, CertificateProfile, SettingsScope, SigningSettings,
+    UnifiedSigner,
+};
 use plist::{Dictionary, Value};
 use x509_certificate::{
     CapturedX509Certificate, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
@@ -57,8 +60,7 @@ pub async fn resign_app(
         .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정인지 확인)"))?;
 
     // 3) 인증서: 키 생성 → CSR → 제출 → 취득. 이 키가 서명키가 된다.
-    let key = InMemorySigningKeyPair::generate_random(KeyAlgorithm::Rsa)
-        .map_err(|e| anyhow!("서명 키 생성 실패: {e:?}"))?;
+    let key = generate_rsa_signing_key(&req.app_name)?;
     let apple_cert = ensure_certificate(&dev, &team, &req.app_name, &key).await?;
 
     // 4) App ID (있으면 재사용)
@@ -202,8 +204,7 @@ pub fn verify_apple_flow_blocking(
         log(&format!("팀: {} ({})", team.name, team.team_id));
 
         log("인증서 확보(CSR 제출)...");
-        let key = InMemorySigningKeyPair::generate_random(KeyAlgorithm::Rsa)
-            .map_err(|e| anyhow!("키 생성: {e:?}"))?;
+        let key = generate_rsa_signing_key(&app_name)?;
         let _cert = ensure_certificate(&dev, &team, &app_name, &key).await?;
         log("인증서 OK.");
 
@@ -226,6 +227,22 @@ pub fn verify_apple_flow_blocking(
             profile.encoded_profile.len()
         ))
     })
+}
+
+/// RSA 서명 키를 만든다. x509-certificate의 `generate_random`은 RSA를 지원하지 않아
+/// `RsaKeyGenerationNotSupported`가 난다(폰에서 확인). apple-codesign의 self-signed 생성기는
+/// rsa 크레이트로 RSA를 만드므로, 그걸로 **키만** 얻고 딸려오는 던지는 인증서는 버린다.
+fn generate_rsa_signing_key(app_name: &str) -> Result<InMemorySigningKeyPair> {
+    let (_throwaway_cert, key) = create_self_signed_code_signing_certificate(
+        KeyAlgorithm::Rsa,
+        CertificateProfile::AppleDevelopment,
+        "TEMP",
+        app_name,
+        "US",
+        chrono::Duration::try_days(1).ok_or_else(|| anyhow!("잘못된 유효기간"))?,
+    )
+    .map_err(|e| anyhow!("RSA 키 생성: {e:?}"))?;
+    Ok(key)
 }
 
 /// 인증서 확보: 키로 CSR을 만들어 제출하고, 발급된 애플 인증서 DER을 취득한다.
