@@ -331,7 +331,6 @@ struct BrowserScreen: View {
                 // 실제 모래시계처럼: 남은 일수가 '윗칸 모래'(7일=위 가득/아래 빔), 지난 만큼 아래로 쌓인다.
                 // SF Symbol은 위/아래 반칸 두 단계뿐이라 양 조절이 안 돼(사용자 지적) 직접 그린다.
                 HourglassSand(fraction: sandFraction, sand: hourglassColor, frameColor: .muted)
-                    .frame(width: 14, height: 18)
                     .frame(width: 32, height: 30)               // 전원 버튼과 같은 상자
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
                     .contentShape(Rectangle())
@@ -720,54 +719,40 @@ struct BrowserScreen: View {
     }
 }
 
-// 남은 서명일수를 실제 모래시계처럼 그린다: 윗칸 모래가 남은 비율(7일=위 가득/아래 빔),
-// 시간이 지나면 아래로 쌓인다. SF Symbol(hourglass)은 위/아래 반칸 두 단계뿐이라 양 조절이
-// 안 돼(사용자 지적) 두 삼각형과 모래 표면을 직접 그린다. fraction 0…1 = 남은 비율.
+// 남은 서명일수를 **원래 모래시계 아이콘 모양 그대로** 두고 그 안의 모래 양만 조절해 표현한다.
+// SF Symbol의 반쪽 채움 변형(tophalf/bottomhalf.filled)을 잔량만큼만 마스크로 드러낸다 —
+// 윗칸 모래가 남은 비율(7일=위 가득/아래 빔), 시간이 지나면 아래로 쌓인다. ≤3일 앰버(sand 색).
+// (직접 그린 삼각형은 투박하다는 지적으로 폐기.) fraction 0…1 = 남은 비율.
 struct HourglassSand: View {
     var fraction: CGFloat
     var sand: Color
     var frameColor: Color
 
     var body: some View {
+        let f = min(max(fraction, 0), 1)
+        return ZStack {
+            // 1) 원래 아이콘(윤곽) — 흐리게, 항상 전체 모양.
+            symbol("hourglass").foregroundColor(frameColor)
+            // 2) 윗칸 남은 모래: 위 반쪽 채운 아이콘을, 표면(위에서 (1-f)/2 지점) 아래로만 드러냄.
+            symbol("hourglass.tophalf.filled").foregroundColor(sand)
+                .mask(revealBelow((1 - f) / 2))
+            // 3) 아랫칸 쌓인 모래: 아래 반쪽 채운 아이콘을, 표면(위에서 (1+f)/2 지점) 아래로만 드러냄.
+            symbol("hourglass.bottomhalf.filled").foregroundColor(sand)
+                .mask(revealBelow((1 + f) / 2))
+        }
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 18, weight: .regular))
+    }
+
+    // 위에서 `top` 비율만큼 비우고(투명) 그 아래를 드러내는(불투명) 마스크. 심볼은 반쪽만 그려져
+    // 있어 반대편은 어차피 비므로, 표면 아래를 통째로 드러내도 해당 반칸만 채워진다.
+    private func revealBelow(_ top: CGFloat) -> some View {
         GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let cx = w / 2
-            let my = h / 2
-            let f = min(max(fraction, 0), 1)
-            let hw = (w / 2) * f          // 모래 표면 반너비(윗·아랫 공통)
-            let topY = my * (1 - f)       // 윗모래 표면 y(작을수록 가득)
-            let botY = my * (1 + f)       // 아랫모래 표면 y(클수록 빔)
-            ZStack {
-                // 윗 모래: 목(neck)에 얹혀 표면(topY)까지. f=1이면 윗칸 가득.
-                Path { p in
-                    p.move(to: CGPoint(x: cx - hw, y: topY))
-                    p.addLine(to: CGPoint(x: cx + hw, y: topY))
-                    p.addLine(to: CGPoint(x: cx, y: my))
-                    p.closeSubpath()
-                }
-                .fill(sand)
-                // 아랫 모래: 바닥에서 표면(botY)까지 쌓인다. f=1이면 아랫칸 빔.
-                Path { p in
-                    p.move(to: CGPoint(x: cx - hw, y: botY))
-                    p.addLine(to: CGPoint(x: cx + hw, y: botY))
-                    p.addLine(to: CGPoint(x: w, y: h))
-                    p.addLine(to: CGPoint(x: 0, y: h))
-                    p.closeSubpath()
-                }
-                .fill(sand)
-                // 윤곽: 위(역삼각형)·아래(삼각형)가 목에서 만난다.
-                Path { p in
-                    p.move(to: CGPoint(x: 0, y: 0))
-                    p.addLine(to: CGPoint(x: w, y: 0))
-                    p.addLine(to: CGPoint(x: cx, y: my))
-                    p.closeSubpath()
-                    p.move(to: CGPoint(x: cx, y: my))
-                    p.addLine(to: CGPoint(x: 0, y: h))
-                    p.addLine(to: CGPoint(x: w, y: h))
-                    p.closeSubpath()
-                }
-                .stroke(frameColor, lineWidth: 1.4)
+            VStack(spacing: 0) {
+                Spacer(minLength: 0).frame(height: geo.size.height * top)
+                Rectangle()
             }
         }
     }
