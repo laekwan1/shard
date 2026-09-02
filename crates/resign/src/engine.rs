@@ -58,30 +58,39 @@ pub async fn resign_app(
     let dev = DeveloperApi::new(session);
 
     // 2) 팀 (무료 개인 팀은 대개 하나)
+    log("[②③ 팀] 조회...");
     let team = dev
         .list_teams()
         .await?
         .into_iter()
         .next()
-        .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정인지 확인)"))?;
+        .ok_or_else(|| anyhow!("[②③ 팀] 개발 팀 없음(무료 계정인지 확인)"))?;
+    log(&format!("[②③ 팀] {} ({})", team.name, team.team_id));
 
     // 3) 서명 신원(키+인증서) — 저장된 게 유효하면 재사용(재발급/폐기 없음). 이 키가 서명키가 된다.
+    log("[⑤ 인증서] 확보...");
     let (key, apple_cert) =
         ensure_signing_identity(&dev, &team, &req.app_name, &state_dir, log).await?;
 
-    // 4) App ID (있으면 재사용). 식별자는 팀 고유(base.teamId)로 — 전역 유일성 요구(9401) 회피.
-    let effective_bundle_id = team_unique_bundle_id(&req.bundle_id, &team.team_id);
-    let app_id = ensure_app_id(&dev, &team, &effective_bundle_id, &req.app_name).await?;
+    // 4) App ID — **현재 번들ID 그대로** 확보(있으면 재사용). 자기 자신 갱신은 설치된 앱과 같은
+    //    번들ID여야 installation_proxy가 *업그레이드*(데이터 보존)로 처리한다 — 다른 id면 별개 앱이
+    //    돼 버린다. 팀ID 접미는 발급 '테스트'(run_verify_flow)에서만 쓴다(거긴 실앱이 없어 net.sw.shard
+    //    전역충돌을 피하려는 것). 실제 재서명은 req.bundle_id(= 실행 중 번들의 CFBundleIdentifier).
+    log(&format!("[② App ID] 확보... ({})", req.bundle_id));
+    let app_id = ensure_app_id(&dev, &team, &req.bundle_id, &req.app_name).await?;
 
     // 5) 프로파일 (②) — ㉮ 무중단 갱신의 대상이기도 하다.
+    log("[② 프로파일] 발급...");
     let profile = dev.download_profile(&team, &app_id).await?;
+    log(&format!("[② 프로파일] {} bytes.", profile.encoded_profile.len()));
 
     // 6) 재서명 (①): 번들에 프로파일 박고, 프로파일의 Entitlements로 서명.
+    log("[⑤ 서명] 번들 추출·번들ID 맞춤·프로파일·엔티틀먼트...");
     let app_dir = extract_ipa(ipa, &work.join("extracted"))?;
-    // 앱의 CFBundleIdentifier를 발급받은 App ID(팀 고유)와 맞춘다 — 프로파일의 application-identifier와
-    // 안 맞으면 서명/설치/실행이 거부된다. (④ 무중단 자체갱신은 앱의 '현재' 번들ID를 써야 하므로,
-    //  제품에선 이 값을 하드코딩 대신 실행 중 번들에서 읽어와야 한다 — 후속작업.)
-    rewrite_bundle_identifier(&app_dir, &effective_bundle_id)?;
+    // 앱의 CFBundleIdentifier를 발급받은 App ID와 맞춘다 — 프로파일의 application-identifier와 안 맞으면
+    // 서명/설치/실행이 거부된다. 자기 갱신은 req.bundle_id가 이미 실행 중 번들ID라 사실상 no-op이지만,
+    // 포장 과정에서 어긋나지 않게 확정한다.
+    rewrite_bundle_identifier(&app_dir, &req.bundle_id)?;
     fs::write(
         app_dir.join("embedded.mobileprovision"),
         &profile.encoded_profile,
@@ -99,11 +108,13 @@ pub async fn resign_app(
         .map_err(|e| anyhow!("엔티틀먼트 설정: {e:?}"))?;
     UnifiedSigner::new(settings)
         .sign_path(&app_dir, &signed)
-        .map_err(|e| anyhow!("재서명 실패: {e:?}"))?;
+        .map_err(|e| anyhow!("[⑤ 서명] 실패: {e:?}"))?;
+    log("[⑤ 서명] 완료.");
 
     // 7) 설치용 .ipa로 재포장(Payload/<app>).
     let out_ipa = work.join("Shard-signed.ipa");
     repackage_ipa(&signed, &out_ipa)?;
+    log("[⑤ 서명] .ipa 재포장 완료.");
     Ok(out_ipa)
 }
 
@@ -175,11 +186,16 @@ pub fn resign_and_install_blocking(
         let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await?;
         log("서명 완료.");
         if let (Some(addr), Some(pairing_path)) = (p.device_addr, p.pairing_path.as_ref()) {
-            log("기기에 설치 중...");
-            let pairing = fs::read(pairing_path).context("페어링 파일 읽기")?;
-            let provider = crate::install::tcp_provider(addr, &pairing, "shard-resign")?;
-            crate::install::install_or_upgrade_app(&provider, &signed).await?;
-            log("설치 완료.");
+            log(&format!("[④ 설치] lockdownd 연결({addr})..."));
+            let pairing =
+                fs::read(pairing_path).map_err(|e| anyhow!("[④ 설치] 페어링 읽기 실패: {e}"))?;
+            let provider = crate::install::tcp_provider(addr, &pairing, "shard-resign")
+                .map_err(|e| anyhow!("[④ 설치] provider 실패: {e:#}"))?;
+            log("[④ 설치] 앱 업그레이드 설치(installation_proxy)...");
+            crate::install::install_or_upgrade_app(&provider, &signed)
+                .await
+                .map_err(|e| anyhow!("[④ 설치] 실패: {e:#}"))?;
+            log("[④ 설치] 완료 — 앱이 교체됩니다. 앱을 다시 열어 주세요.");
         }
         Ok(signed)
     });
@@ -188,6 +204,42 @@ pub fn resign_and_install_blocking(
         crate::auth::AppleSession::clear_session(&p.state_dir);
     }
     result
+}
+
+/// ④+⑤ 자기 자신 갱신 — 실행 중인 앱 번들을 미서명 .ipa로 싸서 발급→재서명→(터널이 있으면)설치까지
+/// 한 흐름으로. `app_bundle`은 실행 중 `.app` 경로(Bundle.main.bundlePath), `req.bundle_id`는 그 번들의
+/// 현재 CFBundleIdentifier(같아야 in-place 업그레이드). 단계별 로그로 어디서 막히는지 드러낸다.
+pub fn resign_selfupdate_blocking(
+    req: ResignRequest,
+    app_bundle: PathBuf,
+    state_dir: PathBuf,
+    work_dir: PathBuf,
+    device_addr: Option<IpAddr>,
+    pairing_path: Option<PathBuf>,
+    tfa: &dyn Fn() -> String,
+    log: &mut dyn FnMut(&str),
+) -> Result<PathBuf> {
+    // 실행 중 번들을 미서명 .ipa(Payload/<app>)로 포장한다. 앱은 자기 번들을 읽을 수 있다.
+    log("자기 번들 포장 중(미서명 .ipa)...");
+    fs::create_dir_all(&work_dir).context("작업 폴더 생성")?;
+    let unsigned_ipa = work_dir.join("self-unsigned.ipa");
+    let _ = fs::remove_file(&unsigned_ipa);
+    repackage_ipa(&app_bundle, &unsigned_ipa)
+        .map_err(|e| anyhow!("[포장] 자기 번들 .ipa 실패: {e:#}"))?;
+    log(&format!(
+        "포장 완료({} bytes). 발급→재서명→설치 진행...",
+        fs::metadata(&unsigned_ipa).map(|m| m.len()).unwrap_or(0)
+    ));
+
+    let params = ResignAndInstall {
+        req,
+        ipa: unsigned_ipa,
+        state_dir,
+        work_dir,
+        device_addr,
+        pairing_path,
+    };
+    resign_and_install_blocking(params, tfa, log)
 }
 
 /// ④ 1단계 스모크 테스트(동기, iOS C ABI용) — 터널+페어링으로 lockdownd에 붙는지 확인.

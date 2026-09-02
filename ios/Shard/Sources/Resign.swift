@@ -167,6 +167,33 @@ final class ResignModel: ObservableObject {
         else { errorText = obj["error"] as? String ?? "알 수 없는 오류" }
     }
 
+    /// ④+⑤ 자기 자신 갱신 — 발급→재서명→(터널+페어링)설치. 실행 중 번들ID/경로를 그대로 넘긴다.
+    func selfUpdate(email: String, password: String, addr: String) {
+        guard !running, hasPairing else { return }
+        running = true
+        logLines = []; summary = nil; errorText = nil
+        lastEmail = email
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        let bundlePath = Bundle.main.bundlePath
+        let bundleId = Bundle.main.bundleIdentifier ?? "net.sw.shard"
+        let sd = stateDir
+        let work = URL(fileURLWithPath: sd).appendingPathComponent("work").path
+        let pairing = pairingURL.path
+        DispatchQueue.global(qos: .userInitiated).async {
+            // 실행 중 번들ID로 재서명해야 in-place 업그레이드가 된다(Bundle.main.bundleIdentifier).
+            let raw: UnsafeMutablePointer<CChar>? =
+                email.withCString { e in password.withCString { p in bundleId.withCString { b in
+                "Shard".withCString { n in bundlePath.withCString { ab in sd.withCString { s in
+                work.withCString { w in addr.withCString { a in pairing.withCString { pr in
+                    shard_resign_selfupdate(e, p, b, n, ab, s, w, a, pr,
+                                            ResignModel.tfaCb, ResignModel.logCb, ctx)
+                }}}}}}}}}
+            let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
+            if let raw = raw { shard_string_free(raw) }
+            DispatchQueue.main.async { self.finishProbe(json) }
+        }
+    }
+
     func run(email: String, password: String) {
         guard !running else { return }
         running = true
@@ -382,6 +409,21 @@ struct ResignView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .disabled(!model.hasPairing || model.running)
+
+                        // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
+                        Button {
+                            model.selfUpdate(email: email, password: password, addr: probeAddr)
+                        } label: {
+                            Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(canSelfUpdate ? Color.accent : Color.toolbar)
+                                .foregroundColor(canSelfUpdate ? .onAccent : .muted)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .disabled(!canSelfUpdate)
+                        Text("위 Apple ID로 발급 → 자기 자신 재서명 → 설치까지. StosVPN 켜고 페어링·비밀번호 필요. 끝나면 앱을 다시 여세요.")
+                            .font(.caption2).foregroundColor(.muted)
                     }
                     .fileImporter(isPresented: $showPairingPicker, allowedContentTypes: [.item]) { result in
                         if case .success(let url) = result { model.importPairing(from: url) }
@@ -466,6 +508,10 @@ struct ResignView: View {
 
     private var runnable: Bool {
         !model.running && !email.isEmpty && !password.isEmpty
+    }
+
+    private var canSelfUpdate: Bool {
+        model.hasPairing && !model.running && !email.isEmpty && !password.isEmpty
     }
 
     @ViewBuilder

@@ -85,6 +85,16 @@ char *shard_resign_verify(const char *email, const char *password,
 char *shard_resign_probe(const char *pairing_path, const char *addr,
                          ShardLog log, void *ctx);
 
+// ④+⑤ 자기 자신 갱신: 실행 중 앱 번들을 재서명해 자기 자신에 업그레이드 설치까지. bundle_id는 실행
+// 중 번들의 CFBundleIdentifier(같아야 in-place), app_bundle_path는 Bundle.main.bundlePath.
+// device_addr(터널)+pairing_path가 있으면 설치까지, NULL이면 서명만. 소유 JSON 반환, shard_string_free.
+char *shard_resign_selfupdate(const char *email, const char *password,
+                              const char *bundle_id, const char *app_name,
+                              const char *app_bundle_path, const char *state_dir,
+                              const char *work_dir, const char *device_addr,
+                              const char *pairing_path, ShardTfa tfa,
+                              ShardLog log, void *ctx);
+
 // The bypass engine: a local HTTP/CONNECT proxy that applies the DPI/SNI
 // desync. shard_start binds 127.0.0.1:<port> (0 = any free port) and returns the
 // bound port, or a negative error. The WebView is then pointed at that port.

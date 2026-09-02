@@ -148,6 +148,81 @@ pub unsafe extern "C" fn shard_resign_verify(
     }
 }
 
+/// ④+⑤ 자기 자신 갱신: 실행 중 앱 번들을 재서명해 자기 자신에 업그레이드 설치까지 한 흐름으로.
+/// `bundle_id`는 실행 중 번들의 CFBundleIdentifier(같아야 in-place 업그레이드), `app_bundle_path`는
+/// Bundle.main.bundlePath. `device_addr`(터널)+`pairing_path`가 있으면 설치까지, 없으면 서명만.
+/// 반환 {"ok":true,"path":"<서명된 .ipa>"} 또는 {"ok":false,"error":"[단계] ..."}.
+///
+/// # Safety
+/// 문자열 인자는 유효한 NUL 종단 UTF-8. device_addr/pairing_path는 NULL 가능. tfa/log는 이 스레드에서.
+#[no_mangle]
+pub unsafe extern "C" fn shard_resign_selfupdate(
+    email: *const c_char,
+    password: *const c_char,
+    bundle_id: *const c_char,
+    app_name: *const c_char,
+    app_bundle_path: *const c_char,
+    state_dir: *const c_char,
+    work_dir: *const c_char,
+    device_addr: *const c_char,
+    pairing_path: *const c_char,
+    tfa: ShardTfa,
+    log: ShardLog,
+    ctx: *mut c_void,
+) -> *mut c_char {
+    macro_rules! required {
+        ($p:expr, $name:expr) => {
+            match unsafe { arg($p) } {
+                Some(s) => s,
+                None => return err(concat!($name, "이(가) 없습니다")),
+            }
+        };
+    }
+    let email = required!(email, "이메일");
+    let password = required!(password, "비밀번호");
+    let bundle_id = required!(bundle_id, "번들 ID");
+    let app_name = required!(app_name, "앱 이름");
+    let app_bundle_path = required!(app_bundle_path, "앱 번들 경로");
+    let state_dir = required!(state_dir, "상태 폴더");
+    let work_dir = required!(work_dir, "작업 폴더");
+    let device_addr = unsafe { arg(device_addr) }.and_then(|s| IpAddr::from_str(&s).ok());
+    let pairing_path = unsafe { arg(pairing_path) }.map(PathBuf::from);
+
+    let tfa_fn = || -> String {
+        let p = tfa(ctx);
+        if p.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(p) }.to_str().unwrap_or("").to_string()
+        }
+    };
+    let mut log_fn = |line: &str| {
+        if let Ok(c) = CString::new(line) {
+            log(ctx, c.as_ptr());
+        }
+    };
+
+    let req = resign::engine::ResignRequest {
+        email,
+        password,
+        bundle_id,
+        app_name,
+    };
+    match resign::engine::resign_selfupdate_blocking(
+        req,
+        PathBuf::from(app_bundle_path),
+        PathBuf::from(state_dir),
+        PathBuf::from(work_dir),
+        device_addr,
+        pairing_path,
+        &tfa_fn,
+        &mut log_fn,
+    ) {
+        Ok(path) => ok(&path.to_string_lossy()),
+        Err(e) => err(&format!("{e:#}")),
+    }
+}
+
 /// ④ 1단계 스모크 테스트: 페어링 파일 + 터널 주소로 폰 lockdownd에 붙는지 확인.
 /// 반환 {"ok":true,"path":"lockdownd 통과 — iOS …"} 또는 {"ok":false,"error":"…"}.
 ///
