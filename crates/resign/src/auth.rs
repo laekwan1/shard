@@ -243,6 +243,8 @@ impl Transport for AppleSession {
         headers.insert("Accept-Language".into(), "en-us".into());
         headers.insert("X-Apple-I-Identity-Id".into(), adsid);
         headers.insert("X-Apple-GS-Token".into(), token);
+        // Dadoum이 보내는데 우리가 빠뜨렸던 것 — 없으면 애플이 HTML 에러페이지를 돌려준다.
+        headers.insert("User-Agent".into(), "Xcode".into());
 
         let mut xml = Vec::new();
         plist::to_writer_xml(&mut xml, &Value::Dictionary(body)).context("요청 plist 직렬화")?;
@@ -253,9 +255,13 @@ impl Transport for AppleSession {
             rb = rb.header(k, v);
         }
         let resp = rb.send().await.context("개발자 포털 POST")?;
+        let status = resp.status();
         let bytes = resp.bytes().await.context("포털 응답 읽기")?;
 
-        // 포털 응답은 GSA와 달리 dict가 최상위(resultCode 포함).
-        plist::from_bytes(&bytes).context("포털 응답 plist")
+        // 포털 응답은 dict가 최상위(resultCode 포함). plist가 아니면(HTML 에러 등) 상태·본문을 드러낸다.
+        plist::from_bytes(&bytes).map_err(|e| {
+            let snippet: String = String::from_utf8_lossy(&bytes).chars().take(200).collect();
+            anyhow!("포털 응답 파싱 실패 (HTTP {status}): {e} — 본문: {snippet}")
+        })
     }
 }
