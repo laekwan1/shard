@@ -272,9 +272,6 @@ struct BrowserScreen: View {
         return .onSurface
     }
 
-    // 남은 '모래 양' 비율(0~1). SigningInfo.fraction()로 onAppear에서 채운다 — 실제 남은 시간을
-    // 초 단위로 반영해(정수 일수 아님) 갓 설치는 거의 가득(≈1)에서 시작한다.
-    @State private var sandFraction: CGFloat = 0
 
     private var addressPanel: some View {
         HStack(spacing: 10) {
@@ -327,8 +324,7 @@ struct BrowserScreen: View {
                 Divider().frame(height: 22).background(Color.toolbar)
                 // 실제 모래시계처럼: 남은 일수가 '윗칸 모래'(7일=위 가득/아래 빔), 지난 만큼 아래로 쌓인다.
                 // SF Symbol은 위/아래 반칸 두 단계뿐이라 양 조절이 안 돼(사용자 지적) 직접 그린다.
-                HourglassSand(fraction: sandFraction, sand: hourglassColor, frameColor: .muted)
-                    .frame(width: 15, height: 22)               // 세로형 모래시계
+                HourglassSand(fraction: SigningInfo.fraction(), sand: hourglassColor, frameColor: .muted)
                     .frame(width: 32, height: 30)               // 전원 버튼과 같은 상자(가운데 정렬)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
                     .contentShape(Rectangle())
@@ -350,7 +346,6 @@ struct BrowserScreen: View {
         .sheet(isPresented: $showResign) { ResignView() }
         .onAppear {
             if signDaysLeft == nil { signDaysLeft = SigningInfo.daysLeft() }
-            sandFraction = SigningInfo.fraction()
         }
     }
 
@@ -720,59 +715,40 @@ struct BrowserScreen: View {
     }
 }
 
-// 남은 서명일수를 실제 모래시계처럼: 곡선 실루엣 안에서 '윗칸 모래'가 남은 비율(7일=위 가득/아래 빔),
-// 시간이 지나면 아래로 쌓인다. SF Symbol 반쪽 채움 변형은 기기에서 위/아래가 뒤집혀 렌더됐고(폰 확인),
-// 각진 삼각형은 투박했다(지적) → 직접 그린 곡선 실루엣에 모래를 클립하고 잔량 띠만 드러내 방향을
-// 확실히 제어한다. 모래는 sand 색(다크 UI라 밝게, ≤3일 앰버), 윤곽은 frameColor. fraction 0…1.
+// 남은 서명일수를 **원래 모래시계 아이콘(SF Symbol)** 으로 표현한다(사용자가 이 디자인으로 복귀 요청).
+// 흐린 `hourglass` 윤곽 위에 `hourglass.tophalf.filled`(윗칸 모래=남은 시간)·`bottomhalf.filled`
+// (아랫칸 모래=지난 시간)를 겹치고, 잔량 비율만큼만 마스크로 드러낸다 — 7일=위 가득/아래 빔, 지날수록
+// 아래로 쌓인다. ≤3일이면 sand=앰버. (SF Symbol 의미는 문자 그대로 확인됨: tophalf=위, bottomhalf=아래.)
+// **잔량(fraction)은 호출부에서 SigningInfo.fraction()으로 매번 계산해 넘긴다** — @State로 캐시하면
+// onAppear 타이밍에 0으로 남아 위/아래가 뒤집혀 보였다(폰 확인). 실시간 계산이라 그 문제가 없다.
 struct HourglassSand: View {
     var fraction: CGFloat
     var sand: Color
     var frameColor: Color
 
     var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let f = min(max(fraction, 0), 1)
-            let cy = h / 2
-            let topSurf = cy * (1 - f)      // 윗모래 표면 y(작을수록 가득)
-            let botSurf = cy * (1 + f)      // 아랫모래 표면 y(클수록 빔)
-            ZStack {
-                // 모래: 실루엣을 채우되 잔량 띠(윗칸 표면~목, 아랫칸 바닥~표면)만 마스크로 드러냄.
-                // 실루엣이 목으로 좁아져 자연히 삼각형처럼 찬다.
-                HourglassShape()
-                    .fill(sand)
-                    .mask(
-                        Path { p in
-                            p.addRect(CGRect(x: 0, y: topSurf, width: w, height: max(0, cy - topSurf)))
-                            p.addRect(CGRect(x: 0, y: botSurf, width: w, height: max(0, h - botSurf)))
-                        }
-                    )
-                HourglassShape()
-                    .stroke(frameColor, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
-            }
+        let f = min(max(fraction, 0), 1)
+        return ZStack {
+            symbol("hourglass").foregroundColor(frameColor)              // 빈 모래시계 윤곽
+            symbol("hourglass.tophalf.filled").foregroundColor(sand)     // 윗칸 남은 모래
+                .mask(revealBelow((1 - f) / 2))
+            symbol("hourglass.bottomhalf.filled").foregroundColor(sand)  // 아랫칸 쌓인 모래
+                .mask(revealBelow((1 + f) / 2))
         }
     }
-}
 
-// 곡선 옆면 + 살짝의 목 너비를 가진 모래시계 실루엣(상하 대칭). 각진 나비넥타이(뾰족한 목·직선
-// 옆면)는 투박하다는 지적으로 폐기 — 오목한 곡선으로 매끈하게. 목업(7/3.5/1/0일)으로 확인.
-struct HourglassShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
-        let cx = w / 2, cy = h / 2
-        let inset = w * 0.05
-        let nw = w * 0.065                 // 목 반너비(0이면 뾰족 → 살짝 준다)
-        let bow = (w / 2 - inset) * 0.28
-        var p = Path()
-        p.move(to: CGPoint(x: inset, y: inset))
-        p.addLine(to: CGPoint(x: w - inset, y: inset))
-        p.addQuadCurve(to: CGPoint(x: cx + nw, y: cy), control: CGPoint(x: cx + bow, y: cy * 0.55))
-        p.addQuadCurve(to: CGPoint(x: w - inset, y: h - inset), control: CGPoint(x: cx + bow, y: cy * 1.45))
-        p.addLine(to: CGPoint(x: inset, y: h - inset))
-        p.addQuadCurve(to: CGPoint(x: cx - nw, y: cy), control: CGPoint(x: cx - bow, y: cy * 1.45))
-        p.addQuadCurve(to: CGPoint(x: inset, y: inset), control: CGPoint(x: cx - bow, y: cy * 0.55))
-        p.closeSubpath()
-        return p
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 18, weight: .regular))
+    }
+
+    // 위에서 `top` 비율만큼 비우고(투명) 그 아래[top…1]를 드러내는(불투명) 마스크. 반쪽 심볼은 해당
+    // 반칸에만 그려져 있어, 표면 아래를 통째로 드러내도 그 반칸에서 잔량만큼만 채워진다.
+    private func revealBelow(_ top: CGFloat) -> some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0).frame(height: geo.size.height * top)
+                Rectangle()
+            }
+        }
     }
 }
