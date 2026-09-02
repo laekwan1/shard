@@ -38,6 +38,18 @@ const GSA_ENDPOINT: &str = "https://gsa.apple.com/grandslam/GsService2";
 type XcodeGcm = AesGcm<Aes256, aes_gcm::aead::consts::U16>;
 type HmacSha256 = Hmac<Sha256>;
 
+/// gsa.apple.com은 **애플 자체 루트 CA**로 서명돼 webpki 기본 루트로는 `UnknownIssuer`가 난다
+/// (폰 로그로 확인). icloud_auth의 로그인 클라이언트가 애플 루트를 명시적으로 추가하는 이유.
+/// 공개 루트 + 애플 루트를 모두 신뢰하는 클라이언트를 만든다.
+fn apple_client() -> Result<reqwest::Client> {
+    let root = reqwest::Certificate::from_der(include_bytes!("apple_root.der"))
+        .context("애플 루트 인증서")?;
+    reqwest::Client::builder()
+        .add_root_certificate(root)
+        .build()
+        .context("reqwest 클라이언트")
+}
+
 /// 로그인된 애플 세션. ②(Developer API)가 이 세션의 dsid·anisette·GS 토큰을 실어 요청한다.
 pub struct AppleSession {
     account: AppleAccount,
@@ -149,7 +161,7 @@ impl AppleSession {
         let mut xml = Vec::new();
         plist::to_writer_xml(&mut xml, &Value::Dictionary(req)).context("plist 직렬화")?;
 
-        let client = reqwest::Client::new();
+        let client = apple_client()?;
         let resp = client
             .post(GSA_ENDPOINT)
             .header("Content-Type", "text/x-xml-plist")
@@ -235,7 +247,7 @@ impl Transport for AppleSession {
         let mut xml = Vec::new();
         plist::to_writer_xml(&mut xml, &Value::Dictionary(body)).context("요청 plist 직렬화")?;
 
-        let client = reqwest::Client::new();
+        let client = apple_client()?;
         let mut rb = client.post(url).body(xml);
         for (k, v) in headers {
             rb = rb.header(k, v);
