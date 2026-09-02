@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // 현재 앱 서명의 남은 유효기간. 앱 번들의 `embedded.mobileprovision`(현재 서명한 도구가 넣은 것 —
 // 지금은 SideStore/Sideloadly, 나중엔 우리 엔진)의 ExpirationDate를 읽는다. 모래시계가 이 값을 담는다.
@@ -118,6 +119,54 @@ final class ResignModel: ObservableObject {
         return base.path
     }
 
+    // ④ 페어링 파일(신뢰 자격) — state_dir에 저장. 폰마다 고유라 내장 불가, 1회 임포트해 재사용.
+    var pairingURL: URL {
+        URL(fileURLWithPath: stateDir).appendingPathComponent("pairing.plist")
+    }
+    var hasPairing: Bool { FileManager.default.fileExists(atPath: pairingURL.path) }
+
+    /// Files에서 고른 페어링 파일을 state_dir에 복사(보안 스코프 처리). hasPairing 갱신을 알린다.
+    func importPairing(from url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        objectWillChange.send()
+        guard let data = try? Data(contentsOf: url) else {
+            errorText = "페어링 파일을 읽지 못했습니다"; return
+        }
+        do { try data.write(to: pairingURL) } catch {
+            errorText = "페어링 저장 실패: \(error.localizedDescription)"; return
+        }
+        summary = "페어링 파일 임포트 완료"
+    }
+
+    /// ④ 1단계 스모크 테스트 — 페어링+터널 주소로 lockdownd에 붙는지 확인(설치의 전제인 전송 계층).
+    func probe(addr: String) {
+        guard !running, hasPairing else { return }
+        running = true
+        logLines = []; summary = nil; errorText = nil
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let raw = self.pairingURL.path.withCString { p in
+                addr.withCString { a in
+                    shard_resign_probe(p, a, ResignModel.logCb, ctx)
+                }
+            }
+            let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
+            if let raw = raw { shard_string_free(raw) }
+            DispatchQueue.main.async { self.finishProbe(json) }
+        }
+    }
+
+    // 프로브 결과 처리 — 발급(finish)과 달리 계정을 기록하지 않는다.
+    private func finishProbe(_ json: String) {
+        running = false
+        guard let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { errorText = "응답 파싱 실패"; return }
+        if (obj["ok"] as? Bool) == true { summary = obj["path"] as? String }
+        else { errorText = obj["error"] as? String ?? "알 수 없는 오류" }
+    }
+
     func run(email: String, password: String) {
         guard !running else { return }
         running = true
@@ -225,6 +274,8 @@ struct ResignView: View {
     @AppStorage("resign.email") private var email = ""
     @State private var password = ""
     @State private var tfaInput = ""
+    @State private var showPairingPicker = false
+    @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -299,6 +350,41 @@ struct ResignView: View {
                     }
                     if let e = model.errorText {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
+                    }
+
+                    // ④ 설치 연결 테스트 — 페어링+터널로 폰 lockdownd에 붙는지(설치의 전제) 확인.
+                    // StosVPN/LocalDevVPN을 켠 상태에서 눌러야 한다.
+                    Divider().background(Color.toolbar)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("④ 설치 연결 테스트 (실험)").font(.caption).foregroundColor(.muted)
+                        HStack(spacing: 8) {
+                            Image(systemName: model.hasPairing ? "checkmark.seal.fill" : "doc.badge.plus")
+                                .foregroundColor(model.hasPairing ? .accent : .muted)
+                            Text(model.hasPairing ? "페어링 파일 있음" : "페어링 파일 없음")
+                                .font(.footnote).foregroundColor(.onSurface)
+                            Spacer()
+                            Button(model.hasPairing ? "교체" : "가져오기") { showPairingPicker = true }
+                                .font(.footnote.weight(.semibold)).foregroundColor(.accent)
+                        }
+                        labeled("터널 주소 (StosVPN 기본 10.7.0.1)") {
+                            TextField("10.7.0.1", text: $probeAddr)
+                                .keyboardType(.numbersAndPunctuation)
+                                .disableAutocorrection(true)
+                        }
+                        Button {
+                            model.probe(addr: probeAddr)
+                        } label: {
+                            Text(model.running ? "확인 중..." : "연결 테스트")
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
+                                .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .disabled(!model.hasPairing || model.running)
+                    }
+                    .fileImporter(isPresented: $showPairingPicker, allowedContentTypes: [.item]) { result in
+                        if case .success(let url) = result { model.importPairing(from: url) }
                     }
 
                     if !model.logLines.isEmpty {

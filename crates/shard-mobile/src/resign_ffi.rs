@@ -148,6 +148,45 @@ pub unsafe extern "C" fn shard_resign_verify(
     }
 }
 
+/// ④ 1단계 스모크 테스트: 페어링 파일 + 터널 주소로 폰 lockdownd에 붙는지 확인.
+/// 반환 {"ok":true,"path":"lockdownd 통과 — iOS …"} 또는 {"ok":false,"error":"…"}.
+///
+/// # Safety
+/// 문자열 인자는 유효한 NUL 종단 UTF-8. `log`는 이 스레드에서 `ctx`와 함께 호출된다.
+#[no_mangle]
+pub unsafe extern "C" fn shard_resign_probe(
+    pairing_path: *const c_char,
+    addr: *const c_char,
+    log: ShardLog,
+    ctx: *mut c_void,
+) -> *mut c_char {
+    let pairing_path = match unsafe { arg(pairing_path) } {
+        Some(s) => s,
+        None => return err("페어링 경로가 없습니다"),
+    };
+    let addr_s = match unsafe { arg(addr) } {
+        Some(s) => s,
+        None => return err("주소가 없습니다"),
+    };
+    let addr = match IpAddr::from_str(&addr_s) {
+        Ok(a) => a,
+        Err(_) => return err("주소 형식이 잘못됨(예: 10.7.0.1)"),
+    };
+    let pairing = match std::fs::read(&pairing_path) {
+        Ok(b) => b,
+        Err(e) => return err(&format!("페어링 파일 읽기 실패: {e}")),
+    };
+    let mut log_fn = |line: &str| {
+        if let Ok(c) = CString::new(line) {
+            log(ctx, c.as_ptr());
+        }
+    };
+    match resign::engine::probe_lockdownd_blocking(addr, pairing, &mut log_fn) {
+        Ok(s) => ok(&s),
+        Err(e) => err(&format!("{e:#}")),
+    }
+}
+
 unsafe fn arg(p: *const c_char) -> Option<String> {
     if p.is_null() {
         None

@@ -20,7 +20,7 @@ use anyhow::{anyhow, Result};
 use idevice::{
     pairing_file::PairingFile,
     provider::{IdeviceProvider, TcpProvider},
-    services::misagent::MisagentClient,
+    services::{lockdown::LockdownClient, misagent::MisagentClient},
     utils::installation::install_package,
     IdeviceService,
 };
@@ -52,4 +52,52 @@ pub async fn install_or_upgrade_app(provider: &dyn IdeviceProvider, ipa: &Path) 
     install_package(provider, ipa, None)
         .await
         .map_err(|e| anyhow!("앱 설치: {e:?}"))
+}
+
+/// ④ 1단계 스모크 테스트 — 터널(StosVPN/LocalDevVPN)+페어링으로 폰 lockdownd에 실제로 붙는지 확인한다.
+/// 설치(㉯)·프로파일(㉮)의 전제인 **전송 계층**을 먼저 증명하는 make-or-break: 여기가 되면 나머지는
+/// 그 위에 얹힌다. 안 되면 그대로의 에러(연결/페어링/주소 중 무엇인지)로 다음 수를 정한다.
+///   connect → GetValue(ProductVersion)  : 연결이 되는지(세션 전에도 읽힘)
+///   start_session(pairing)              : 페어링이 유효한지(SSL 핸드셰이크)
+///   DeviceName·UDID                     : 부가 확인
+pub async fn probe_lockdownd(
+    addr: IpAddr,
+    pairing: &[u8],
+    log: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let provider = tcp_provider(addr, pairing, "shard-probe")?;
+    log(&format!("lockdownd 연결 중... ({addr}:{})", LockdownClient::LOCKDOWND_PORT));
+    let mut lockdown = LockdownClient::connect(&provider)
+        .await
+        .map_err(|e| anyhow!("lockdownd 연결 실패(터널/주소 확인): {e:?}"))?;
+
+    log("연결됨. ProductVersion 질의...");
+    let version = lockdown
+        .get_value(Some("ProductVersion"), None)
+        .await
+        .map_err(|e| anyhow!("ProductVersion 질의 실패: {e:?}"))?;
+    let version = version.as_string().unwrap_or("?").to_string();
+
+    log(&format!("iOS {version}. 세션 시작(페어링 검증)..."));
+    let pairing_file =
+        PairingFile::from_bytes(pairing).map_err(|e| anyhow!("페어링 파싱: {e:?}"))?;
+    lockdown
+        .start_session(&pairing_file)
+        .await
+        .map_err(|e| anyhow!("세션 시작 실패(페어링 무효/만료 가능): {e:?}"))?;
+    log("세션 OK — 페어링 유효, lockdownd 통과.");
+
+    let name = lockdown
+        .get_value(Some("DeviceName"), None)
+        .await
+        .ok()
+        .and_then(|v| v.as_string().map(str::to_string))
+        .unwrap_or_default();
+    let udid = lockdown
+        .get_value(Some("UniqueDeviceID"), None)
+        .await
+        .ok()
+        .and_then(|v| v.as_string().map(str::to_string))
+        .unwrap_or_default();
+    Ok(format!("lockdownd 통과 — iOS {version}, 기기 '{name}', UDID {udid}"))
 }

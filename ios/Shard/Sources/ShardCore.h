@@ -79,6 +79,12 @@ char *shard_resign_verify(const char *email, const char *password,
                           const char *state_dir, ShardTfa tfa, ShardLog log,
                           void *ctx);
 
+// ④ 1단계 스모크 테스트: 페어링 파일 + 터널 주소(예: 10.7.0.1)로 폰 lockdownd에 붙는지 확인.
+// 소유 JSON {"ok":true,"path":"lockdownd 통과 — iOS ..."} 또는 {"ok":false,"error":"..."} 반환;
+// shard_string_free로 해제. log로 단계 진행을 화면에 스트리밍.
+char *shard_resign_probe(const char *pairing_path, const char *addr,
+                         ShardLog log, void *ctx);
+
 // The bypass engine: a local HTTP/CONNECT proxy that applies the DPI/SNI
 // desync. shard_start binds 127.0.0.1:<port> (0 = any free port) and returns the
 // bound port, or a negative error. The WebView is then pointed at that port.
