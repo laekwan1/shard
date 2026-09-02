@@ -64,14 +64,19 @@ pub async fn resign_app(
     let key = generate_rsa_signing_key(&req.app_name)?;
     let apple_cert = ensure_certificate(&dev, &team, &req.app_name, &key).await?;
 
-    // 4) App ID (있으면 재사용)
-    let app_id = ensure_app_id(&dev, &team, &req.bundle_id, &req.app_name).await?;
+    // 4) App ID (있으면 재사용). 식별자는 팀 고유(base.teamId)로 — 전역 유일성 요구(9401) 회피.
+    let effective_bundle_id = team_unique_bundle_id(&req.bundle_id, &team.team_id);
+    let app_id = ensure_app_id(&dev, &team, &effective_bundle_id, &req.app_name).await?;
 
     // 5) 프로파일 (②) — ㉮ 무중단 갱신의 대상이기도 하다.
     let profile = dev.download_profile(&team, &app_id).await?;
 
     // 6) 재서명 (①): 번들에 프로파일 박고, 프로파일의 Entitlements로 서명.
     let app_dir = extract_ipa(ipa, &work.join("extracted"))?;
+    // 앱의 CFBundleIdentifier를 발급받은 App ID(팀 고유)와 맞춘다 — 프로파일의 application-identifier와
+    // 안 맞으면 서명/설치/실행이 거부된다. (④ 무중단 자체갱신은 앱의 '현재' 번들ID를 써야 하므로,
+    //  제품에선 이 값을 하드코딩 대신 실행 중 번들에서 읽어와야 한다 — 후속작업.)
+    rewrite_bundle_identifier(&app_dir, &effective_bundle_id)?;
     fs::write(
         app_dir.join("embedded.mobileprovision"),
         &profile.encoded_profile,
@@ -217,8 +222,12 @@ pub fn verify_apple_flow_blocking(
         let _cert = ensure_certificate(&dev, &team, &app_name, &key).await?;
         log("인증서 OK.");
 
-        log("App ID 확보...");
-        let app_id = ensure_app_id(&dev, &team, &bundle_id, &app_name).await?;
+        // App ID 식별자는 애플 전역에서 고유해야 한다 — 다른 계정이 net.sw.shard를 선점하면
+        // 9401("An App ID with Identifier … is not available")로 막힌다(폰 로그로 확인). 팀 ID를
+        // 붙이면 계정마다 고유해져 충돌이 없다(AltStore/SideStore와 동일 방식; 팀 ID는 전역 고유).
+        let effective_bundle_id = team_unique_bundle_id(&bundle_id, &team.team_id);
+        log(&format!("App ID 확보... ({effective_bundle_id})"));
+        let app_id = ensure_app_id(&dev, &team, &effective_bundle_id, &app_name).await?;
         log(&format!("App ID: {}", app_id.identifier));
 
         log("프로파일 발급...");
@@ -318,6 +327,29 @@ async fn ensure_app_id(
         .into_iter()
         .find(|a| a.identifier == bundle_id)
         .ok_or_else(|| anyhow!("등록한 App ID를 못 찾음"))
+}
+
+/// App ID 식별자를 팀 고유로 만든다: `base.teamId`. App ID는 애플 전역에서 유일해야 해서
+/// 여러 계정이 같은 base(net.sw.shard)를 못 쓴다(9401) — 팀 ID(전역 유일)를 붙여 회피한다.
+fn team_unique_bundle_id(base: &str, team_id: &str) -> String {
+    format!("{base}.{team_id}")
+}
+
+/// 앱 번들 Info.plist의 CFBundleIdentifier를 바꾼다(팀 고유 App ID와 일치시키려고).
+/// Info.plist는 대개 바이너리 plist라, plist 크레이트로 읽어 값만 고쳐 다시 바이너리로 쓴다.
+/// 안 맞추면 프로파일의 application-identifier(teamId.식별자)와 어긋나 서명/설치/실행이 거부된다.
+fn rewrite_bundle_identifier(app_dir: &Path, bundle_id: &str) -> Result<()> {
+    let plist_path = app_dir.join("Info.plist");
+    let mut dict = Value::from_file(&plist_path)
+        .map_err(|e| anyhow!("Info.plist 읽기: {e:?}"))?
+        .into_dictionary()
+        .ok_or_else(|| anyhow!("Info.plist가 딕셔너리가 아님"))?;
+    dict.insert("CFBundleIdentifier".into(), bundle_id.into());
+    let mut buf = Vec::new();
+    plist::to_writer_binary(&mut buf, &Value::Dictionary(dict))
+        .map_err(|e| anyhow!("Info.plist 직렬화: {e:?}"))?;
+    fs::write(&plist_path, buf).context("Info.plist 쓰기")?;
+    Ok(())
 }
 
 /// mobileprovision(CMS로 감싼 plist)에서 Entitlements를 뽑아 XML로. (Dadoum sign.d의 profilePlist["Entitlements"].)
