@@ -98,19 +98,22 @@ pub struct ProvisioningProfile {
 
 pub struct DeveloperApi<T: Transport> {
     transport: T,
-    device: DeviceType,
 }
 
 impl<T: Transport> DeveloperApi<T> {
     pub fn new(transport: T) -> Self {
-        Self {
-            transport,
-            device: DeviceType::IOs,
-        }
+        Self { transport }
     }
 
     /// 공통 층: 기본 파라미터를 넣고 보내고 resultCode를 검사한다(원본 `sendRequest`).
-    async fn send(&self, action: &str, mut params: Dictionary) -> Result<Dictionary> {
+    /// `device`는 URL 세그먼트를 정한다 — listTeams/viewDeveloper는 `Any`(세그먼트 없음),
+    /// 인증서·App ID·프로파일은 `IOs`(`ios/`). 이걸 틀리면 404가 난다(폰 로그로 확인).
+    async fn send(
+        &self,
+        action: &str,
+        device: DeviceType,
+        mut params: Dictionary,
+    ) -> Result<Dictionary> {
         params.insert("clientId".into(), CLIENT_ID.into());
         params.insert("protocolVersion".into(), PROTOCOL_VERSION.into());
         params.insert(
@@ -122,7 +125,7 @@ impl<T: Transport> DeveloperApi<T> {
             Value::Array(vec!["en_US".into()]),
         );
 
-        let url = portal_url(self.device, action);
+        let url = portal_url(device, action);
         let resp = self.transport.post_plist(&url, params).await?;
 
         // resultCode != 0 이면 실패. userString → resultString 순으로 메시지.
@@ -141,7 +144,9 @@ impl<T: Transport> DeveloperApi<T> {
 
     /// 개인 팀 목록(대개 하나).
     pub async fn list_teams(&self) -> Result<Vec<DeveloperTeam>> {
-        let resp = self.send("listTeams.action", Dictionary::new()).await?;
+        let resp = self
+            .send("listTeams.action", DeviceType::Any, Dictionary::new())
+            .await?;
         let teams = array_of(&resp, "teams")?
             .iter()
             .filter_map(Value::as_dictionary)
@@ -160,7 +165,7 @@ impl<T: Transport> DeveloperApi<T> {
     ) -> Result<Vec<DevelopmentCertificate>> {
         let mut req = Dictionary::new();
         req.insert("teamId".into(), team.team_id.clone().into());
-        let resp = self.send("listAllDevelopmentCerts.action", req).await?;
+        let resp = self.send("listAllDevelopmentCerts.action", DeviceType::IOs, req).await?;
         let certs = array_of(&resp, "certificates")?
             .iter()
             .filter_map(Value::as_dictionary)
@@ -191,7 +196,7 @@ impl<T: Transport> DeveloperApi<T> {
         );
         req.insert("machineName".into(), machine_name.into());
         req.insert("csrContent".into(), csr.into());
-        let resp = self.send("submitDevelopmentCSR.action", req).await?;
+        let resp = self.send("submitDevelopmentCSR.action", DeviceType::IOs, req).await?;
         let cert_request = resp
             .get("certRequest")
             .and_then(Value::as_dictionary)
@@ -205,7 +210,7 @@ impl<T: Transport> DeveloperApi<T> {
     pub async fn list_app_ids(&self, team: &DeveloperTeam) -> Result<ListAppIds> {
         let mut req = Dictionary::new();
         req.insert("teamId".into(), team.team_id.clone().into());
-        let resp = self.send("listAppIds.action", req).await?;
+        let resp = self.send("listAppIds.action", DeviceType::IOs, req).await?;
         let app_ids = array_of(&resp, "appIds")?
             .iter()
             .filter_map(Value::as_dictionary)
@@ -236,7 +241,7 @@ impl<T: Transport> DeveloperApi<T> {
         req.insert("identifier".into(), identifier.into());
         req.insert("name".into(), name.into());
         req.insert("teamId".into(), team.team_id.clone().into());
-        self.send("addAppId.action", req).await?;
+        self.send("addAppId.action", DeviceType::IOs, req).await?;
         Ok(())
     }
 
@@ -249,7 +254,7 @@ impl<T: Transport> DeveloperApi<T> {
         let mut req = Dictionary::new();
         req.insert("appIdId".into(), app_id.app_id_id.clone().into());
         req.insert("teamId".into(), team.team_id.clone().into());
-        let resp = self.send("downloadTeamProvisioningProfile.action", req).await?;
+        let resp = self.send("downloadTeamProvisioningProfile.action", DeviceType::IOs, req).await?;
         let pp = resp
             .get("provisioningProfile")
             .and_then(Value::as_dictionary)
