@@ -13,10 +13,20 @@ enum SigningInfo {
         return exp
     }
 
-    /// 남은 일수(내림). 이미 만료면 0 이하.
+    /// 남은 일수(**올림** — 만료 순간까지 'N일 남음'으로 센다). 갓 서명(≈7일)이면 7. 만료면 0 이하.
+    /// 내림이면 6.9일도 '6일'로 나와 사용자가 갓 설치인데 6일로 본다(지적) → 올림으로 7일.
     static func daysLeft() -> Int? {
         guard let exp = expirationDate() else { return nil }
-        return Int(floor(exp.timeIntervalSinceNow / 86400))
+        return Int(ceil(exp.timeIntervalSinceNow / 86400))
+    }
+
+    /// 남은 '모래 양' 비율(0…1) — 무료 프로파일 유효기간 7일 대비 **실제 남은 시간**(정수 일수가
+    /// 아니라 초 단위). 정수 일수(6)로 나누면 갓 설치도 6/7≈0.86이라 안 차 보였다(지적) → 초 단위로
+    /// 해 갓 서명(≈6.99일)은 ≈1.0(가득)에서 시작해 만료까지 매끄럽게 줄어든다.
+    static func fraction() -> CGFloat {
+        guard let exp = expirationDate() else { return 0 }
+        let full = 7.0 * 86400.0
+        return CGFloat(min(max(exp.timeIntervalSinceNow / full, 0), 1))
     }
 
     // mobileprovision은 CMS로 감싼 XML plist다. engine.rs의 plist_from_mobileprovision과 같은 방식으로
@@ -314,9 +324,11 @@ struct ResignView: View {
         let days = SigningInfo.daysLeft()
         let low = (days ?? 99) <= 3
         return HStack(spacing: 12) {
-            Image(systemName: "hourglass")
-                .font(.title3)
-                .foregroundColor(days == nil ? .muted : (low ? .accent : .onSurface))
+            // 주소창 모래시계와 같은 표현(모래 양 = 남은 비율). 여기선 옆에 정확한 일수도 쓴다.
+            HourglassSand(fraction: SigningInfo.fraction(),
+                          sand: days == nil ? .muted : (low ? .accent : .onSurface),
+                          frameColor: .muted)
+                .frame(width: 22, height: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text("현재 서명").font(.caption).foregroundColor(.muted)
                 if let d = days {

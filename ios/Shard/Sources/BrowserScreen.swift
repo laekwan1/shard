@@ -272,12 +272,9 @@ struct BrowserScreen: View {
         return .onSurface
     }
 
-    // 남은 서명일수를 '모래 양'으로: 무료 개발 인증서 유효기간(7일) 대비 비율(0~1).
-    // 이 비율만큼 모래시계 안을 아래에서 채워 모래가 줄어드는 것처럼 보이게 한다.
-    private var sandFraction: CGFloat {
-        guard let d = signDaysLeft else { return 0 }
-        return min(max(CGFloat(d) / 7.0, 0), 1)
-    }
+    // 남은 '모래 양' 비율(0~1). SigningInfo.fraction()로 onAppear에서 채운다 — 실제 남은 시간을
+    // 초 단위로 반영해(정수 일수 아님) 갓 설치는 거의 가득(≈1)에서 시작한다.
+    @State private var sandFraction: CGFloat = 0
 
     private var addressPanel: some View {
         HStack(spacing: 10) {
@@ -350,7 +347,10 @@ struct BrowserScreen: View {
             }
         )
         .sheet(isPresented: $showResign) { ResignView() }
-        .onAppear { if signDaysLeft == nil { signDaysLeft = SigningInfo.daysLeft() } }
+        .onAppear {
+            if signDaysLeft == nil { signDaysLeft = SigningInfo.daysLeft() }
+            sandFraction = SigningInfo.fraction()
+        }
     }
 
     /// A small dialog for the homepage URL. Uses URLField so it grabs focus and
