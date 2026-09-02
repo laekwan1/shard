@@ -21,8 +21,8 @@ zip = "8.6.0"
 # fork(laekwan1): omnisette가 anisette_url이 있으면 v1 원격을 우선하도록 패치 — iOS에서 온디바이스
 # (SSC)·v3 프로비저닝이 ani.sidestore.io와 안 맞아(EndProvisioningError) 로그인이 막히던 것을,
 # 잘 되는 v1(단순 GET)로 우회. auth.rs가 anisette_url을 ani.sidestore.io로 설정한다.
-icloud_auth = { git = "https://github.com/laekwan1/apple-private-apis", rev = "0dd665bc2a0e4531a064bc07fabb92dda18689fe" }
-omnisette   = { git = "https://github.com/laekwan1/apple-private-apis", rev = "0dd665bc2a0e4531a064bc07fabb92dda18689fe", features = ["remote-anisette"] }
+icloud_auth = { git = "https://github.com/laekwan1/apple-private-apis", rev = "313a4eb6ec44ecfce5ed3b0f7420574183eb78fc" }
+omnisette   = { git = "https://github.com/laekwan1/apple-private-apis", rev = "313a4eb6ec44ecfce5ed3b0f7420574183eb78fc", features = ["remote-anisette"] }
 # ② Developer API는 애플 개발자 서비스에 plist를 POST한다. 요청/응답이 전부 plist라 이 크레이트로
 # 인코딩·파싱한다(데이터 포맷 원시함수라 예외). uuid는 requestId/machineId 생성용.
 plist = "1"
