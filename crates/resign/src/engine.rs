@@ -253,6 +253,15 @@ async fn ensure_certificate(
     app_name: &str,
     key: &InMemorySigningKeyPair,
 ) -> Result<CapturedX509Certificate> {
+    // 무료 계정은 개발 인증서 한도가 낮고(2~3개), 우리는 매번 새 키를 만들어 기존 인증서를 재사용
+    // 못 한다(개인키가 없어). 그래서 기존 개발 인증서를 폐기하고 새로 발급한다 — 안 그러면 애플이
+    // 7460("이미 인증서가 있음")으로 거부한다(폰/PC 로그로 확인).
+    // ⚠️ 같은 Apple ID로 서명된 다른 앱이 영향받을 수 있다. 제품에선 키+인증서를 저장해 재사용해야
+    //    churn이 없다(후속작업).
+    for c in dev.list_certificates(team).await? {
+        let _ = dev.revoke_certificate(team, &c.serial_number).await; // 실패해도 계속
+    }
+
     let mut builder = X509CertificateBuilder::default();
     builder
         .subject()

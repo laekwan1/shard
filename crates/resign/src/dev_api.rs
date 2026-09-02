@@ -180,6 +180,16 @@ impl<T: Transport> DeveloperApi<T> {
         Ok(certs)
     }
 
+    /// 개발 인증서 폐기(serialNumber로). 무료 계정 한도 때문에 새로 발급하려면 기존 것을 지워야 할 때.
+    pub async fn revoke_certificate(&self, team: &DeveloperTeam, serial_number: &str) -> Result<()> {
+        let mut req = Dictionary::new();
+        req.insert("teamId".into(), team.team_id.clone().into());
+        req.insert("serialNumber".into(), serial_number.into());
+        self.send("revokeDevelopmentCert.action", DeviceType::IOs, req)
+            .await?;
+        Ok(())
+    }
+
     /// CSR을 제출해 새 개발 인증서를 발급받는다. 반환은 certRequestId.
     /// `csr`은 PEM CSR 문자열. machineName은 우리 앱 이름.
     pub async fn submit_csr(
