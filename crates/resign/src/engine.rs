@@ -47,9 +47,14 @@ pub async fn resign_app(
     log: &mut dyn FnMut(&str),
 ) -> Result<PathBuf> {
     // 1) 로그인 (③) — 저장된 세션이 있으면 재로그인 없이 복원(계정 잠금 위험 감소).
-    let (session, _resumed) =
-        AppleSession::resume_or_login(req.email.clone(), req.password.clone(), tfa, state_dir, log)
-            .await?;
+    let (session, _resumed) = AppleSession::resume_or_login(
+        req.email.clone(),
+        req.password.clone(),
+        tfa,
+        state_dir.clone(),
+        log,
+    )
+    .await?;
     let dev = DeveloperApi::new(session);
 
     // 2) 팀 (무료 개인 팀은 대개 하나)
@@ -60,9 +65,9 @@ pub async fn resign_app(
         .next()
         .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정인지 확인)"))?;
 
-    // 3) 인증서: 키 생성 → CSR → 제출 → 취득. 이 키가 서명키가 된다.
-    let key = generate_rsa_signing_key(&req.app_name)?;
-    let apple_cert = ensure_certificate(&dev, &team, &req.app_name, &key).await?;
+    // 3) 서명 신원(키+인증서) — 저장된 게 유효하면 재사용(재발급/폐기 없음). 이 키가 서명키가 된다.
+    let (key, apple_cert) =
+        ensure_signing_identity(&dev, &team, &req.app_name, &state_dir, log).await?;
 
     // 4) App ID (있으면 재사용). 식별자는 팀 고유(base.teamId)로 — 전역 유일성 요구(9401) 회피.
     let effective_bundle_id = team_unique_bundle_id(&req.bundle_id, &team.team_id);
@@ -207,7 +212,7 @@ pub fn verify_apple_flow_blocking(
         //    같은 실행에서 새 로그인으로 재시도한다. 사용자는 한 번만 누르고 결과는 반드시 나온다.
         if let Some(session) = AppleSession::resume(&state_dir, log).await {
             let dev = DeveloperApi::new(session);
-            match run_verify_flow(&dev, &bundle_id, &app_name, log).await {
+            match run_verify_flow(&dev, &bundle_id, &app_name, &state_dir, log).await {
                 Ok(s) => return Ok(s),
                 Err(e) => {
                     log(&format!("복원 세션 실패({e:#}) — 새로 로그인해 재시도합니다."));
@@ -219,7 +224,7 @@ pub fn verify_apple_flow_blocking(
         let session =
             AppleSession::login(email, password, || tfa(), state_dir.clone(), log).await?;
         let dev = DeveloperApi::new(session);
-        run_verify_flow(&dev, &bundle_id, &app_name, log).await
+        run_verify_flow(&dev, &bundle_id, &app_name, &state_dir, log).await
     })
 }
 
@@ -228,6 +233,7 @@ async fn run_verify_flow(
     dev: &DeveloperApi<AppleSession>,
     bundle_id: &str,
     app_name: &str,
+    state_dir: &Path,
     log: &mut dyn FnMut(&str),
 ) -> Result<String> {
     log("팀 조회...");
@@ -239,10 +245,8 @@ async fn run_verify_flow(
         .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정 확인)"))?;
     log(&format!("팀: {} ({})", team.name, team.team_id));
 
-    log("인증서 확보(CSR 제출)...");
-    let key = generate_rsa_signing_key(app_name)?;
-    let _cert = ensure_certificate(dev, &team, app_name, &key).await?;
-    log("인증서 OK.");
+    // 서명 신원(키+인증서) — 저장된 게 유효하면 재사용(재발급/폐기 없음, 매일 갱신 대비).
+    let _identity = ensure_signing_identity(dev, &team, app_name, state_dir, log).await?;
 
     // App ID 식별자는 애플 전역에서 고유해야 한다 — 다른 계정이 net.sw.shard를 선점하면 9401.
     // 팀 ID를 붙여 팀 고유로 만든다(AltStore/SideStore 방식; 팀 ID는 전역 고유).
@@ -322,6 +326,46 @@ async fn ensure_certificate(
         .ok_or_else(|| anyhow!("발급된 인증서를 못 찾음"))?;
     CapturedX509Certificate::from_der(ours.cert_content.clone())
         .map_err(|e| anyhow!("애플 인증서 파싱: {e:?}"))
+}
+
+/// 서명 신원(키+인증서) 확보. **저장된 것이 애플에 아직 유효하면 그대로 재사용**(재발급·폐기 없음).
+/// 매번 새 키로 재발급하면 무료 한도(7460)에 걸리고, 기존 dev 인증서를 폐기해 같은 Apple ID의 다른
+/// 앱까지 영향받는다. 재사용하면 갱신이 **프로파일만 갈아끼우는 무중단(㉮)** 으로 가벼워진다 —
+/// 매일 갱신도 부담 없다. 저장은 앱 컨테이너(state_dir) 파일; 제품은 Keychain 권장(후속).
+async fn ensure_signing_identity(
+    dev: &DeveloperApi<AppleSession>,
+    team: &DeveloperTeam,
+    app_name: &str,
+    state_dir: &Path,
+    log: &mut dyn FnMut(&str),
+) -> Result<(InMemorySigningKeyPair, CapturedX509Certificate)> {
+    let key_path = state_dir.join("signkey.p8");
+    let cert_path = state_dir.join("signcert.der");
+
+    // 1) 저장된 키+인증서가 애플 목록에 아직 있으면(=유효) 재사용. DER 바이트로 대조 — 직렬번호
+    //    문자열 포맷 차이에 안 흔들린다.
+    if let (Ok(key_der), Ok(cert_der)) = (fs::read(&key_path), fs::read(&cert_path)) {
+        if let (Ok(key), Ok(cert)) = (
+            InMemorySigningKeyPair::from_pkcs8_der(&key_der),
+            CapturedX509Certificate::from_der(cert_der.clone()),
+        ) {
+            if let Ok(list) = dev.list_certificates(team).await {
+                if list.iter().any(|c| c.cert_content == cert_der) {
+                    log("기존 인증서 재사용(재발급 없음).");
+                    return Ok((key, cert));
+                }
+            }
+        }
+    }
+
+    // 2) 없거나 만료/폐기됨 → 새 키로 발급하고 저장(다음엔 재사용).
+    log("인증서 확보(CSR 제출)...");
+    let key = generate_rsa_signing_key(app_name)?;
+    let cert = ensure_certificate(dev, team, app_name, &key).await?;
+    let _ = fs::write(&key_path, &*key.to_pkcs8_one_asymmetric_key_der());
+    let _ = fs::write(&cert_path, cert.constructed_data());
+    log("인증서 OK(저장됨).");
+    Ok((key, cert))
 }
 
 /// 번들ID의 App ID 확보(있으면 재사용, 없으면 등록 후 재조회).
