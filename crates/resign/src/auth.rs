@@ -55,6 +55,8 @@ pub struct AppleSession {
     account: AppleAccount,
     /// Xcode GS 토큰 캐시(요청마다 GSA 왕복을 피함). 세션 수명 동안 유효.
     cached_gs_token: Mutex<Option<String>>,
+    /// 세션·GS 토큰 캐시 폴더. 토큰을 여기 저장해 복원 시 재사용한다(재로그인 회피).
+    state_dir: PathBuf,
 }
 
 impl AppleSession {
@@ -90,8 +92,11 @@ impl AppleSession {
         let session = Self {
             account,
             cached_gs_token: Mutex::new(None),
+            state_dir: state_dir.clone(),
         };
         // 세션을 저장해 다음엔 재로그인을 피한다 — 반복 로그인이 계정 잠금의 최대 원인.
+        // 낡은 GS 토큰이 남아 있으면 지운다(이번 로그인이 새 토큰을 받아 다시 저장한다).
+        Self::clear_session(&state_dir);
         session.save_session(&state_dir);
         Ok(session)
     }
@@ -111,9 +116,17 @@ impl AppleSession {
         let anisette = icloud_auth::anisette::AnisetteData::new(config).await.ok()?;
         let mut account = AppleAccount::new_with_anisette(anisette).ok()?;
         account.spd = Some(spd);
+        // 로그인 때 저장해 둔 GS 토큰이 있으면 미리 싣는다 — 복원 세션의 apptokens 재요청은 공유
+        // anisette 정체성이 바뀌어 GSA가 거부(et 없음)하므로, bearer 토큰을 그대로 재사용해 건너뛴다.
+        // 토큰이 만료/불일치면 포털이 거부하고, 호출자가 새 로그인으로 폴백한다.
+        let cached = std::fs::read_to_string(state_dir.join("gstoken.txt"))
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
         Some(Self {
             account,
-            cached_gs_token: Mutex::new(None),
+            cached_gs_token: Mutex::new(cached),
+            state_dir: state_dir.to_path_buf(),
         })
     }
 
@@ -146,6 +159,8 @@ impl AppleSession {
     /// 저장된 세션 삭제 — 만료/실패로 못 쓸 때 호출해 다음 실행이 새로 로그인하게.
     pub fn clear_session(state_dir: &Path) {
         let _ = std::fs::remove_file(state_dir.join("session.plist"));
+        // GS 토큰도 함께 버린다 — 세션이 못 쓰게 됐으면 그에 딸린 토큰도 못 쓴다.
+        let _ = std::fs::remove_file(state_dir.join("gstoken.txt"));
     }
 
     /// spd(로그인 후 서버가 준 세션 데이터)에서 문자열 필드. adsid/GsIdmsToken 등.
@@ -179,6 +194,9 @@ impl AppleSession {
         }
         let t = self.fetch_xcode_gs_token().await?;
         *self.cached_gs_token.lock().unwrap() = Some(t.clone());
+        // 디스크에 저장해 다음 실행(복원)이 재로그인 없이 재사용한다. bearer 토큰이라 anisette
+        // 정체성과 무관하게 유효한 동안 쓸 수 있다(만료되면 포털 거부 → 호출자가 새 로그인 폴백).
+        let _ = std::fs::write(self.state_dir.join("gstoken.txt"), &t);
         Ok(t)
     }
 

@@ -201,55 +201,70 @@ pub fn verify_apple_flow_blocking(
         .enable_all()
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
-    let mut resumed = false;
-    let result = rt.block_on(async {
-        let (session, r) =
-            AppleSession::resume_or_login(email, password, || tfa(), state_dir.clone(), log).await?;
-        resumed = r;
+    rt.block_on(async {
+        // 1) 저장된 세션을 먼저 시도(재로그인 회피 = 잠금 위험 감소). 복원 세션이 실패하면 — 공유
+        //    anisette 정체성 변화로 GS 토큰 재요청이 거부(et 없음)되거나 세션이 만료된 것 — 지우고
+        //    같은 실행에서 새 로그인으로 재시도한다. 사용자는 한 번만 누르고 결과는 반드시 나온다.
+        if let Some(session) = AppleSession::resume(&state_dir, log).await {
+            let dev = DeveloperApi::new(session);
+            match run_verify_flow(&dev, &bundle_id, &app_name, log).await {
+                Ok(s) => return Ok(s),
+                Err(e) => {
+                    log(&format!("복원 세션 실패({e:#}) — 새로 로그인해 재시도합니다."));
+                    AppleSession::clear_session(&state_dir);
+                }
+            }
+        }
+        // 2) 새 로그인 후 같은 흐름.
+        let session =
+            AppleSession::login(email, password, || tfa(), state_dir.clone(), log).await?;
         let dev = DeveloperApi::new(session);
+        run_verify_flow(&dev, &bundle_id, &app_name, log).await
+    })
+}
 
-        log("팀 조회...");
-        let team = dev
-            .list_teams()
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정 확인)"))?;
-        log(&format!("팀: {} ({})", team.name, team.team_id));
+/// ②③ 발급 흐름(팀→인증서→App ID→프로파일). 세션이 복원이든 새 로그인이든 동일하게 돈다.
+async fn run_verify_flow(
+    dev: &DeveloperApi<AppleSession>,
+    bundle_id: &str,
+    app_name: &str,
+    log: &mut dyn FnMut(&str),
+) -> Result<String> {
+    log("팀 조회...");
+    let team = dev
+        .list_teams()
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("개발 팀 없음(무료 계정 확인)"))?;
+    log(&format!("팀: {} ({})", team.name, team.team_id));
 
-        log("인증서 확보(CSR 제출)...");
-        let key = generate_rsa_signing_key(&app_name)?;
-        let _cert = ensure_certificate(&dev, &team, &app_name, &key).await?;
-        log("인증서 OK.");
+    log("인증서 확보(CSR 제출)...");
+    let key = generate_rsa_signing_key(app_name)?;
+    let _cert = ensure_certificate(dev, &team, app_name, &key).await?;
+    log("인증서 OK.");
 
-        // App ID 식별자는 애플 전역에서 고유해야 한다 — 다른 계정이 net.sw.shard를 선점하면
-        // 9401("An App ID with Identifier … is not available")로 막힌다(폰 로그로 확인). 팀 ID를
-        // 붙이면 계정마다 고유해져 충돌이 없다(AltStore/SideStore와 동일 방식; 팀 ID는 전역 고유).
-        let effective_bundle_id = team_unique_bundle_id(&bundle_id, &team.team_id);
-        log(&format!("App ID 확보... ({effective_bundle_id})"));
-        let app_id = ensure_app_id(&dev, &team, &effective_bundle_id, &app_name).await?;
-        log(&format!("App ID: {}", app_id.identifier));
+    // App ID 식별자는 애플 전역에서 고유해야 한다 — 다른 계정이 net.sw.shard를 선점하면 9401.
+    // 팀 ID를 붙여 팀 고유로 만든다(AltStore/SideStore 방식; 팀 ID는 전역 고유).
+    let effective_bundle_id = team_unique_bundle_id(bundle_id, &team.team_id);
+    log(&format!("App ID 확보... ({effective_bundle_id})"));
+    let app_id = ensure_app_id(dev, &team, &effective_bundle_id, app_name).await?;
+    log(&format!("App ID: {}", app_id.identifier));
 
-        log("프로파일 발급...");
-        let profile = dev.download_profile(&team, &app_id).await?;
-        log(&format!(
-            "프로파일: {} ({} bytes)",
-            profile.name,
-            profile.encoded_profile.len()
-        ));
+    log("프로파일 발급...");
+    let profile = dev.download_profile(&team, &app_id).await?;
+    log(&format!(
+        "프로파일: {} ({} bytes)",
+        profile.name,
+        profile.encoded_profile.len()
+    ));
 
-        Ok(format!(
-            "team={}; appId={}; profile={}B",
-            team.team_id,
-            app_id.identifier,
-            profile.encoded_profile.len()
-        ))
-    });
-    // 복원한 세션으로 실패했다면 만료로 보고 지운다 — 다음 실행이 새로 로그인하게.
-    if result.is_err() && resumed {
-        AppleSession::clear_session(&state_dir);
-    }
-    result
+    Ok(format!(
+        "team={}; appId={}; profile={}B",
+        team.team_id,
+        app_id.identifier,
+        profile.encoded_profile.len()
+    ))
 }
 
 /// RSA 서명 키를 만든다. x509-certificate의 `generate_random`은 RSA를 지원하지 않아
