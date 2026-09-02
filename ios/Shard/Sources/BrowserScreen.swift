@@ -272,6 +272,13 @@ struct BrowserScreen: View {
         return .onSurface
     }
 
+    // 남은 서명일수를 '모래양'으로: 무료 개발 인증서 유효기간(7일) 대비 비율(0~1).
+    // 이 비율만큼만 테두리를 그려(trim) 모래가 줄어드는 것처럼 보이게 한다.
+    private var sandFraction: CGFloat {
+        guard let d = signDaysLeft else { return 0 }
+        return min(max(CGFloat(d) / 7.0, 0), 1)
+    }
+
     private var addressPanel: some View {
         HStack(spacing: 10) {
             if engineRevealed {
@@ -283,18 +290,6 @@ struct BrowserScreen: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.engineOn ? Color.accent : Color.toolbar, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture { model.toggleEngine() }
-                // 자체 서명(재서명) — 현재 서명의 남은 유효일수를 담는다(≤3일이면 앰버). 탭=재서명 시트.
-                HStack(spacing: 3) {
-                    Image(systemName: "hourglass")
-                    if let d = signDaysLeft {
-                        Text("\(max(d, 0))").font(.caption2.weight(.semibold))
-                    }
-                }
-                .foregroundColor(hourglassColor)
-                .padding(.horizontal, 7).frame(height: 30)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
-                .contentShape(Rectangle())
-                .onTapGesture { showResign = true }
                 Divider().frame(height: 22).background(Color.toolbar)
             }
             // Home: tap → the set homepage; hold → make the current page the homepage.
@@ -326,6 +321,33 @@ struct BrowserScreen: View {
                 .onChange(of: model.address) { editing = $0 }
 
             iconButton(landscape ? "rotate.left" : "rotate.right") { rotate() }
+
+            // 자체 서명(재서명) — 주소창 맨 오른쪽. 전원 버튼과 대칭으로 구분선을 왼쪽에 둔다
+            // (전원은 왼쪽 끝+오른쪽 구분선, 모래시계는 오른쪽 끝+왼쪽 구분선).
+            // 남은 유효일수를 테두리 '모래양'(trim)으로 채우고 숫자도 표기(≤3일이면 앰버). 탭=재서명 시트.
+            if engineRevealed {
+                Divider().frame(height: 22).background(Color.toolbar)
+                HStack(spacing: 3) {
+                    Image(systemName: "hourglass")
+                    if let d = signDaysLeft {
+                        Text("\(max(d, 0))").font(.caption2.weight(.semibold))
+                    }
+                }
+                .foregroundColor(hourglassColor)
+                .padding(.horizontal, 8).frame(height: 30)
+                .background(
+                    ZStack {
+                        // 빈 트랙(빠져나간 모래 자리) — 흐린 테두리 전체.
+                        RoundedRectangle(cornerRadius: 8).stroke(Color.toolbar, lineWidth: 1.5)
+                        // 남은 모래 — 잔량 비율만큼만 테두리를 그린다.
+                        RoundedRectangle(cornerRadius: 8)
+                            .trim(from: 0, to: sandFraction)
+                            .stroke(hourglassColor, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                    }
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { showResign = true }
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Color.surface)
