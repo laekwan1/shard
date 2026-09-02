@@ -30,7 +30,9 @@ uuid = { version = "1", features = ["v4"] }
 # ② 전송층: 개발자 포털/GSA에 plist를 POST(reqwest), Xcode 앱토큰 완성용 HMAC-SHA256(checksum)과
 # AES-GCM 복호(icloud_auth의 get_app_token이 복호 직전 todo!()라 우리가 마저 한다 — spd public이라
 # fork 불필요). 전부 서명/암호 원시함수라 의존 예외 허용.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# gzip/deflate/brotli: 개발자 포털(developerservices2)은 응답을 압축해 보낸다 — 없으면 raw
+# 압축 바이트를 plist로 읽으려다 실패한다(폰 로그로 확인, HTTP 200인데 본문이 바이너리).
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "brotli"] }
 hmac = "0.12"
 sha2 = "0.10"
 aes-gcm = "0.10"

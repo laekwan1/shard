@@ -258,10 +258,15 @@ impl Transport for AppleSession {
         let status = resp.status();
         let bytes = resp.bytes().await.context("포털 응답 읽기")?;
 
-        // 포털 응답은 dict가 최상위(resultCode 포함). plist가 아니면(HTML 에러 등) 상태·본문을 드러낸다.
+        // 포털 응답은 dict가 최상위(resultCode 포함). plist가 아니면(압축/HTML 등) 상태·형식(hex)을 드러낸다.
         plist::from_bytes(&bytes).map_err(|e| {
-            let snippet: String = String::from_utf8_lossy(&bytes).chars().take(200).collect();
-            anyhow!("포털 응답 파싱 실패 (HTTP {status}): {e} — 본문: {snippet}")
+            let hex: String = bytes
+                .iter()
+                .take(24)
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            anyhow!("포털 응답 파싱 실패 (HTTP {status}): {e} — 앞부분 hex: {hex}")
         })
     }
 }
