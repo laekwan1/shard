@@ -33,10 +33,54 @@ enum SigningInfo {
     }
 }
 
+// 발급에 성공한 Apple ID(팀·App ID)를 기억한다 — 어떤 계정으로 서명받았는지 관리·표시하려고.
+// UserDefaults에 JSON으로 저장(계정 수가 소수라 충분). 비밀번호는 절대 저장하지 않는다.
+struct SignedAccount: Codable, Identifiable {
+    var email: String
+    var teamId: String
+    var appId: String
+    var date: Date
+    var id: String { email }
+}
+
+enum SignedAccountStore {
+    private static let key = "resign.accounts"
+
+    static func load() -> [SignedAccount] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let list = try? JSONDecoder().decode([SignedAccount].self, from: data)
+        else { return [] }
+        return list
+    }
+
+    static func save(_ list: [SignedAccount]) {
+        if let data = try? JSONEncoder().encode(list) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// 같은 이메일이면 갱신, 아니면 추가(최신이 위로). 반환은 갱신된 목록.
+    static func upsert(_ acct: SignedAccount) -> [SignedAccount] {
+        var list = load()
+        list.removeAll { $0.email.caseInsensitiveCompare(acct.email) == .orderedSame }
+        list.insert(acct, at: 0)
+        save(list)
+        return list
+    }
+
+    static func remove(email: String) -> [SignedAccount] {
+        var list = load()
+        list.removeAll { $0.email.caseInsensitiveCompare(email) == .orderedSame }
+        save(list)
+        return list
+    }
+}
+
 // iOS 자체 서명 엔진(Rust `resign`)을 부르는 Swift 층.
 //
-// 첫 단계는 **발급 테스트**: .ipa 서명·설치 없이 로그인 → 인증서 → App ID → 프로파일 발급까지만
-// 애플 실서버로 확인한다(shard_resign_verify). 가장 어려운 인증·발급이 폰에서 되는지가 먼저다.
+// 현재 단계는 **인증서 발급**: .ipa 서명·설치 없이 로그인 → 인증서 → App ID → 프로파일 발급까지
+// 애플 실서버로 수행한다(shard_resign_verify). 가장 어려운 인증·발급이 폰에서 되는지가 먼저다.
+// 성공한 계정은 SignedAccount로 기억해 체크 표시로 관리한다.
 //
 // C ABI는 동기라 백그라운드 스레드에서 부르고, 2FA 코드는 세마포어로 UI에서 받아 넘긴다.
 // 로그 콜백은 진행 상황을 화면에 스트리밍한다.
@@ -47,9 +91,13 @@ final class ResignModel: ObservableObject {
     @Published var summary: String?
     @Published var errorText: String?
     @Published var needs2FA = false
+    // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
+    @Published var accounts: [SignedAccount] = SignedAccountStore.load()
 
     private let tfaSem = DispatchSemaphore(value: 0)
     private var tfaCode = ""
+    // 방금 시도한 이메일 — 성공하면 이 값으로 계정을 기록한다(run이 받은 걸 finish가 씀).
+    private var lastEmail = ""
     private var tfaCPtr: UnsafeMutablePointer<CChar>?
 
     // anisette·세션 캐시 폴더(앱 컨테이너). 기기별로 유지된다.
@@ -66,6 +114,7 @@ final class ResignModel: ObservableObject {
         logLines = []
         summary = nil
         errorText = nil
+        lastEmail = email
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         DispatchQueue.global(qos: .userInitiated).async {
             let raw = email.withCString { e in
@@ -114,10 +163,35 @@ final class ResignModel: ObservableObject {
             return
         }
         if (obj["ok"] as? Bool) == true {
-            summary = obj["path"] as? String
+            let s = obj["path"] as? String ?? ""
+            summary = s
+            // 발급 성공 — 이 계정을 기록해 체크 표시로 관리한다(팀/App ID는 요약에서 파싱).
+            if !lastEmail.isEmpty {
+                let acct = SignedAccount(
+                    email: lastEmail,
+                    teamId: Self.field(s, "team"),
+                    appId: Self.field(s, "appId"),
+                    date: Date()
+                )
+                accounts = SignedAccountStore.upsert(acct)
+            }
         } else {
             errorText = obj["error"] as? String ?? "알 수 없는 오류"
         }
+    }
+
+    /// 저장소에서 계정을 지운다(관리용).
+    func forget(email: String) {
+        accounts = SignedAccountStore.remove(email: email)
+    }
+
+    /// "team=…; appId=…; profile=…B" 요약에서 `key=` 뒤 값을 ; 전까지 뽑는다.
+    private static func field(_ s: String, _ key: String) -> String {
+        for part in s.components(separatedBy: ";") {
+            let kv = part.trimmingCharacters(in: .whitespaces)
+            if kv.hasPrefix("\(key)=") { return String(kv.dropFirst(key.count + 1)) }
+        }
+        return ""
     }
 
     deinit {
@@ -148,7 +222,7 @@ struct ResignView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("자체 서명 — 발급 테스트").font(.headline).foregroundColor(.onSurface)
+                Text("자체 서명").font(.headline).foregroundColor(.onSurface)
                 Spacer()
                 Button("닫기") { dismiss() }.foregroundColor(.accent)
             }
@@ -157,7 +231,10 @@ struct ResignView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("Apple ID로 로그인해 개발 인증서·프로비저닝 프로파일이 발급되는지 확인합니다. (.ipa 서명·설치는 다음 단계)")
+                    signatureStatus
+                    if !model.accounts.isEmpty { signedAccounts }
+
+                    Text("Apple ID로 로그인해 이 앱의 개발 인증서·프로비저닝 프로파일을 발급받습니다. (.ipa 서명·설치는 다음 단계)")
                         .font(.caption).foregroundColor(.muted)
 
                     labeled("Apple ID (보조 계정 권장)") {
@@ -173,7 +250,7 @@ struct ResignView: View {
                     Button {
                         model.run(email: email, password: password)
                     } label: {
-                        Text(model.running ? "진행 중..." : "발급 테스트")
+                        Text(model.running ? "진행 중..." : "인증서 발급")
                             .font(.body.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)
@@ -208,7 +285,7 @@ struct ResignView: View {
                     }
 
                     if let s = model.summary {
-                        Text("성공 — \(s)").font(.footnote).foregroundColor(.accent)
+                        Text("발급 성공 — \(s)").font(.footnote).foregroundColor(.accent)
                     }
                     if let e = model.errorText {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
@@ -230,6 +307,63 @@ struct ResignView: View {
             }
         }
         .background(Color.surface.ignoresSafeArea())
+    }
+
+    // 현재 서명의 정확한 남은 일수(모래시계는 '양'으로, 여기선 숫자로). 없으면 정보 없음.
+    private var signatureStatus: some View {
+        let days = SigningInfo.daysLeft()
+        let low = (days ?? 99) <= 3
+        return HStack(spacing: 12) {
+            Image(systemName: "hourglass")
+                .font(.title3)
+                .foregroundColor(days == nil ? .muted : (low ? .accent : .onSurface))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("현재 서명").font(.caption).foregroundColor(.muted)
+                if let d = days {
+                    Text(d > 0 ? "남은 유효기간 \(d)일" : "만료됨")
+                        .font(.body.weight(.semibold))
+                        .foregroundColor(d > 0 ? (low ? .accent : .onSurface) : .red)
+                } else {
+                    Text("서명 정보 없음").font(.body.weight(.semibold)).foregroundColor(.muted)
+                }
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.chrome)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // 발급받은 계정 — 이메일 + 체크 표시로 관리. ✕로 기록 삭제.
+    private var signedAccounts: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("발급받은 계정").font(.caption).foregroundColor(.muted)
+            ForEach(model.accounts) { acct in
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.seal.fill").foregroundColor(.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(acct.email).font(.footnote.weight(.semibold)).foregroundColor(.onSurface)
+                        if !acct.teamId.isEmpty {
+                            Text("팀 \(acct.teamId) · \(shortDate(acct.date))")
+                                .font(.caption2).foregroundColor(.muted)
+                        }
+                    }
+                    Spacer()
+                    Button { model.forget(email: acct.email) } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundColor(.muted)
+                    }
+                }
+                .padding(.vertical, 8).padding(.horizontal, 10)
+                .background(Color.chrome)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+        }
+    }
+
+    private func shortDate(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy.MM.dd"
+        return f.string(from: d)
     }
 
     private var runnable: Bool {
