@@ -41,6 +41,8 @@ struct BrowserScreen: View {
     @State private var engineRevealed = false
     // 재서명(자체 서명) 시트 — 우회 토글이 뜰 때 함께 나오는 모래시계로 연다.
     @State private var showResign = false
+    // 현재 서명의 남은 유효일수 — 모래시계에 표시한다(≤3일이면 앰버).
+    @State private var signDaysLeft: Int? = nil
 
     @State private var landscape = false
 
@@ -264,6 +266,12 @@ struct BrowserScreen: View {
 
     // A small control at the screen's top-right that drops its quality list
     // right underneath. A soft square, translucent grey, and half the size it
+    // 모래시계 색: 서명 만료 임박(≤3일, ㉮ 자동 갱신 임계와 동일)이면 앰버로 경고.
+    private var hourglassColor: Color {
+        if let d = signDaysLeft, d <= 3 { return .accent }
+        return .onSurface
+    }
+
     private var addressPanel: some View {
         HStack(spacing: 10) {
             if engineRevealed {
@@ -275,13 +283,18 @@ struct BrowserScreen: View {
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(model.engineOn ? Color.accent : Color.toolbar, lineWidth: 1))
                     .contentShape(Rectangle())
                     .onTapGesture { model.toggleEngine() }
-                // 자체 서명(재서명) — 남은 기간·수동 재서명. 우회 토글과 함께 노출(사용자 확정).
-                Image(systemName: "hourglass")
-                    .foregroundColor(.onSurface)
-                    .frame(width: 32, height: 30)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.toolbar, lineWidth: 1))
-                    .contentShape(Rectangle())
-                    .onTapGesture { showResign = true }
+                // 자체 서명(재서명) — 현재 서명의 남은 유효일수를 담는다(≤3일이면 앰버). 탭=재서명 시트.
+                HStack(spacing: 3) {
+                    Image(systemName: "hourglass")
+                    if let d = signDaysLeft {
+                        Text("\(max(d, 0))").font(.caption2.weight(.semibold))
+                    }
+                }
+                .foregroundColor(hourglassColor)
+                .padding(.horizontal, 7).frame(height: 30)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
+                .contentShape(Rectangle())
+                .onTapGesture { showResign = true }
                 Divider().frame(height: 22).background(Color.toolbar)
             }
             // Home: tap → the set homepage; hold → make the current page the homepage.
@@ -327,6 +340,7 @@ struct BrowserScreen: View {
             }
         )
         .sheet(isPresented: $showResign) { ResignView() }
+        .onAppear { if signDaysLeft == nil { signDaysLeft = SigningInfo.daysLeft() } }
     }
 
     /// A small dialog for the homepage URL. Uses URLField so it grabs focus and

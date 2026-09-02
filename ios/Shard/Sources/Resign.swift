@@ -1,5 +1,38 @@
 import SwiftUI
 
+// 현재 앱 서명의 남은 유효기간. 앱 번들의 `embedded.mobileprovision`(현재 서명한 도구가 넣은 것 —
+// 지금은 SideStore/Sideloadly, 나중엔 우리 엔진)의 ExpirationDate를 읽는다. 모래시계가 이 값을 담는다.
+enum SigningInfo {
+    /// 현재 서명의 만료일(없으면 nil — 시뮬레이터/미서명 등).
+    static func expirationDate() -> Date? {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url),
+              let plist = plistFromMobileprovision(data),
+              let exp = plist["ExpirationDate"] as? Date
+        else { return nil }
+        return exp
+    }
+
+    /// 남은 일수(내림). 이미 만료면 0 이하.
+    static func daysLeft() -> Int? {
+        guard let exp = expirationDate() else { return nil }
+        return Int(floor(exp.timeIntervalSinceNow / 86400))
+    }
+
+    // mobileprovision은 CMS로 감싼 XML plist다. engine.rs의 plist_from_mobileprovision과 같은 방식으로
+    // <?xml … </plist> 구간을 스캔해 파싱한다(전체 CMS 파싱 대신).
+    private static func plistFromMobileprovision(_ data: Data) -> [String: Any]? {
+        let startIdx = data.range(of: Data("<?xml".utf8))?.lowerBound
+            ?? data.range(of: Data("<plist".utf8))?.lowerBound
+        guard let start = startIdx,
+              let end = data.range(of: Data("</plist>".utf8))?.upperBound
+        else { return nil }
+        let slice = data.subdata(in: start..<end)
+        return try? PropertyListSerialization.propertyList(from: slice, options: [], format: nil)
+            as? [String: Any]
+    }
+}
+
 // iOS 자체 서명 엔진(Rust `resign`)을 부르는 Swift 층.
 //
 // 첫 단계는 **발급 테스트**: .ipa 서명·설치 없이 로그인 → 인증서 → App ID → 프로파일 발급까지만
