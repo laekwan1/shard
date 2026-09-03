@@ -33,6 +33,3 @@ targets:
     dependencies:
       - framework: build/ShardCore.xcframework
         embed: false
-      # minimuxer(온디바이스 설치 muxer) 프리빌트 정적 xcframework. CI가 받아 둔다.
-      - framework: build/minimuxer.xcframework
-        embed: false

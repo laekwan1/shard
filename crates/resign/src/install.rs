@@ -20,7 +20,10 @@ use anyhow::{anyhow, Result};
 use idevice::{
     pairing_file::PairingFile,
     provider::{IdeviceProvider, TcpProvider},
-    services::{lockdown::LockdownClient, misagent::MisagentClient},
+    services::{
+        heartbeat::HeartbeatClient, installation_proxy::InstallationProxyClient,
+        lockdown::LockdownClient, misagent::MisagentClient,
+    },
     utils::installation::install_package,
     IdeviceService,
 };
@@ -66,38 +69,52 @@ pub async fn probe_lockdownd(
     log: &mut dyn FnMut(&str),
 ) -> Result<String> {
     let provider = tcp_provider(addr, pairing, "shard-probe")?;
-    log(&format!("lockdownd 연결 중... ({addr}:{})", LockdownClient::LOCKDOWND_PORT));
-    let mut lockdown = LockdownClient::connect(&provider)
-        .await
-        .map_err(|e| anyhow!("lockdownd 연결 실패(터널/주소 확인): {e:?}"))?;
-
-    log("연결됨. ProductVersion 질의...");
-    let version = lockdown
-        .get_value(Some("ProductVersion"), None)
-        .await
-        .map_err(|e| anyhow!("ProductVersion 질의 실패: {e:?}"))?;
-    let version = version.as_string().unwrap_or("?").to_string();
-
-    log(&format!("iOS {version}. 세션 시작(페어링 검증)..."));
     let pairing_file =
         PairingFile::from_bytes(pairing).map_err(|e| anyhow!("페어링 파싱: {e:?}"))?;
+
+    // ① TCP 연결(터널 너머 lockdownd 포트).
+    log(&format!("① 연결... ({addr}:{})", LockdownClient::LOCKDOWND_PORT));
+    let mut lockdown = LockdownClient::connect(&provider)
+        .await
+        .map_err(|e| anyhow!("[① 연결] 실패(터널/주소 확인): {e:?}"))?;
+
+    // ② 세션(SSL, 페어링) — 여기서 early eof면 raw lockdown이 안 통하는 것(iOS 26 usbmux 계층 필요 신호).
+    log("② 세션 시작(SSL, 페어링)...");
     lockdown
         .start_session(&pairing_file)
         .await
-        .map_err(|e| anyhow!("세션 시작 실패(페어링 무효/만료 가능): {e:?}"))?;
-    log("세션 OK — 페어링 유효, lockdownd 통과.");
+        .map_err(|e| anyhow!("[② 세션] 실패(early eof=usbmux 계층 필요 / 페어링 무효): {e:?}"))?;
+    let version = lockdown
+        .get_value(Some("ProductVersion"), None)
+        .await
+        .ok()
+        .and_then(|v| v.as_string().map(str::to_string))
+        .unwrap_or_default();
+    log(&format!("세션 OK — iOS {version}."));
 
-    let name = lockdown
-        .get_value(Some("DeviceName"), None)
+    // ③ 하트비트 — iOS는 하트비트 클라이언트가 없으면 서비스 연결을 닫는다(설치 중 연결 유지에 필수).
+    log("③ 하트비트 시작(연결 유지)...");
+    let mut hb = HeartbeatClient::connect(&provider)
         .await
-        .ok()
-        .and_then(|v| v.as_string().map(str::to_string))
-        .unwrap_or_default();
-    let udid = lockdown
-        .get_value(Some("UniqueDeviceID"), None)
+        .map_err(|e| anyhow!("[③ 하트비트] 연결 실패: {e:?}"))?;
+    let interval = hb
+        .get_marco(15)
         .await
-        .ok()
-        .and_then(|v| v.as_string().map(str::to_string))
-        .unwrap_or_default();
-    Ok(format!("lockdownd 통과 — iOS {version}, 기기 '{name}', UDID {udid}"))
+        .map_err(|e| anyhow!("[③ 하트비트] marco 실패: {e:?}"))?;
+    hb.send_polo().await.ok();
+    log(&format!("하트비트 OK(interval {interval})."));
+
+    // ④ installation_proxy — 설치 서비스가 실제 응답하는지(㉯ 설치의 전제).
+    log("④ installation_proxy 앱 목록...");
+    let mut inst = InstallationProxyClient::connect(&provider)
+        .await
+        .map_err(|e| anyhow!("[④ instproxy] 연결 실패: {e:?}"))?;
+    let apps = inst
+        .get_apps(None, None)
+        .await
+        .map_err(|e| anyhow!("[④ instproxy] 목록 실패: {e:?}"))?;
+    Ok(format!(
+        "설치 서비스 통과 — iOS {version}, 설치앱 {}개(전송 계층 OK)",
+        apps.len()
+    ))
 }

@@ -37,16 +37,6 @@ jobs:
       - name: Build the Rust xcframework
         run: bash ios/scripts/build-xcframework.sh
 
-      # minimuxer: 온디바이스 설치 muxer(usbmux+하트비트). 프리빌트 xcframework를 받아 링크한다
-      # (소스 빌드는 libplist C 의존이라 iOS에서 무겁다). Swift 바인딩은 저장소(Sources/minimuxer)에.
-      - name: Fetch minimuxer xcframework
-        run: |
-          mkdir -p ios/build
-          curl -fsSL https://github.com/jkcoxson/minimuxer/releases/download/build/minimuxer.xcframework.zip -o /tmp/mmx.zip
-          (cd ios/build && unzip -oqq /tmp/mmx.zip)
-          test -d ios/build/minimuxer.xcframework || { echo "minimuxer xcframework 없음"; exit 1; }
-          ls -la ios/build/minimuxer.xcframework
-
       - name: Install XcodeGen
         run: brew install xcodegen
 
