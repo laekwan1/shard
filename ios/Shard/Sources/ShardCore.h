@@ -85,11 +85,18 @@ char *shard_resign_verify(const char *email, const char *password,
 char *shard_resign_probe(const char *pairing_path, const char *addr,
                          ShardLog log, void *ctx);
 
-// ④ RSD 스모크(iOS 17+): RSD 포트(addr:port, 예 10.7.0.1:49152)에 붙어 서비스 목록으로 판별.
-// classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 이걸로 대체.
-// 소유 JSON {"ok":true,"path":"...판별 요약..."} 또는 {"ok":false,"error":"..."}; shard_string_free.
-// 발견된 RSD 서비스 목록은 log로 스트리밍. 페어링 파일 불필요(Architecture A는 VPN이 상류에서 처리).
-char *shard_rsd_probe(const char *addr, uint16_t port, ShardLog log, void *ctx);
+// ④ RSD 스모크(iOS 17+): rppairing 터널(addr:port + RP 페어링, 예 10.7.0.1:49152)을 세우고 터널 안
+// RSD 서비스 목록 확인. classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 대체.
+// pairing_path는 **RpPairingFile**(idevice_pair 발급, classic .mobiledevicepairing 아님).
+// 소유 JSON {"ok":true,"path":"..."} 또는 {"ok":false,"error":"..."}; shard_string_free. 목록은 log로.
+char *shard_rsd_probe(const char *addr, uint16_t port, const char *pairing_path,
+                      ShardLog log, void *ctx);
+
+// ④ RSD 설치(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치(installation_proxy).
+// pairing_path=RpPairingFile, ipa_path=⑤ 재서명 결과. 같은 번들ID면 in-place 업그레이드(데이터 보존).
+// 소유 JSON 반환; shard_string_free.
+char *shard_rsd_install(const char *addr, uint16_t port, const char *pairing_path,
+                        const char *ipa_path, ShardLog log, void *ctx);
 
 // ④+⑤ 자기 자신 갱신: 실행 중 앱 번들을 재서명해 자기 자신에 업그레이드 설치까지. bundle_id는 실행
 // 중 번들의 CFBundleIdentifier(같아야 in-place), app_bundle_path는 Bundle.main.bundlePath.

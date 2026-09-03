@@ -193,22 +193,25 @@ final class ResignModel: ObservableObject {
             for l in mmTail { self.logLines.append(l) }
         }
         let diag: String
-        if !tunnel { diag = "터널로 기기(10.7.0.1:62078) 못 닿음 — StosVPN 연결 확인" }
+        if !tunnel { diag = "터널로 기기(10.7.0.1:62078) 못 닿음 — LocalDevVPN 연결 확인" }
         else if udid == nil { diag = "터널은 열렸는데 페어링 SSL로 기기를 못 잡음 — 페어링 재발급" }
         else { diag = "하트비트 lockdown 실패 — 아래 idevice(C) stderr가 진짜 이유" }
         return (false, diag)
     }
 
-    /// ④ RSD 연결 테스트 (iOS 17+) — classic lockdown이 죽은 iOS 26의 진짜 경로. RSD(RemoteXPC)에 붙어
-    /// 서비스 목록을 읽고 Architecture A(터널 안 — 바로 설치 가능)/B(우리가 터널 세워야)를 판별한다.
-    /// **페어링 파일 불필요**(A는 루프백 VPN이 상류에서 처리). 포트는 StikDebug 기본 49152.
+    /// ④ RSD 연결 테스트 (iOS 17+) — classic lockdown이 죽은 iOS 26의 진짜 경로. rppairing 터널(직접
+    /// TCP→RemotePairing→TLS-PSK→jktcp 어댑터)을 세우고 **터널 안** RSD 서비스 목록을 확인한다.
+    /// **RP 페어링 파일 필요**(idevice_pair 발급, classic과 다름). 포트는 StikDebug 기본 49152.
     func rsdProbe(addr: String) {
-        guard !running else { return }
+        guard !running, hasPairing else { return }
         running = true
         logLines = []; summary = nil; errorText = nil
         let ctx = Unmanaged.passUnretained(self).toOpaque()
+        let pairingPath = pairingURL.path
         DispatchQueue.global(qos: .userInitiated).async {
-            let raw = addr.withCString { a in shard_rsd_probe(a, 49152, ResignModel.logCb, ctx) }
+            let raw = addr.withCString { a in pairingPath.withCString { p in
+                shard_rsd_probe(a, 49152, p, ResignModel.logCb, ctx)
+            } }
             let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
             if let raw = raw { shard_string_free(raw) }
             DispatchQueue.main.async {
@@ -257,9 +260,9 @@ final class ResignModel: ObservableObject {
         else { errorText = obj["error"] as? String ?? "알 수 없는 오류" }
     }
 
-    /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, minimuxer가 폰에
-    /// 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
-    func selfUpdate(email: String, password: String) {
+    /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, RSD(rppairing 터널)로
+    /// 폰에 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
+    func selfUpdate(email: String, password: String, addr: String) {
         guard !running, hasPairing else { return }
         running = true
         logLines = []; summary = nil; errorText = nil
@@ -288,25 +291,22 @@ final class ResignModel: ObservableObject {
                 DispatchQueue.main.async { self.running = false; self.errorText = "서명 단계 실패 — \(err ?? json)" }
                 return
             }
-            // 2) minimuxer: 시작 → 기기 준비(하트비트) → 업로드(AFC) → 설치.
-            do {
-                DispatchQueue.main.async { self.logLines.append("서명 완료. minimuxer로 설치 준비...") }
-                let (okReady, diag) = try self.minimuxerReady(pairingPath: pairingPath, sd: sd)
-                guard okReady else {
-                    DispatchQueue.main.async { self.running = false; self.errorText = "설치 전 minimuxer 미준비 — \(diag)" }
-                    return
-                }
-                DispatchQueue.main.async { self.logLines.append("AFC 업로드 + 설치 중...") }
-                let ipaData = try Data(contentsOf: URL(fileURLWithPath: ipaPath))
-                try ipaData.withUnsafeBytes { (rawBuf: UnsafeRawBufferPointer) in
-                    try yeet_app_afc(bundleId, rawBuf.bindMemory(to: UInt8.self))
-                }
-                try install_ipa(bundleId)
-                DispatchQueue.main.async { self.running = false; self.summary = "설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요." }
-            } catch let e as MinimuxerError {
-                DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 설치 실패: \(describe_error(e).toString())" }
-            } catch {
-                DispatchQueue.main.async { self.running = false; self.errorText = "설치 실패: \(error.localizedDescription)" }
+            // 2) RSD(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치. classic minimuxer는
+            //    iOS 26에서 죽어(QueryType RST) RSD로 대체. pairing은 RP 페어링(idevice_pair 발급).
+            DispatchQueue.main.async { self.logLines.append("서명 완료. RSD 터널로 설치...") }
+            let raw2: UnsafeMutablePointer<CChar>? =
+                addr.withCString { a in pairingPath.withCString { pp in ipaPath.withCString { ip in
+                    shard_rsd_install(a, 49152, pp, ip, ResignModel.logCb, ctx)
+                } } }
+            let json2 = raw2.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
+            if let raw2 = raw2 { shard_string_free(raw2) }
+            DispatchQueue.main.async {
+                self.running = false
+                if let d2 = json2.data(using: .utf8),
+                   let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
+                    if (obj2["ok"] as? Bool) == true { self.summary = obj2["path"] as? String }
+                    else { self.errorText = "설치 실패 — \(obj2["error"] as? String ?? json2)" }
+                } else { self.errorText = "설치 응답 파싱 실패" }
             }
         }
     }
@@ -496,44 +496,44 @@ struct ResignView: View {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
                     }
 
-                    // ④ 설치 연결 테스트 — 페어링+터널로 폰 lockdownd에 붙는지(설치의 전제) 확인.
-                    // StosVPN/LocalDevVPN을 켠 상태에서 눌러야 한다.
+                    // ④ 설치 연결 테스트 — RP 페어링 + LocalDevVPN으로 rppairing 터널을 세워 터널 안
+                    // RSD(설치 서비스)에 붙는지 확인(설치의 전제). idevice_pair로 RP 페어링을 1회 발급.
                     Divider().background(Color.toolbar)
                     VStack(alignment: .leading, spacing: 8) {
                         Text("④ 설치 연결 테스트 (실험)").font(.caption).foregroundColor(.muted)
                         HStack(spacing: 8) {
                             Image(systemName: model.hasPairing ? "checkmark.seal.fill" : "doc.badge.plus")
                                 .foregroundColor(model.hasPairing ? .accent : .muted)
-                            Text(model.hasPairing ? "페어링 파일 있음" : "페어링 파일 없음")
+                            Text(model.hasPairing ? "RP 페어링 있음" : "RP 페어링 없음 (idevice_pair 발급)")
                                 .font(.footnote).foregroundColor(.onSurface)
                             Spacer()
                             Button(model.hasPairing ? "교체" : "가져오기") { showPairingPicker = true }
                                 .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                         }
-                        labeled("터널 주소 (StosVPN 기본 10.7.0.1)") {
+                        labeled("터널 주소 (LocalDevVPN 기본 10.7.0.1)") {
                             TextField("10.7.0.1", text: $probeAddr)
                                 .keyboardType(.numbersAndPunctuation)
                                 .disableAutocorrection(true)
                         }
-                        // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. 페어링 파일 불필요(A는 VPN이
-                        // 상류에서 처리). 서비스 목록으로 Architecture A/B를 판별한다(측정 먼저).
+                        // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. rppairing 터널(TCP→RemotePairing
+                        // →TLS-PSK→jktcp 어댑터)을 세우고 터널 안 RSD 서비스 목록을 확인. RP 페어링 필요.
                         Button {
                             model.rsdProbe(addr: probeAddr)
                         } label: {
                             Text(model.running ? "확인 중..." : "연결 테스트 (RSD)")
                                 .font(.body.weight(.semibold))
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                .background(!model.running ? Color.accent : Color.toolbar)
-                                .foregroundColor(!model.running ? .onAccent : .muted)
+                                .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
+                                .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        .disabled(model.running)
-                        Text("RSD(:49152)로 iOS 17+ 경로 확인 — 페어링 불필요. StosVPN 켜고 누르세요. 로그의 서비스 목록에 installation_proxy가 보이면 바로 설치 가능(A).")
+                        .disabled(!model.hasPairing || model.running)
+                        Text("LocalDevVPN 켜고 누르세요. 로그의 ‘터널 안 서비스’에 installation_proxy가 보이면 설치 준비 완료. 페어링은 idevice_pair로 만든 RP 페어링이어야 합니다(classic .mobiledevicepairing은 안 됨).")
                             .font(.caption2).foregroundColor(.muted)
 
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
-                            model.selfUpdate(email: email, password: password)
+                            model.selfUpdate(email: email, password: password, addr: probeAddr)
                         } label: {
                             Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
                                 .font(.body.weight(.semibold))
@@ -543,7 +543,7 @@ struct ResignView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .disabled(!canSelfUpdate)
-                        Text("위 Apple ID로 발급 → 자기 자신 재서명 → 설치까지. StosVPN 켜고 페어링·비밀번호 필요. 끝나면 앱을 다시 여세요.")
+                        Text("위 Apple ID로 발급 → 자기 자신 재서명 → 설치까지. LocalDevVPN 켜고 페어링·비밀번호 필요. 끝나면 앱을 다시 여세요.")
                             .font(.caption2).foregroundColor(.muted)
                     }
                     .fileImporter(isPresented: $showPairingPicker, allowedContentTypes: [.item]) { result in

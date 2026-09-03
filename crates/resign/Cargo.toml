@@ -38,12 +38,14 @@ sha2 = "0.10"
 aes-gcm = "0.10"
 # ④ 설치/갱신: idevice(jkcoxson)로 폰 lockdownd에 붙어 misagent(㉮ 프로파일)·installation_proxy(㉯
 # 앱)를 호출. ring 프로바이더가 iOS 크로스컴파일에 덜 까다롭다. **검증 0 — 폰에서만.**
-# master(0.1.66)에 pin — 읽은 API(install_package/MisagentClient/TcpProvider)가 master 기준.
-# xpc+rsd: iOS 17+ RemoteXPC/RSD 경로(설계 docs/RSD-설치.md). classic lockdown(62078)은 iOS 26에서
-# 죽어(QueryType RST) 설치가 RSD로만 됨. c442bd2에 이미 RsdProvider for IpAddr(Architecture A)와
-# install_package_with_callback_rsd가 있어 버전 범프 없이 rsd/xpc feature만 켠다. tunnel_tcp_stack/
-# remote_pairing은 Architecture B(우리가 터널을 세워야 할 때)에만 필요 — probe로 A/B 확인 후 추가.
-idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5", default-features = false, features = ["ring", "installation_proxy", "misagent", "tcp", "afc", "heartbeat", "xpc", "rsd"] }
+# iOS 17+ 설치(설계 docs/RSD-설치.md): classic lockdown(62078)은 iOS 26에서 죽어(QueryType RST)
+# 설치가 RSD 터널로만 됨. 폰 확인 결과 LocalDevVPN의 10.7.0.1:49152는 **RemotePairing(JSON)**
+# 엔드포인트라(RSD/RemoteXPC 아님 — bare RSD 핸드셰이크는 리셋됨), StikJIT처럼 tunnel_create_rppairing
+# 경로를 쓴다: remote_pairing(RpPairing 페어verify+TLS-PSK 터널) + tunnel_tcp_stack(jktcp userspace
+# 어댑터, 실제 TUN 불필요) + rsd/xpc(터널 안 RSD) + installation_proxy/afc(설치·업로드). classic
+# install.rs가 쓰던 API(install_package/MisagentClient/TcpProvider)도 같은 rev. c442bd2 그대로
+# (master와 1커밋差, RSD 핸드셰이크 동일)라 버전 범프 없음. 남은 관문: RpPairingFile 포맷(조사 중).
+idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5", default-features = false, features = ["ring", "installation_proxy", "misagent", "tcp", "afc", "heartbeat", "xpc", "rsd", "remote_pairing", "tunnel_tcp_stack"] }
 # iOS C ABI는 동기다. async 엔진을 current-thread 런타임으로 block_on하는 래퍼가 필요.
 tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을

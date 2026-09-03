@@ -262,16 +262,18 @@ pub unsafe extern "C" fn shard_resign_probe(
     }
 }
 
-/// ④ RSD 스모크(iOS 17+): RSD 포트(addr:port, 예 10.7.0.1:49152)에 붙어 서비스 목록으로 A/B 판별.
-/// classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 이걸로 대체한다.
-/// 반환 {"ok":true,"path":"…판별 요약…"} 또는 {"ok":false,"error":"…"}. 서비스 목록은 log로 흐른다.
+/// ④ RSD 스모크(iOS 17+): rppairing 터널(addr:port, 예 10.7.0.1:49152 + RP 페어링)을 세우고 터널 안
+/// RSD 서비스 목록을 확인. classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 대체.
+/// `pairing_path`는 **RpPairingFile**(idevice_pair로 발급, classic .mobiledevicepairing 아님).
+/// 반환 {"ok":true,"path":"…요약…"} 또는 {"ok":false,"error":"…"}. 서비스 목록은 log로 흐른다.
 ///
 /// # Safety
-/// `addr`는 유효한 NUL 종단 UTF-8. `log`는 이 스레드에서 `ctx`와 함께 호출된다.
+/// `addr`/`pairing_path`는 유효한 NUL 종단 UTF-8. `log`는 이 스레드에서 `ctx`와 함께 호출된다.
 #[no_mangle]
 pub unsafe extern "C" fn shard_rsd_probe(
     addr: *const c_char,
     port: u16,
+    pairing_path: *const c_char,
     log: ShardLog,
     ctx: *mut c_void,
 ) -> *mut c_char {
@@ -283,13 +285,68 @@ pub unsafe extern "C" fn shard_rsd_probe(
         Ok(a) => a,
         Err(_) => return err("주소 형식이 잘못됨(예: 10.7.0.1)"),
     };
+    let pairing_path = match unsafe { arg(pairing_path) } {
+        Some(s) => s,
+        None => return err("페어링 경로가 없습니다"),
+    };
+    let pairing = match std::fs::read(&pairing_path) {
+        Ok(b) => b,
+        Err(e) => return err(&format!("페어링 파일 읽기 실패: {e}")),
+    };
     let sockaddr = SocketAddr::new(ip, port);
     let mut log_fn = |line: &str| {
         if let Ok(c) = CString::new(line) {
             log(ctx, c.as_ptr());
         }
     };
-    match resign::engine::rsd_probe_blocking(sockaddr, &mut log_fn) {
+    match resign::engine::rsd_probe_blocking(sockaddr, pairing, &mut log_fn) {
+        Ok(s) => ok(&s),
+        Err(e) => err(&format!("{e:#}")),
+    }
+}
+
+/// ④ RSD 설치(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치(installation_proxy).
+/// `pairing_path`는 RpPairingFile, `ipa_path`는 ⑤ 재서명이 만든 서명된 .ipa. 같은 번들ID면 in-place
+/// 업그레이드(데이터 보존). 반환 {"ok":true,"path":"설치 완료…"} 또는 {"ok":false,"error":"…"}.
+///
+/// # Safety
+/// 문자열 인자는 유효한 NUL 종단 UTF-8. `log`는 이 스레드에서 `ctx`와 함께 호출된다.
+#[no_mangle]
+pub unsafe extern "C" fn shard_rsd_install(
+    addr: *const c_char,
+    port: u16,
+    pairing_path: *const c_char,
+    ipa_path: *const c_char,
+    log: ShardLog,
+    ctx: *mut c_void,
+) -> *mut c_char {
+    let addr_s = match unsafe { arg(addr) } {
+        Some(s) => s,
+        None => return err("주소가 없습니다"),
+    };
+    let ip = match IpAddr::from_str(&addr_s) {
+        Ok(a) => a,
+        Err(_) => return err("주소 형식이 잘못됨(예: 10.7.0.1)"),
+    };
+    let pairing_path = match unsafe { arg(pairing_path) } {
+        Some(s) => s,
+        None => return err("페어링 경로가 없습니다"),
+    };
+    let ipa_path = match unsafe { arg(ipa_path) } {
+        Some(s) => s,
+        None => return err("ipa 경로가 없습니다"),
+    };
+    let pairing = match std::fs::read(&pairing_path) {
+        Ok(b) => b,
+        Err(e) => return err(&format!("페어링 파일 읽기 실패: {e}")),
+    };
+    let sockaddr = SocketAddr::new(ip, port);
+    let mut log_fn = |line: &str| {
+        if let Ok(c) = CString::new(line) {
+            log(ctx, c.as_ptr());
+        }
+    };
+    match resign::engine::rsd_install_blocking(sockaddr, pairing, PathBuf::from(ipa_path), &mut log_fn) {
         Ok(s) => ok(&s),
         Err(e) => err(&format!("{e:#}")),
     }

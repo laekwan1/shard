@@ -255,14 +255,36 @@ pub fn probe_lockdownd_blocking(
     rt.block_on(crate::install::probe_lockdownd(addr, &pairing, log))
 }
 
-/// ④ RSD 스모크(동기, iOS C ABI용) — RSD 포트(예: 10.7.0.1:49152)에 붙어 서비스 목록으로 A/B 판별.
-/// Architecture A는 우리가 터널을 안 세우므로 백그라운드 태스크가 없어 current_thread로 충분.
-pub fn rsd_probe_blocking(addr: std::net::SocketAddr, log: &mut dyn FnMut(&str)) -> Result<String> {
+/// ④ RSD 스모크(동기, iOS C ABI용) — rppairing 터널을 세우고 터널 안 RSD 서비스 목록을 반환.
+/// jktcp 어댑터가 백그라운드 태스크를 띄우므로 **LocalSet 위에서** 돈다(ffi run_sync_local과 동일 —
+/// current_thread block_on 단독이면 어댑터 태스크가 안 돌 수 있다). `pairing`은 RpPairingFile 바이트.
+pub fn rsd_probe_blocking(
+    addr: std::net::SocketAddr,
+    pairing: Vec<u8>,
+    log: &mut dyn FnMut(&str),
+) -> Result<String> {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
-    rt.block_on(crate::rsd::rsd_probe(addr, log))
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&rt, crate::rsd::rsd_probe(addr, pairing, log))
+}
+
+/// ④ RSD 설치(동기, iOS C ABI용) — rppairing 터널 위에서 서명된 .ipa를 업로드+설치. 같은 번들ID면
+/// in-place 업그레이드(데이터 보존). `pairing`은 RpPairingFile 바이트, `ipa`는 ⑤가 만든 서명된 .ipa.
+pub fn rsd_install_blocking(
+    addr: std::net::SocketAddr,
+    pairing: Vec<u8>,
+    ipa: std::path::PathBuf,
+    log: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
+    let local = tokio::task::LocalSet::new();
+    local.block_on(&rt, crate::rsd::rsd_install(addr, pairing, &ipa, log))
 }
 
 /// 첫 폰 테스트용 — .ipa/설치 없이 **애플 실서버 왕복(②③)만** 검증한다:
