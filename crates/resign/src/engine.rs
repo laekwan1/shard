@@ -97,6 +97,28 @@ pub async fn resign_app(
     )
     .context("embedded.mobileprovision 쓰기")?;
     let entitlements_xml = entitlements_xml_from_profile(&profile.encoded_profile)?;
+    // 진단: iOS가 설치 직전 0xe8008016(invalid entitlements)로 거부할 때 원인을 좁힌다 — 서명에 들어갈
+    // 엔티틀먼트 키·get-task-allow·application-identifier와, 프로파일의 등록기기 수를 남긴다. 무료
+    // 개발 프로파일은 get-task-allow=true + 이 기기 UDID가 ProvisionedDevices에 있어야 설치·실행된다.
+    if let Ok(pl) = plist_from_mobileprovision(&profile.encoded_profile) {
+        let devs = pl
+            .get("ProvisionedDevices")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0);
+        if let Some(ent) = pl.get("Entitlements").and_then(Value::as_dictionary) {
+            let gta = ent.get("get-task-allow").and_then(Value::as_boolean);
+            let appid = ent
+                .get("application-identifier")
+                .and_then(Value::as_string)
+                .unwrap_or("?");
+            let keys: Vec<&str> = ent.keys().map(String::as_str).collect();
+            log(&format!(
+                "[진단] 프로파일 등록기기={devs}, get-task-allow={gta:?}, application-identifier={appid}"
+            ));
+            log(&format!("[진단] 엔티틀먼트 키: {}", keys.join(", ")));
+        }
+    }
 
     let signed = work.join("signed").join(app_dir.file_name().unwrap());
     fs::create_dir_all(signed.parent().unwrap())?;
