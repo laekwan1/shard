@@ -37,6 +37,19 @@ jobs:
       - name: Build the Rust xcframework
         run: bash ios/scripts/build-xcframework.sh
 
+      # ④ 온디바이스 설치: SideStore가 쓰는 minimuxer(usbmux+하트비트) + 그것이 의존하는
+      # libimobiledevice C 스택 + OpenSSL. 전부 프리빌트 xcframework라 소스 C 빌드가 없다.
+      # Rust 엔진은 발급·서명까지, minimuxer가 폰에 설치한다.
+      - name: Fetch on-device install xcframeworks (minimuxer + libimobiledevice + OpenSSL)
+        run: |
+          mkdir -p ios/build
+          dl() { curl -fsSL "$1" -o /tmp/x.zip && (cd ios/build && unzip -oqq /tmp/x.zip) && echo "ok: $2"; }
+          dl https://github.com/jkcoxson/minimuxer/releases/download/build/minimuxer.xcframework.zip minimuxer
+          dl https://github.com/SideStore/libimobiledevice-xcframework/releases/latest/download/libimobiledevice.xcframework.zip libimobiledevice
+          dl https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip OpenSSL
+          for f in minimuxer libimobiledevice OpenSSL; do test -d "ios/build/$f.xcframework" || { echo "$f.xcframework 없음"; exit 1; }; done
+          ls -d ios/build/*.xcframework
+
       - name: Install XcodeGen
         run: brew install xcodegen
 

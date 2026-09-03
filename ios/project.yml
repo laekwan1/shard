@@ -33,3 +33,11 @@ targets:
     dependencies:
       - framework: build/ShardCore.xcframework
         embed: false
+      # ④ 온디바이스 설치 스택(프리빌트 정적 xcframework, CI가 받아 둔다):
+      # minimuxer(usbmux muxer) → libimobiledevice(C, 그 심볼 제공) → OpenSSL(libimobiledevice가 씀).
+      - framework: build/minimuxer.xcframework
+        embed: false
+      - framework: build/libimobiledevice.xcframework
+        embed: false
+      - framework: build/OpenSSL.xcframework
+        embed: false

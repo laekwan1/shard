@@ -139,21 +139,33 @@ final class ResignModel: ObservableObject {
         summary = "페어링 파일 임포트 완료"
     }
 
-    /// ④ 1단계 스모크 테스트 — 페어링+터널 주소로 lockdownd에 붙는지 확인(설치의 전제인 전송 계층).
-    func probe(addr: String) {
+    /// ④ 연결 테스트 — minimuxer(usbmux+하트비트, SideStore 방식)로 폰에 붙는지 확인(설치의 전제).
+    /// LocalDevVPN이 10.7.0.1 터널을 주면 minimuxer가 그리로 붙어 기기 준비(하트비트)까지 올린다.
+    func minimuxerProbe() {
         guard !running, hasPairing else { return }
         running = true
         logLines = []; summary = nil; errorText = nil
-        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        let sd = stateDir
+        let pairingPath = pairingURL.path
         DispatchQueue.global(qos: .userInitiated).async {
-            let raw = self.pairingURL.path.withCString { p in
-                addr.withCString { a in
-                    shard_resign_probe(p, a, ResignModel.logCb, ctx)
+            do {
+                let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
+                DispatchQueue.main.async { self.logLines.append("minimuxer 시작(페어링 로드)...") }
+                set_debug(true)
+                try start(pairing, "file://" + sd)   // minimuxer는 앞 7글자(file://)를 떼고 로그 경로로 씀
+                DispatchQueue.main.async { self.logLines.append("start OK — 기기 준비 대기(하트비트)...") }
+                var okReady = false
+                for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+                DispatchQueue.main.async {
+                    self.running = false
+                    if okReady { self.summary = "minimuxer 연결 OK — 설치 준비됨(이제 '지금 갱신')" }
+                    else { self.errorText = "minimuxer 시작됨, 기기 준비 안 됨(연결/하트비트 대기 초과 — VPN·페어링 확인)" }
                 }
+            } catch let e as MinimuxerError {
+                DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 실패: \(describe_error(e).toString())" }
+            } catch {
+                DispatchQueue.main.async { self.running = false; self.errorText = "페어링 읽기 실패: \(error.localizedDescription)" }
             }
-            let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
-            if let raw = raw { shard_string_free(raw) }
-            DispatchQueue.main.async { self.finishProbe(json) }
         }
     }
 
@@ -167,8 +179,9 @@ final class ResignModel: ObservableObject {
         else { errorText = obj["error"] as? String ?? "알 수 없는 오류" }
     }
 
-    /// ④+⑤ 자기 자신 갱신 — 발급→재서명→(터널+페어링)설치. 실행 중 번들ID/경로를 그대로 넘긴다.
-    func selfUpdate(email: String, password: String, addr: String) {
+    /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, minimuxer가 폰에
+    /// 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
+    func selfUpdate(email: String, password: String) {
         guard !running, hasPairing else { return }
         running = true
         logLines = []; summary = nil; errorText = nil
@@ -178,19 +191,49 @@ final class ResignModel: ObservableObject {
         let bundleId = Bundle.main.bundleIdentifier ?? "net.sw.shard"
         let sd = stateDir
         let work = URL(fileURLWithPath: sd).appendingPathComponent("work").path
-        let pairing = pairingURL.path
+        let pairingPath = pairingURL.path
         DispatchQueue.global(qos: .userInitiated).async {
-            // 실행 중 번들ID로 재서명해야 in-place 업그레이드가 된다(Bundle.main.bundleIdentifier).
+            // 1) Rust: 발급 + 자기 재서명 (설치는 minimuxer가 → device_addr/pairing_path = NULL로 서명만).
             let raw: UnsafeMutablePointer<CChar>? =
                 email.withCString { e in password.withCString { p in bundleId.withCString { b in
                 "Shard".withCString { n in bundlePath.withCString { ab in sd.withCString { s in
-                work.withCString { w in addr.withCString { a in pairing.withCString { pr in
-                    shard_resign_selfupdate(e, p, b, n, ab, s, w, a, pr,
+                work.withCString { w in
+                    shard_resign_selfupdate(e, p, b, n, ab, s, w, nil, nil,
                                             ResignModel.tfaCb, ResignModel.logCb, ctx)
-                }}}}}}}}}
+                }}}}}}}
             let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
             if let raw = raw { shard_string_free(raw) }
-            DispatchQueue.main.async { self.finishProbe(json) }
+            guard let d = json.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                  (obj["ok"] as? Bool) == true, let ipaPath = obj["path"] as? String else {
+                let err = (json.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["error"] as? String
+                DispatchQueue.main.async { self.running = false; self.errorText = "서명 단계 실패 — \(err ?? json)" }
+                return
+            }
+            // 2) minimuxer: 시작 → 기기 준비(하트비트) → 업로드(AFC) → 설치.
+            do {
+                DispatchQueue.main.async { self.logLines.append("서명 완료. minimuxer로 설치 준비...") }
+                let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
+                set_debug(true)
+                try start(pairing, "file://" + sd)
+                var okReady = false
+                for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+                guard okReady else {
+                    DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 기기 준비 안 됨(VPN·페어링 확인)" }
+                    return
+                }
+                DispatchQueue.main.async { self.logLines.append("AFC 업로드 + 설치 중...") }
+                let ipaData = try Data(contentsOf: URL(fileURLWithPath: ipaPath))
+                try ipaData.withUnsafeBytes { (rawBuf: UnsafeRawBufferPointer) in
+                    try yeet_app_afc(bundleId, rawBuf.bindMemory(to: UInt8.self))
+                }
+                try install_ipa(bundleId)
+                DispatchQueue.main.async { self.running = false; self.summary = "설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요." }
+            } catch let e as MinimuxerError {
+                DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 설치 실패: \(describe_error(e).toString())" }
+            } catch {
+                DispatchQueue.main.async { self.running = false; self.errorText = "설치 실패: \(error.localizedDescription)" }
+            }
         }
     }
 
@@ -399,7 +442,7 @@ struct ResignView: View {
                                 .disableAutocorrection(true)
                         }
                         Button {
-                            model.probe(addr: probeAddr)
+                            model.minimuxerProbe()
                         } label: {
                             Text(model.running ? "확인 중..." : "연결 테스트")
                                 .font(.body.weight(.semibold))
@@ -412,7 +455,7 @@ struct ResignView: View {
 
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
-                            model.selfUpdate(email: email, password: password, addr: probeAddr)
+                            model.selfUpdate(email: email, password: password)
                         } label: {
                             Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
                                 .font(.body.weight(.semibold))
