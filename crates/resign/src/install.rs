@@ -72,11 +72,17 @@ pub async fn probe_lockdownd(
     let pairing_file =
         PairingFile::from_bytes(pairing).map_err(|e| anyhow!("페어링 파싱: {e:?}"))?;
 
-    // ① TCP 연결(터널 너머 lockdownd 포트).
+    // ① TCP 연결(터널 너머 lockdownd 포트). 라우트가 없으면 OS가 ~75s 매달리므로 10s로 자른다.
     log(&format!("① 연결... ({addr}:{})", LockdownClient::LOCKDOWND_PORT));
-    let mut lockdown = LockdownClient::connect(&provider)
-        .await
-        .map_err(|e| anyhow!("[① 연결] 실패(터널/주소 확인): {e:?}"))?;
+    let mut lockdown = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        LockdownClient::connect(&provider),
+    )
+    .await
+    .map_err(|_| {
+        anyhow!("[① 연결] 시간초과 10s — 앱이 {addr}에 못 닿음. LocalDevVPN이 켜져 연결됐는지, 그리고 기기 IP가 정말 {addr}인지 확인(LocalDevVPN 설정의 device IP가 다를 수 있음).")
+    })?
+    .map_err(|e| anyhow!("[① 연결] 실패(터널/주소): {e:?}"))?;
 
     // ② 세션(SSL, 페어링) — 여기서 early eof면 raw lockdown이 안 통하는 것(iOS 26 usbmux 계층 필요 신호).
     log("② 세션 시작(SSL, 페어링)...");
