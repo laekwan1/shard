@@ -322,19 +322,13 @@ struct BrowserScreen: View {
             // 잔량 비율(무료 7일 대비)만큼 아래에서 채운 색 모래를 겹친다. ≤3일이면 앰버. 탭=재서명 시트.
             if engineRevealed {
                 Divider().frame(height: 22).background(Color.toolbar)
-                // 맨 처음 디자인 그대로: SF Symbol hourglass 아이콘 + 남은 일수(숫자). ≤3일 앰버.
-                // (직접 그린 커스텀 모래시계는 사용자 지적으로 폐기.) 정확한 잔량은 시트에도 표기.
-                HStack(spacing: 3) {
-                    Image(systemName: "hourglass")
-                    if let d = signDaysLeft {
-                        Text("\(max(d, 0))").font(.caption2.weight(.semibold))
-                    }
-                }
-                .foregroundColor(hourglassColor)
-                .padding(.horizontal, 7).frame(height: 30)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
-                .contentShape(Rectangle())
-                .onTapGesture { showResign = true }
+                // SF Symbol hourglass 아이콘 그대로, 그 안의 '모래 양'으로 남은 일수 표현(숫자 없음).
+                // 7일=윗칸 가득/아래 빔, 지날수록 아래로. ≤3일 앰버. 정확한 일수는 시트에 표기.
+                HourglassSand(fraction: SigningInfo.fraction(), sand: hourglassColor, frameColor: .muted)
+                    .frame(width: 32, height: 30)               // 전원 버튼과 같은 상자
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
+                    .contentShape(Rectangle())
+                    .onTapGesture { showResign = true }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -718,5 +712,43 @@ struct BrowserScreen: View {
                                         extra: extra, title: title, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"
+    }
+}
+
+// 맨 처음 SF Symbol hourglass 아이콘과 **동일한 이미지** 그대로 두고, 그 안의 '모래 양'만 남은 비율로
+// 조절한다. 흐린 `hourglass` 윤곽 위에 채움 변형(`hourglass.tophalf.filled`=윗칸 모래=남은 시간,
+// `hourglass.bottomhalf.filled`=아랫칸=지난 시간)을 겹치고, 잔량만큼만 마스크로 드러낸다.
+// 7일=윗칸 가득/아래 빔, 지날수록 아래로 쌓임. ≤3일이면 sand=앰버. (SF Symbol 의미는 문자 그대로.)
+// fraction은 호출부에서 SigningInfo.fraction()으로 실시간 계산해 넘긴다(@State 캐시하면 onAppear
+// 타이밍에 0으로 남아 아래칸만 차 보였던 근본원인 — 캐시 안 함).
+struct HourglassSand: View {
+    var fraction: CGFloat
+    var sand: Color
+    var frameColor: Color
+
+    var body: some View {
+        let f = min(max(fraction, 0), 1)
+        return ZStack {
+            symbol("hourglass").foregroundColor(frameColor)              // 아이콘 윤곽(항상 전체)
+            symbol("hourglass.tophalf.filled").foregroundColor(sand)     // 윗칸 남은 모래
+                .mask(revealBelow((1 - f) / 2))
+            symbol("hourglass.bottomhalf.filled").foregroundColor(sand)  // 아랫칸 쌓인 모래
+                .mask(revealBelow((1 + f) / 2))
+        }
+    }
+
+    private func symbol(_ name: String) -> some View {
+        Image(systemName: name).font(.system(size: 18, weight: .regular))
+    }
+
+    // 위에서 `top` 비율만큼 비우고(투명) 그 아래[top…1]를 드러내는(불투명) 마스크. 반쪽 심볼은 해당
+    // 반칸에만 그려져 있어, 표면 아래를 통째로 드러내도 그 반칸에서 잔량만큼만 채워진다.
+    private func revealBelow(_ top: CGFloat) -> some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0).frame(height: geo.size.height * top)
+                Rectangle()
+            }
+        }
     }
 }

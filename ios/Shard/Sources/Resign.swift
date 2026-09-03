@@ -452,10 +452,11 @@ struct ResignView: View {
         let days = SigningInfo.daysLeft()
         let low = (days ?? 99) <= 3
         return HStack(spacing: 12) {
-            // 맨 처음 디자인 그대로: SF Symbol hourglass 아이콘. 정확한 일수는 옆 텍스트로.
-            Image(systemName: "hourglass")
-                .font(.title3)
-                .foregroundColor(days == nil ? .muted : (low ? .accent : .onSurface))
+            // SF Symbol hourglass 아이콘 그대로 + 모래 양(주소창과 동일). 옆에 정확한 일수 텍스트.
+            HourglassSand(fraction: SigningInfo.fraction(),
+                          sand: days == nil ? .muted : (low ? .accent : .onSurface),
+                          frameColor: .muted)
+                .frame(width: 22, height: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text("현재 서명").font(.caption).foregroundColor(.muted)
                 if let d = days {
