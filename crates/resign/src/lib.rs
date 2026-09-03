@@ -16,3 +16,5 @@ pub mod auth;
 pub mod dev_api;
 pub mod engine;
 pub mod install;
+// ④ iOS 17+ 설치 = RemoteXPC/RSD(install.rs의 classic lockdown은 iOS 26에서 죽음). docs/RSD-설치.md.
+pub mod rsd;

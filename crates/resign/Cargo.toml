@@ -39,7 +39,11 @@ aes-gcm = "0.10"
 # ④ 설치/갱신: idevice(jkcoxson)로 폰 lockdownd에 붙어 misagent(㉮ 프로파일)·installation_proxy(㉯
 # 앱)를 호출. ring 프로바이더가 iOS 크로스컴파일에 덜 까다롭다. **검증 0 — 폰에서만.**
 # master(0.1.66)에 pin — 읽은 API(install_package/MisagentClient/TcpProvider)가 master 기준.
-idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5", default-features = false, features = ["ring", "installation_proxy", "misagent", "tcp", "afc", "heartbeat"] }
+# xpc+rsd: iOS 17+ RemoteXPC/RSD 경로(설계 docs/RSD-설치.md). classic lockdown(62078)은 iOS 26에서
+# 죽어(QueryType RST) 설치가 RSD로만 됨. c442bd2에 이미 RsdProvider for IpAddr(Architecture A)와
+# install_package_with_callback_rsd가 있어 버전 범프 없이 rsd/xpc feature만 켠다. tunnel_tcp_stack/
+# remote_pairing은 Architecture B(우리가 터널을 세워야 할 때)에만 필요 — probe로 A/B 확인 후 추가.
+idevice = { git = "https://github.com/jkcoxson/idevice", rev = "c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5", default-features = false, features = ["ring", "installation_proxy", "misagent", "tcp", "afc", "heartbeat", "xpc", "rsd"] }
 # iOS C ABI는 동기다. async 엔진을 current-thread 런타임으로 block_on하는 래퍼가 필요.
 tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 # create_self_signed_code_signing_certificate가 chrono::Duration과 x509의 KeyAlgorithm을

@@ -255,6 +255,16 @@ pub fn probe_lockdownd_blocking(
     rt.block_on(crate::install::probe_lockdownd(addr, &pairing, log))
 }
 
+/// ④ RSD 스모크(동기, iOS C ABI용) — RSD 포트(예: 10.7.0.1:49152)에 붙어 서비스 목록으로 A/B 판별.
+/// Architecture A는 우리가 터널을 안 세우므로 백그라운드 태스크가 없어 current_thread로 충분.
+pub fn rsd_probe_blocking(addr: std::net::SocketAddr, log: &mut dyn FnMut(&str)) -> Result<String> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
+    rt.block_on(crate::rsd::rsd_probe(addr, log))
+}
+
 /// 첫 폰 테스트용 — .ipa/설치 없이 **애플 실서버 왕복(②③)만** 검증한다:
 /// 로그인 → 팀 → 인증서(CSR 제출) → App ID → 프로파일 발급. 성공하면 요약 문자열.
 /// 이게 되면 가장 어려운 인증·발급이 폰에서 실증된 것 — 서명·설치는 그 다음.

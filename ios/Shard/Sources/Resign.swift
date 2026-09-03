@@ -199,8 +199,31 @@ final class ResignModel: ObservableObject {
         return (false, diag)
     }
 
-    /// ④ 연결 테스트 — minimuxer(usbmux+하트비트, SideStore 방식)로 폰에 붙는지 확인(설치의 전제).
-    /// LocalDevVPN이 10.7.0.1 터널을 주면 minimuxer가 그리로 붙어 기기 준비(하트비트)까지 올린다.
+    /// ④ RSD 연결 테스트 (iOS 17+) — classic lockdown이 죽은 iOS 26의 진짜 경로. RSD(RemoteXPC)에 붙어
+    /// 서비스 목록을 읽고 Architecture A(터널 안 — 바로 설치 가능)/B(우리가 터널 세워야)를 판별한다.
+    /// **페어링 파일 불필요**(A는 루프백 VPN이 상류에서 처리). 포트는 StikDebug 기본 49152.
+    func rsdProbe(addr: String) {
+        guard !running else { return }
+        running = true
+        logLines = []; summary = nil; errorText = nil
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        DispatchQueue.global(qos: .userInitiated).async {
+            let raw = addr.withCString { a in shard_rsd_probe(a, 49152, ResignModel.logCb, ctx) }
+            let json = raw.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
+            if let raw = raw { shard_string_free(raw) }
+            DispatchQueue.main.async {
+                self.running = false
+                if let d = json.data(using: .utf8),
+                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                    if (obj["ok"] as? Bool) == true { self.summary = obj["path"] as? String }
+                    else { self.errorText = obj["error"] as? String ?? "알 수 없는 오류" }
+                } else { self.errorText = "응답 파싱 실패" }
+            }
+        }
+    }
+
+    /// ④ (구) 연결 테스트 — minimuxer(classic lockdown). iOS 26에서 QueryType RST로 막다른 길 확정.
+    /// RSD 전환 완료 시 제거 예정. 지금은 비교용으로 남겨둠(호출 안 함).
     func minimuxerProbe() {
         guard !running, hasPairing else { return }
         running = true
@@ -492,17 +515,21 @@ struct ResignView: View {
                                 .keyboardType(.numbersAndPunctuation)
                                 .disableAutocorrection(true)
                         }
+                        // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. 페어링 파일 불필요(A는 VPN이
+                        // 상류에서 처리). 서비스 목록으로 Architecture A/B를 판별한다(측정 먼저).
                         Button {
-                            model.minimuxerProbe()
+                            model.rsdProbe(addr: probeAddr)
                         } label: {
-                            Text(model.running ? "확인 중..." : "연결 테스트")
+                            Text(model.running ? "확인 중..." : "연결 테스트 (RSD)")
                                 .font(.body.weight(.semibold))
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
-                                .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
+                                .background(!model.running ? Color.accent : Color.toolbar)
+                                .foregroundColor(!model.running ? .onAccent : .muted)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
-                        .disabled(!model.hasPairing || model.running)
+                        .disabled(model.running)
+                        Text("RSD(:49152)로 iOS 17+ 경로 확인 — 페어링 불필요. StosVPN 켜고 누르세요. 로그의 서비스 목록에 installation_proxy가 보이면 바로 설치 가능(A).")
+                            .font(.caption2).foregroundColor(.muted)
 
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {

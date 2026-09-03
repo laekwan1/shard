@@ -8,7 +8,7 @@
 //! ⚠️ 실제 동작은 애플 실서버 + 실기기가 있어야 확인된다(폰). 여기까지는 링크·컴파일.
 
 use std::ffi::{c_char, c_void, CStr, CString};
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -257,6 +257,39 @@ pub unsafe extern "C" fn shard_resign_probe(
         }
     };
     match resign::engine::probe_lockdownd_blocking(addr, pairing, &mut log_fn) {
+        Ok(s) => ok(&s),
+        Err(e) => err(&format!("{e:#}")),
+    }
+}
+
+/// ④ RSD 스모크(iOS 17+): RSD 포트(addr:port, 예 10.7.0.1:49152)에 붙어 서비스 목록으로 A/B 판별.
+/// classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 이걸로 대체한다.
+/// 반환 {"ok":true,"path":"…판별 요약…"} 또는 {"ok":false,"error":"…"}. 서비스 목록은 log로 흐른다.
+///
+/// # Safety
+/// `addr`는 유효한 NUL 종단 UTF-8. `log`는 이 스레드에서 `ctx`와 함께 호출된다.
+#[no_mangle]
+pub unsafe extern "C" fn shard_rsd_probe(
+    addr: *const c_char,
+    port: u16,
+    log: ShardLog,
+    ctx: *mut c_void,
+) -> *mut c_char {
+    let addr_s = match unsafe { arg(addr) } {
+        Some(s) => s,
+        None => return err("주소가 없습니다"),
+    };
+    let ip = match IpAddr::from_str(&addr_s) {
+        Ok(a) => a,
+        Err(_) => return err("주소 형식이 잘못됨(예: 10.7.0.1)"),
+    };
+    let sockaddr = SocketAddr::new(ip, port);
+    let mut log_fn = |line: &str| {
+        if let Ok(c) = CString::new(line) {
+            log(ctx, c.as_ptr());
+        }
+    };
+    match resign::engine::rsd_probe_blocking(sockaddr, &mut log_fn) {
         Ok(s) => ok(&s),
         Err(e) => err(&format!("{e:#}")),
     }
