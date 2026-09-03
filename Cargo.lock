@@ -474,6 +474,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2909,10 +2931,12 @@ name = "idevice"
 version = "0.1.66"
 source = "git+https://github.com/jkcoxson/idevice?rev=c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5#c442bd235bd14d6d5c8f28f85c9e6179e3a4c3d5"
 dependencies = [
+ "async-stream",
  "async_zip",
  "base64 0.22.1",
  "chrono",
  "futures",
+ "indexmap",
  "libc",
  "plist",
  "plist-macro",
@@ -2923,6 +2947,7 @@ dependencies = [
  "tokio",
  "tokio-rustls 0.26.4",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -2968,6 +2993,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -6840,7 +6867,9 @@ checksum = "bf3923a6f5c4c6382e0b653c4117f48d631ea17f38ed86e2a828e6f7412f5239"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "md-5",
  "rand 0.10.2",
+ "serde_core",
  "wasm-bindgen",
 ]
 
