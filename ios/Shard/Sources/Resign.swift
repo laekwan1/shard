@@ -139,6 +139,24 @@ final class ResignModel: ObservableObject {
         summary = "페어링 파일 임포트 완료"
     }
 
+    /// minimuxer.log(minimuxer Info + idevice Debug)에서 ready 실패의 진짜 이유를 뽑아 준다.
+    /// minimuxer의 ready()는 매 폴에 "device connection succeeded: X; at least 1 device exists: Y;
+    /// last heartbeat was a success: Z; ..." 한 줄을 남기고, 페어링/SSL이 깨지면 idevice ERROR를 남긴다.
+    /// 폰에선 파일을 못 빼므로 그 줄들만 골라 UI로 끌어올린다(추측 대신 근거로 다음 수를 정하려고).
+    private func minimuxerLogTail(sd: String, maxLines: Int = 10) -> [String] {
+        let path = URL(fileURLWithPath: sd).appendingPathComponent("minimuxer.log")
+        guard let text = try? String(contentsOf: path, encoding: .utf8), !text.isEmpty else {
+            return ["(minimuxer.log 없음/비어있음)"]
+        }
+        let lines = text.split(separator: "\n").map(String.init)
+        // 의미 있는 줄만: not ready 브레이크다운 + 에러/경고/하트비트/페어링/SSL/lockdown.
+        let kw = ["not ready", "rror", "arn", "eartbeat", "air", "SSL", "ssl", "handshake",
+                  "ockdown", "refused", "timed out", "Invalid", "HostID", "denied"]
+        let picked = lines.filter { line in kw.contains { line.contains($0) } }
+        let chosen = (picked.isEmpty ? lines : picked).suffix(maxLines)
+        return chosen.map { $0.count > 150 ? String($0.suffix(150)) : $0 }
+    }
+
     /// ④ 공통 — libusbmuxd를 minimuxer 내부 muxer(127.0.0.1:27015)로 향하게 한 뒤 start→ready까지 올린다.
     /// **`target_minimuxer_address()`를 `start()` 전에 부르지 않으면** libusbmuxd가 기본 usbmuxd
     /// 소켓(iOS엔 없음)을 봐서 `fetch_first_device()`가 실패 → `ready()`가 영원히 false다. 이 한 줄이
@@ -152,11 +170,19 @@ final class ResignModel: ObservableObject {
         var okReady = false
         for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
         if okReady { return (true, "") }
-        // 안 되면 어디서 막혔는지 갈라준다: 직접 TCP(터널)까진 되는지 → 그 위 muxer/하트비트인지.
-        let tunnel = test_device_connection()      // 10.7.0.1:62078로 직접 TCP (env var 무관, 터널만 보는 검사)
-        let diag = tunnel
-            ? "기기 TCP는 열렸는데 muxer/하트비트 미준비 — 페어링 파일 확인"
-            : "터널로 기기(10.7.0.1:62078) 못 닿음 — StosVPN 켜짐·연결 상태 확인"
+        // 실패: 세 신호로 어디서 막혔는지 가르고, minimuxer.log(진짜 이유)를 UI로 끌어올린다.
+        let tunnel = test_device_connection()      // 10.7.0.1:62078 직접 TCP (페어링 무관 — 터널만 봄)
+        let udid = fetch_udid()?.toString()        // libusbmuxd→내부 muxer로 기기가 잡히나(여기부턴 페어링 SSL 필요)
+        let tail = self.minimuxerLogTail(sd: sd)
+        DispatchQueue.main.async {
+            self.logLines.append("── 진단: TCP(터널) \(tunnel ? "열림" : "막힘") · 기기UDID \(udid ?? "못 찾음") ──")
+            self.logLines.append("── minimuxer.log ──")
+            for l in tail { self.logLines.append(l) }
+        }
+        let diag: String
+        if !tunnel { diag = "터널로 기기(10.7.0.1:62078) 못 닿음 — StosVPN 연결 확인" }
+        else if udid == nil { diag = "터널은 열렸는데 페어링 SSL로 기기를 못 잡음 — 페어링이 이 기기 것/최신인지 확인" }
+        else { diag = "기기는 찾았는데 하트비트 미완료 — 아래 로그 확인" }
         return (false, diag)
     }
 
