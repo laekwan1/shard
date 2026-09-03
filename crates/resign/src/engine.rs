@@ -183,7 +183,22 @@ pub fn resign_and_install_blocking(
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
     let result = rt.block_on(async {
-        let signed = resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await?;
+        // resign_app은 저장 세션을 재사용(resume_or_login)한다. 그 세션이 만료면 포털이 1100("session
+        // has expired")으로 거부한다 — 그때 세션을 비우고 같은 실행에서 새 로그인으로 한 번 재시도한다
+        // (verify 경로와 같은 "한 번 눌러 반드시 결과" 보장; 없으면 사용자가 두 번 눌러야 했다 — 폰 확인).
+        let signed = match resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await {
+            Ok(s) => s,
+            Err(e) => {
+                let es = format!("{e:#}").to_lowercase();
+                if es.contains("1100") || es.contains("expired") {
+                    log("저장 세션 만료(1100) — 세션을 비우고 새로 로그인해 재시도합니다.");
+                    crate::auth::AppleSession::clear_session(&p.state_dir);
+                    resign_app(&p.req, &p.ipa, || tfa(), p.state_dir.clone(), &p.work_dir, log).await?
+                } else {
+                    return Err(e);
+                }
+            }
+        };
         log("서명 완료.");
         if let (Some(addr), Some(pairing_path)) = (p.device_addr, p.pairing_path.as_ref()) {
             log(&format!("[④ 설치] lockdownd 연결({addr})..."));
