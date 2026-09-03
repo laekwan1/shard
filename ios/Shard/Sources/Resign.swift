@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
 
 // 현재 앱 서명의 남은 유효기간. 앱 번들의 `embedded.mobileprovision`(현재 서명한 도구가 넣은 것 —
 // 지금은 SideStore/Sideloadly, 나중엔 우리 엔진)의 ExpirationDate를 읽는다. 모래시계가 이 값을 담는다.
@@ -139,22 +140,23 @@ final class ResignModel: ObservableObject {
         summary = "페어링 파일 임포트 완료"
     }
 
-    /// minimuxer.log(minimuxer Info + idevice Debug)에서 ready 실패의 진짜 이유를 뽑아 준다.
-    /// minimuxer의 ready()는 매 폴에 "device connection succeeded: X; at least 1 device exists: Y;
-    /// last heartbeat was a success: Z; ..." 한 줄을 남기고, 페어링/SSL이 깨지면 idevice ERROR를 남긴다.
-    /// 폰에선 파일을 못 빼므로 그 줄들만 골라 UI로 끌어올린다(추측 대신 근거로 다음 수를 정하려고).
-    private func minimuxerLogTail(sd: String, maxLines: Int = 10) -> [String] {
-        let path = URL(fileURLWithPath: sd).appendingPathComponent("minimuxer.log")
-        guard let text = try? String(contentsOf: path, encoding: .utf8), !text.isEmpty else {
-            return ["(minimuxer.log 없음/비어있음)"]
+    /// 로그 파일에서 keyword에 맞는 줄만 골라 마지막 몇 줄을 준다(맞는 게 없으면 그냥 tail). 줄당 150자 컷.
+    /// 폰에선 파일을 못 빼므로 UI로 끌어올려 근거로 다음 수를 정한다(추측 금지).
+    private func fileTail(_ url: URL, maxLines: Int, keywords: [String]) -> [String] {
+        guard let text = try? String(contentsOf: url, encoding: .utf8), !text.isEmpty else {
+            return ["(\(url.lastPathComponent) 없음/비어있음)"]
         }
         let lines = text.split(separator: "\n").map(String.init)
-        // 의미 있는 줄만: not ready 브레이크다운 + 에러/경고/하트비트/페어링/SSL/lockdown.
-        let kw = ["not ready", "rror", "arn", "eartbeat", "air", "SSL", "ssl", "handshake",
-                  "ockdown", "refused", "timed out", "Invalid", "HostID", "denied"]
-        let picked = lines.filter { line in kw.contains { line.contains($0) } }
+        let picked = lines.filter { line in keywords.contains { line.contains($0) } }
         let chosen = (picked.isEmpty ? lines : picked).suffix(maxLines)
         return chosen.map { $0.count > 150 ? String($0.suffix(150)) : $0 }
+    }
+
+    /// minimuxer.log(minimuxer Info + idevice Debug): ready() 매 폴의 "…success: false…" 브레이크다운.
+    private func minimuxerLogTail(sd: String, maxLines: Int = 8) -> [String] {
+        fileTail(URL(fileURLWithPath: sd).appendingPathComponent("minimuxer.log"), maxLines: maxLines,
+                 keywords: ["not ready", "rror", "arn", "eartbeat", "air", "SSL", "ssl", "handshake",
+                            "ockdown", "refused", "timed out", "Invalid", "HostID", "denied"])
     }
 
     /// ④ 공통 — libusbmuxd를 minimuxer 내부 muxer(127.0.0.1:27015)로 향하게 한 뒤 start→ready까지 올린다.
@@ -162,8 +164,12 @@ final class ResignModel: ObservableObject {
     /// 소켓(iOS엔 없음)을 봐서 `fetch_first_device()`가 실패 → `ready()`가 영원히 false다. 이 한 줄이
     /// ④의 make-or-break였다(폰: "start OK"인데 "기기 준비 안 됨"으로 대기 초과). 반환 (ready, 진단문).
     private func minimuxerReady(pairingPath: String, sd: String) throws -> (Bool, String) {
+        // libimobiledevice/idevice의 C-레벨 상세(핸드셰이크/SSL/lockdown 원시 에러)는 stderr로 나가는데
+        // minimuxer가 그걸 UnknownError로 뭉갠다. 부르기 전에 stderr를 파일로 돌려(freopen) 원시 이유를 붙잡는다.
+        let cErrPath = URL(fileURLWithPath: sd).appendingPathComponent("idevice_stderr.log").path
+        freopen(cErrPath, "w", stderr); setvbuf(stderr, nil, _IONBF, 0)
         let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
-        set_debug(true)
+        set_debug(true)                            // idevice_set_debug_level(1) → 위 stderr 파일에 상세가 쌓인다
         target_minimuxer_address()                 // USBMUXD_SOCKET_ADDRESS=127.0.0.1:27015 심음 — 이게 없으면 아래 start는 떠도 기기를 못 찾는다
         try start(pairing, "file://" + sd)         // 내부 muxer가 10.7.0.1:62078(터널 너머 기기)로 다리를 놓음. STARTED 플래그로 중복 호출 안전.
         DispatchQueue.main.async { self.logLines.append("start OK — 기기 준비 대기(하트비트)...") }
@@ -173,16 +179,23 @@ final class ResignModel: ObservableObject {
         // 실패: 세 신호로 어디서 막혔는지 가르고, minimuxer.log(진짜 이유)를 UI로 끌어올린다.
         let tunnel = test_device_connection()      // 10.7.0.1:62078 직접 TCP (페어링 무관 — 터널만 봄)
         let udid = fetch_udid()?.toString()        // libusbmuxd→내부 muxer로 기기가 잡히나(여기부턴 페어링 SSL 필요)
-        let tail = self.minimuxerLogTail(sd: sd)
+        let mmTail = self.minimuxerLogTail(sd: sd)
+        let cErr = URL(fileURLWithPath: sd).appendingPathComponent("idevice_stderr.log")
+        let cTail = self.fileTail(cErr, maxLines: 14,
+                                  keywords: ["ERROR", "rror", "SSL", "ssl", "andshake", "ockdown",
+                                             "air", "efus", "denied", "ervice", "rust", "scrow",
+                                             "HostID", "Invalid", "onnect"])
         DispatchQueue.main.async {
             self.logLines.append("── 진단: TCP(터널) \(tunnel ? "열림" : "막힘") · 기기UDID \(udid ?? "못 찾음") ──")
+            self.logLines.append("── idevice(C) stderr — 진짜 이유 ──")
+            for l in cTail { self.logLines.append(l) }
             self.logLines.append("── minimuxer.log ──")
-            for l in tail { self.logLines.append(l) }
+            for l in mmTail { self.logLines.append(l) }
         }
         let diag: String
         if !tunnel { diag = "터널로 기기(10.7.0.1:62078) 못 닿음 — StosVPN 연결 확인" }
-        else if udid == nil { diag = "터널은 열렸는데 페어링 SSL로 기기를 못 잡음 — 페어링이 이 기기 것/최신인지 확인" }
-        else { diag = "기기는 찾았는데 하트비트 미완료 — 아래 로그 확인" }
+        else if udid == nil { diag = "터널은 열렸는데 페어링 SSL로 기기를 못 잡음 — 페어링 재발급" }
+        else { diag = "하트비트 lockdown 실패 — 아래 idevice(C) stderr가 진짜 이유" }
         return (false, diag)
     }
 
