@@ -39,5 +39,7 @@ targets:
         embed: false
       - framework: build/libimobiledevice.xcframework
         embed: false
+      # OpenSSL은 **동적** 프레임워크(MH_DYLIB)라 앱에 담아야(embed) dyld가 실행 시 찾는다.
+      # embed:false면 링크는 되지만 실행이 안 된다(폰 확인). minimuxer·libimobiledevice는 정적(.a)이라 false.
       - framework: build/OpenSSL.xcframework
-        embed: false
+        embed: true
