@@ -157,6 +157,38 @@ final class ResignModel: ObservableObject {
         }
     }
 
+    /// ④ minimuxer 연결 테스트 — SideStore식 usbmux 계층으로 폰에 붙는지(설치의 전제) 확인.
+    /// LocalDevVPN/StosVPN이 10.7.0.1 터널을 제공하면 minimuxer가 그리로 붙어 하트비트까지 올린다.
+    /// 실패 시 MinimuxerError를 그대로 노출(연결/XPC/instproxy 등 어디서 막혔는지).
+    func minimuxerProbe() {
+        guard !running, hasPairing else { return }
+        running = true
+        logLines = []; summary = nil; errorText = nil
+        let logDir = "file://" + stateDir            // minimuxer가 앞 7글자(file://)를 떼고 로그 경로로 씀
+        let pairingURL = self.pairingURL
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let pairing = try String(contentsOf: pairingURL, encoding: .utf8)
+                DispatchQueue.main.async { self.logLines.append("minimuxer 시작(페어링 로드)...") }
+                set_debug(true)
+                try start(pairing, logDir)
+                DispatchQueue.main.async { self.logLines.append("start OK — 기기 준비 대기(하트비트)...") }
+                var ok = false
+                for _ in 0..<40 { if ready() { ok = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+                DispatchQueue.main.async {
+                    self.running = false
+                    if ok { self.summary = "minimuxer 연결 OK — 설치 준비됨" }
+                    else { self.errorText = "minimuxer 시작됨, 기기 준비 안 됨(연결/하트비트 대기 초과 — VPN·페어링 확인)" }
+                }
+            } catch let e as MinimuxerError {
+                let name = describe_error(e).toString()
+                DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 실패: \(name)" }
+            } catch {
+                DispatchQueue.main.async { self.running = false; self.errorText = "페어링 읽기 실패: \(error.localizedDescription)" }
+            }
+        }
+    }
+
     // 프로브 결과 처리 — 발급(finish)과 달리 계정을 기록하지 않는다.
     private func finishProbe(_ json: String) {
         running = false
@@ -399,9 +431,9 @@ struct ResignView: View {
                                 .disableAutocorrection(true)
                         }
                         Button {
-                            model.probe(addr: probeAddr)
+                            model.minimuxerProbe()
                         } label: {
-                            Text(model.running ? "확인 중..." : "연결 테스트")
+                            Text(model.running ? "확인 중..." : "연결 테스트 (minimuxer)")
                                 .font(.body.weight(.semibold))
                                 .frame(maxWidth: .infinity).padding(.vertical, 10)
                                 .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
