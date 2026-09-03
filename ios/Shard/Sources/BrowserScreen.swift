@@ -730,9 +730,12 @@ struct HourglassSand: View {
         let f = min(max(fraction, 0), 1)
         return ZStack {
             symbol("hourglass").foregroundColor(frameColor)              // 아이콘 윤곽(항상 전체)
-            symbol("hourglass.tophalf.filled").foregroundColor(sand)     // 윗칸 남은 모래
+            // ⚠️ 실기기(iOS 26)에서 tophalf/bottomhalf.filled가 **이름과 반대로** 렌더된다(문서상
+            //    tophalf=위지만 실제 아래에 그려짐). 사용자가 4회 '모래가 아래' 지적 → 두 심볼을 맞바꿔
+            //    남은 모래(잔량 비율)가 **윗칸**에 오게 한다. 7일=위 가득/아래 빔.
+            symbol("hourglass.bottomhalf.filled").foregroundColor(sand)  // 남은 모래 → 실제로 윗칸에 렌더
                 .mask(revealBelow((1 - f) / 2))
-            symbol("hourglass.bottomhalf.filled").foregroundColor(sand)  // 아랫칸 쌓인 모래
+            symbol("hourglass.tophalf.filled").foregroundColor(sand)     // 쌓인 모래 → 실제로 아랫칸에 렌더
                 .mask(revealBelow((1 + f) / 2))
         }
     }
