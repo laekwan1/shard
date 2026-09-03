@@ -75,17 +75,29 @@ RSD 핸드셰이크·서비스목록 → `afc`로 서명 .ipa 업로드 → `ins
    경로도 정리(사문화).
 5. **문서·검증**: 폰에서 도달성→터널→RSD 서비스→업로드→설치 단계 로그로 실증.
 
-## 위험·미지수 (착수 전/중 확인)
+## 실측·확정 (2026-09-04) — 아래가 최신, 위 "진짜 길/단계"의 세부는 이걸로 갱신됨
 
-- **R1 RSD 포트 [해소]**: 10.7.0.1:**49152**(StikJIT 기본). 단 **StosVPN이 49152를 라우팅하는지**
-  폰에서 확인 필요(LocalDevVPN은 StikDebug로 검증됨; StosVPN도 SideStore가 RSD로 갔으니 유력).
-  안 되면 LocalDevVPN으로.
-- **R2 페어링 포맷**: RemoteXPC 터널이 기존 `.mobiledevicepairing`을 그대로 받는지, 아니면
-  `rp_pairing_file_*`(RP 포맷)이 필요한지. FFI에 `rp_pairing_file_from_bytes`가 있어 변환 경로 존재.
-- **R3 FFI 빌드**: idevice `ffi` 크레이트를 iOS로 빌드하는 feature·타깃 정합(우리 fork rev 호환).
-  → 프리빌트로 먼저 검증해 빌드 리스크와 배선 리스크를 분리.
+폰 실측 + 소스 조사로 확정된 것(위 설계의 몇 부분을 정정한다):
+
+- **R1 [정정·확정]**: 10.7.0.1:49152는 **RSD/RemoteXPC가 아니라 RemotePairing(JSON) 엔드포인트**다.
+  bare `RsdHandshake::new`(HTTP/2)를 보내면 기기가 **리셋**한다(errno 54, 폰 확인). 그래서
+  `tunnel_create_remotexpc`(RSD 먼저)가 아니라 **`tunnel_create_rppairing`**(직접 TCP→RPPairing→
+  TLS-PSK 터널→jktcp 어댑터→터널 안 RSD)을 쓴다 — StikJIT/JITSession.swift이 그렇게 한다. 루프백 VPN
+  (StosVPN·LocalDevVPN)은 둘 다 순수 IP 반사기라 10.7.0.1:P를 기기의 P로 되쏠 뿐, 노출 프로토콜을
+  바꾸지 않는다. **사용자는 LocalDevVPN 사용.**
+- **R2 [정정·확정]**: **classic `.mobiledevicepairing`은 이 경로에 못 쓴다.** `RpPairingFile`은 완전히
+  다른 스키마(Ed25519 `public_key`/`private_key`/`identifier`/`alt_irk`)이고 변환기가 없다
+  (`RpPairingFile::from_bytes`가 classic을 거부). RP 페어링은 pair-verify(무PIN)로 재사용되지만,
+  최초 발급(pair-setup)은 화면 PIN+Trust가 필요해 온디바이스 자동 생성이 안 된다 → **`idevice_pair`
+  (rppairing 빌드)로 USB에서 1회 발급**해 가져온다(Sideloadly 초기설치급 1회 부트스트랩). idevice_pair는
+  Windows GUI exe 있음. (참고: SideStore 자체는 RSD가 아니라 **classic lockdown+classic 페어링**으로
+  설치하는데, 그 classic 경로는 iOS 26에서 우리가 막힌 그 길이라 재현이 불안정 — RP 경로로 간다.)
+- **R3 [해소]**: 별도 `libidevice_ffi.a` **불필요**. `crates/shard-mobile`에서 idevice **Rust API를
+  직접 래핑**(resign::rsd)했고, 버전 범프 없이 features에 `xpc,rsd,remote_pairing,tunnel_tcp_stack`만
+  추가. **호스트 `cargo check` 통과**(jktcp·ed25519/x25519·chacha20poly1305 컴파일 확인). iOS
+  크로스컴파일은 순수 Rust라 통과 유력 → CI로 최종 확인.
 - **R4 Developer Mode**: iOS 16+ RSD/RemoteXPC는 기기 Developer Mode ON이 전제일 수 있음
-  (사이드로드 이력이면 대개 켜짐) — 폰에서 확인.
+  (사이드로드 이력이면 대개 켜짐; idevice_pair가 켜주기도 함) — 폰에서 확인.
 - **R5 get-task-allow [무관 예상]**: JIT엔 필요하지만 **설치엔 불필요**(installation_proxy는
   디바이스 서비스). 우리 케이스와 무관할 것.
 - **R6 DDI [무관 예상]**: JIT/일부 서비스는 Developer Disk Image 마운트가 필요하지만
