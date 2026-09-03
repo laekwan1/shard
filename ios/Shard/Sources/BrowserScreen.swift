@@ -322,14 +322,19 @@ struct BrowserScreen: View {
             // 잔량 비율(무료 7일 대비)만큼 아래에서 채운 색 모래를 겹친다. ≤3일이면 앰버. 탭=재서명 시트.
             if engineRevealed {
                 Divider().frame(height: 22).background(Color.toolbar)
-                // 실제 모래시계처럼: 남은 일수가 '윗칸 모래'(7일=위 가득/아래 빔), 지난 만큼 아래로 쌓인다.
-                // SF Symbol은 위/아래 반칸 두 단계뿐이라 양 조절이 안 돼(사용자 지적) 직접 그린다.
-                HourglassSand(fraction: SigningInfo.fraction(), sand: hourglassColor, frameColor: .muted)
-                    .frame(width: 15, height: 22)               // 세로형 모래시계
-                    .frame(width: 32, height: 30)               // 전원 버튼과 같은 상자(가운데 정렬)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
-                    .contentShape(Rectangle())
-                    .onTapGesture { showResign = true }
+                // 맨 처음 디자인 그대로: SF Symbol hourglass 아이콘 + 남은 일수(숫자). ≤3일 앰버.
+                // (직접 그린 커스텀 모래시계는 사용자 지적으로 폐기.) 정확한 잔량은 시트에도 표기.
+                HStack(spacing: 3) {
+                    Image(systemName: "hourglass")
+                    if let d = signDaysLeft {
+                        Text("\(max(d, 0))").font(.caption2.weight(.semibold))
+                    }
+                }
+                .foregroundColor(hourglassColor)
+                .padding(.horizontal, 7).frame(height: 30)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(hourglassColor == .accent ? Color.accent : Color.toolbar, lineWidth: 1))
+                .contentShape(Rectangle())
+                .onTapGesture { showResign = true }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -713,63 +718,5 @@ struct BrowserScreen: View {
                                         extra: extra, title: title, task: task, progress: report)
         }
         banner = "다운로드를 시작했습니다"
-    }
-}
-
-// 남은 서명일수를 실제 모래시계처럼: 곡선 실루엣 안에서 '윗칸 모래'가 남은 비율(7일=위 가득/아래 빔),
-// 시간이 지나면 아래로 쌓인다. **모래는 sand 색으로 채운 영역**(사용자: 채운/검은 부분=모래, 7일이면
-// 위에), 윤곽은 frameColor 선. SF Symbol 반쪽 채움은 기기에서 위/아래가 뒤집혀 나오고 원격에서 못
-// 잡아, **픽셀을 직접 제어하는 이 방식으로 확정**한다(목업 7/3.5/1/0일 검증). fraction은 호출부에서
-// SigningInfo.fraction()으로 실시간 계산해 넘긴다(캐시 X — @State면 onAppear 타이밍에 0으로 남아 뒤집힘).
-struct HourglassSand: View {
-    var fraction: CGFloat
-    var sand: Color
-    var frameColor: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
-            let f = min(max(fraction, 0), 1)
-            let cy = h / 2
-            let topSurf = cy * (1 - f)      // 윗모래 표면 y(작을수록 가득)
-            let botSurf = cy * (1 + f)      // 아랫모래 표면 y(클수록 빔)
-            ZStack {
-                // 모래: 실루엣을 채우되 잔량 띠(윗칸 표면~목, 아랫칸 바닥~표면)만 마스크로 드러냄.
-                // 실루엣이 목으로 좁아져 자연히 삼각형처럼 찬다. f=1이면 윗칸 가득/아랫칸 빔.
-                HourglassShape()
-                    .fill(sand)
-                    .mask(
-                        Path { p in
-                            p.addRect(CGRect(x: 0, y: topSurf, width: w, height: max(0, cy - topSurf)))
-                            p.addRect(CGRect(x: 0, y: botSurf, width: w, height: max(0, h - botSurf)))
-                        }
-                    )
-                HourglassShape()
-                    .stroke(frameColor, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
-            }
-        }
-    }
-}
-
-// 곡선 옆면 + 살짝의 목 너비를 가진 모래시계 실루엣(상하 대칭). 각진 나비넥타이(뾰족한 목·직선
-// 옆면)는 투박하다는 지적으로 폐기 — 오목한 곡선으로 매끈하게.
-struct HourglassShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width, h = rect.height
-        let cx = w / 2, cy = h / 2
-        let inset = w * 0.05
-        let nw = w * 0.065                 // 목 반너비(0이면 뾰족 → 살짝 준다)
-        let bow = (w / 2 - inset) * 0.28
-        var p = Path()
-        p.move(to: CGPoint(x: inset, y: inset))
-        p.addLine(to: CGPoint(x: w - inset, y: inset))
-        p.addQuadCurve(to: CGPoint(x: cx + nw, y: cy), control: CGPoint(x: cx + bow, y: cy * 0.55))
-        p.addQuadCurve(to: CGPoint(x: w - inset, y: h - inset), control: CGPoint(x: cx + bow, y: cy * 1.45))
-        p.addLine(to: CGPoint(x: inset, y: h - inset))
-        p.addQuadCurve(to: CGPoint(x: cx - nw, y: cy), control: CGPoint(x: cx - bow, y: cy * 1.45))
-        p.addQuadCurve(to: CGPoint(x: inset, y: inset), control: CGPoint(x: cx - bow, y: cy * 0.55))
-        p.closeSubpath()
-        return p
     }
 }

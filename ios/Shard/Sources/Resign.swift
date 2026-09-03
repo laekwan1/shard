@@ -452,11 +452,10 @@ struct ResignView: View {
         let days = SigningInfo.daysLeft()
         let low = (days ?? 99) <= 3
         return HStack(spacing: 12) {
-            // 주소창 모래시계와 같은 표현(모래 양 = 남은 비율). 여기선 옆에 정확한 일수도 쓴다.
-            HourglassSand(fraction: SigningInfo.fraction(),
-                          sand: days == nil ? .muted : (low ? .accent : .onSurface),
-                          frameColor: .muted)
-                .frame(width: 22, height: 26)
+            // 맨 처음 디자인 그대로: SF Symbol hourglass 아이콘. 정확한 일수는 옆 텍스트로.
+            Image(systemName: "hourglass")
+                .font(.title3)
+                .foregroundColor(days == nil ? .muted : (low ? .accent : .onSurface))
             VStack(alignment: .leading, spacing: 2) {
                 Text("현재 서명").font(.caption).foregroundColor(.muted)
                 if let d = days {
