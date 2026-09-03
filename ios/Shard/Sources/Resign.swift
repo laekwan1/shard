@@ -139,6 +139,27 @@ final class ResignModel: ObservableObject {
         summary = "페어링 파일 임포트 완료"
     }
 
+    /// ④ 공통 — libusbmuxd를 minimuxer 내부 muxer(127.0.0.1:27015)로 향하게 한 뒤 start→ready까지 올린다.
+    /// **`target_minimuxer_address()`를 `start()` 전에 부르지 않으면** libusbmuxd가 기본 usbmuxd
+    /// 소켓(iOS엔 없음)을 봐서 `fetch_first_device()`가 실패 → `ready()`가 영원히 false다. 이 한 줄이
+    /// ④의 make-or-break였다(폰: "start OK"인데 "기기 준비 안 됨"으로 대기 초과). 반환 (ready, 진단문).
+    private func minimuxerReady(pairingPath: String, sd: String) throws -> (Bool, String) {
+        let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
+        set_debug(true)
+        target_minimuxer_address()                 // USBMUXD_SOCKET_ADDRESS=127.0.0.1:27015 심음 — 이게 없으면 아래 start는 떠도 기기를 못 찾는다
+        try start(pairing, "file://" + sd)         // 내부 muxer가 10.7.0.1:62078(터널 너머 기기)로 다리를 놓음. STARTED 플래그로 중복 호출 안전.
+        DispatchQueue.main.async { self.logLines.append("start OK — 기기 준비 대기(하트비트)...") }
+        var okReady = false
+        for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+        if okReady { return (true, "") }
+        // 안 되면 어디서 막혔는지 갈라준다: 직접 TCP(터널)까진 되는지 → 그 위 muxer/하트비트인지.
+        let tunnel = test_device_connection()      // 10.7.0.1:62078로 직접 TCP (env var 무관, 터널만 보는 검사)
+        let diag = tunnel
+            ? "기기 TCP는 열렸는데 muxer/하트비트 미준비 — 페어링 파일 확인"
+            : "터널로 기기(10.7.0.1:62078) 못 닿음 — StosVPN 켜짐·연결 상태 확인"
+        return (false, diag)
+    }
+
     /// ④ 연결 테스트 — minimuxer(usbmux+하트비트, SideStore 방식)로 폰에 붙는지 확인(설치의 전제).
     /// LocalDevVPN이 10.7.0.1 터널을 주면 minimuxer가 그리로 붙어 기기 준비(하트비트)까지 올린다.
     func minimuxerProbe() {
@@ -149,17 +170,12 @@ final class ResignModel: ObservableObject {
         let pairingPath = pairingURL.path
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
                 DispatchQueue.main.async { self.logLines.append("minimuxer 시작(페어링 로드)...") }
-                set_debug(true)
-                try start(pairing, "file://" + sd)   // minimuxer는 앞 7글자(file://)를 떼고 로그 경로로 씀
-                DispatchQueue.main.async { self.logLines.append("start OK — 기기 준비 대기(하트비트)...") }
-                var okReady = false
-                for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+                let (okReady, diag) = try self.minimuxerReady(pairingPath: pairingPath, sd: sd)
                 DispatchQueue.main.async {
                     self.running = false
                     if okReady { self.summary = "minimuxer 연결 OK — 설치 준비됨(이제 '지금 갱신')" }
-                    else { self.errorText = "minimuxer 시작됨, 기기 준비 안 됨(연결/하트비트 대기 초과 — VPN·페어링 확인)" }
+                    else { self.errorText = "minimuxer 시작됨, 기기 준비 안 됨 — \(diag)" }
                 }
             } catch let e as MinimuxerError {
                 DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 실패: \(describe_error(e).toString())" }
@@ -213,13 +229,9 @@ final class ResignModel: ObservableObject {
             // 2) minimuxer: 시작 → 기기 준비(하트비트) → 업로드(AFC) → 설치.
             do {
                 DispatchQueue.main.async { self.logLines.append("서명 완료. minimuxer로 설치 준비...") }
-                let pairing = try String(contentsOf: URL(fileURLWithPath: pairingPath), encoding: .utf8)
-                set_debug(true)
-                try start(pairing, "file://" + sd)
-                var okReady = false
-                for _ in 0..<40 { if ready() { okReady = true; break }; Thread.sleep(forTimeInterval: 0.25) }
+                let (okReady, diag) = try self.minimuxerReady(pairingPath: pairingPath, sd: sd)
                 guard okReady else {
-                    DispatchQueue.main.async { self.running = false; self.errorText = "minimuxer 기기 준비 안 됨(VPN·페어링 확인)" }
+                    DispatchQueue.main.async { self.running = false; self.errorText = "설치 전 minimuxer 미준비 — \(diag)" }
                     return
                 }
                 DispatchQueue.main.async { self.logLines.append("AFC 업로드 + 설치 중...") }
