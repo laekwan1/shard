@@ -1491,10 +1491,10 @@ scrub.addEventListener("mousedown", (e) => {
   document.addEventListener("mouseup", up);
 });
 
+// 좌/우 화살표 = 3초, Shift+화살표 = 10초 (고정). 사용자 지정 — 비례 이동은 짧은/긴 영상에서
+// 얼마나 움직일지 예측이 안 돼 헷갈린다는 지적. 고정값이라 어느 영상에서나 같은 감각.
 function seekStep(far) {
-  const length = video.duration || 0;
-  const share = length / (far ? 5 : 20);
-  return Math.min(Math.max(share, far ? 15 : 3), far ? 120 : 30);
+  return far ? 10 : 3;
 }
 
 const RATES = [1, 1.25, 1.5, 2, 0.5, 0.75];
@@ -1752,10 +1752,7 @@ document.addEventListener("keydown", (e) => {
       e.preventDefault();
       video.paused ? video.play() : video.pause();
       break;
-    // A twentieth of what is playing, rather than a fixed three seconds — that
-    // is a third of a short clip and nothing at all in a two-hour film. Shift
-    // takes a fifth. Bounded so a very long file does not jump minutes and a
-    // very short one still moves.
+    // 좌/우 = 3초, Shift+좌/우 = 10초 (seekStep, 고정). 위/아래는 소리.
     case "ArrowRight":
       video.currentTime += seekStep(e.shiftKey);
       paintTime();
