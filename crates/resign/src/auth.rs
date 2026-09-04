@@ -64,11 +64,24 @@ pub struct AppleSession {
 /// 복원(apptokens 재요청)이 되고 (2) Apple이 정상 기기로 봐 계정 잠금이 준다** — 공유 서버의 회전·공유
 /// 정체성이 반복 잠금과 매번 재로그인의 근본 원인이었다(폰: 서브계정 반복 잠금 확인).
 fn anisette_url(state_dir: &Path) -> String {
-    std::fs::read_to_string(state_dir.join("anisette_url.txt"))
+    // 1) 사용자가 앱 "anisette 서버" 칸에 직접 넣은 값(state_dir 파일)이 최우선.
+    if let Some(u) = std::fs::read_to_string(state_dir.join("anisette_url.txt"))
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "https://ani.sidestore.io".to_string())
+    {
+        return u;
+    }
+    // 2) 앱에 심은 기본 전용 서버 — CI 시크릿 ANISETTE_URL로 **빌드 때** 컴파일에 주입된다(build.rs가
+    //    변경 감지). 소스·커밋엔 값이 없다(저장소 PUBLIC). 이게 있으면 사용자가 아무것도 안 넣어도
+    //    전용 서버를 써서 잠금·재로그인이 근본 차단된다("앱 자체에 서버 등록" 요구 충족).
+    if let Some(u) = option_env!("ANISETTE_URL") {
+        if !u.is_empty() {
+            return u.to_string();
+        }
+    }
+    // 3) 그래도 없으면 공유 기본(마지막 폴백).
+    "https://ani.sidestore.io".to_string()
 }
 
 impl AppleSession {

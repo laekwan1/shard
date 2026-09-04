@@ -35,6 +35,10 @@ jobs:
           key: ios-app-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build the Rust xcframework
+        # ANISETTE_URL: 전용 anisette 서버 주소를 **빌드 때** 앱에 기본값으로 주입(auth.rs option_env!).
+        # 값은 저장소가 아니라 GitHub 암호화 시크릿에만 있다(저장소 PUBLIC — 서버 주소를 커밋에 안 남긴다).
+        env:
+          ANISETTE_URL: ${{ secrets.ANISETTE_URL }}
         run: bash ios/scripts/build-xcframework.sh
 
       # ④ 온디바이스 설치: SideStore가 쓰는 minimuxer(usbmux+하트비트) + 그것이 의존하는
