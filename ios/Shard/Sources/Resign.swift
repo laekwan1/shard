@@ -140,6 +140,19 @@ final class ResignModel: ObservableObject {
         summary = "페어링 파일 임포트 완료"
     }
 
+    /// 전용 anisette 서버 주소를 state_dir에 저장 → Rust auth.rs가 `anisette_url.txt`로 읽는다. 비우면
+    /// 파일을 지워 기본 공유서버(ani.sidestore.io)로 되돌린다. 전용 서버 = 이 계정만 쓰는 고정 기기
+    /// 정체성 = 세션 복원 됨 + 계정 잠금 감소(공유 서버의 회전·공유 정체성이 반복 잠금의 근본 원인이었다).
+    func saveAnisetteURL(_ s: String) {
+        let url = URL(fileURLWithPath: stateDir).appendingPathComponent("anisette_url.txt")
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            try? t.write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// 로그 파일에서 keyword에 맞는 줄만 골라 마지막 몇 줄을 준다(맞는 게 없으면 그냥 tail). 줄당 150자 컷.
     /// 폰에선 파일을 못 빼므로 UI로 끌어올려 근거로 다음 수를 정한다(추측 금지).
     private func fileTail(_ url: URL, maxLines: Int, keywords: [String]) -> [String] {
@@ -420,6 +433,8 @@ struct ResignView: View {
     @State private var tfaInput = ""
     @State private var showPairingPicker = false
     @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
+    // 전용 anisette 서버 주소(비우면 기본 공유서버). 고정 기기 정체성 → 잠금·재로그인 근본 차단.
+    @AppStorage("resign.anisetteURL") private var anisetteURL = ""
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -451,6 +466,16 @@ struct ResignView: View {
                     labeled("비밀번호 (앱 암호 권장)") {
                         SecureField("••••••••", text: $password)
                     }
+                    labeled("anisette 서버 (비우면 기본 공유서버)") {
+                        TextField("http://<홈서버>:6969", text: $anisetteURL)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                            .disableAutocorrection(true)
+                            .onChange(of: anisetteURL) { v in model.saveAnisetteURL(v) }
+                    }
+                    .onAppear { model.saveAnisetteURL(anisetteURL) }
+                    Text("전용 서버(고정 기기 정체성)를 쓰면 계정 잠금·재로그인이 근본적으로 준다. 도커 anisette-v3-server를 홈서버에 올리고 폰에서 닿게(LAN 또는 DuckDNS:6969).")
+                        .font(.caption2).foregroundColor(.muted)
 
                     Button {
                         model.run(email: email, password: password)

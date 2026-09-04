@@ -59,6 +59,18 @@ pub struct AppleSession {
     state_dir: PathBuf,
 }
 
+/// 사용할 anisette 서버 URL. `<state_dir>/anisette_url.txt`에 값이 있으면 그걸(사용자 전용 서버),
+/// 없으면 공유 기본(ani.sidestore.io). **전용 서버는 이 계정만 쓰는 고정 기기 정체성을 줘서 (1) 세션
+/// 복원(apptokens 재요청)이 되고 (2) Apple이 정상 기기로 봐 계정 잠금이 준다** — 공유 서버의 회전·공유
+/// 정체성이 반복 잠금과 매번 재로그인의 근본 원인이었다(폰: 서브계정 반복 잠금 확인).
+fn anisette_url(state_dir: &Path) -> String {
+    std::fs::read_to_string(state_dir.join("anisette_url.txt"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "https://ani.sidestore.io".to_string())
+}
+
 impl AppleSession {
     /// Apple ID로 로그인. `tfa`는 2FA 코드를 돌려주는 콜백(폰 UI가 사용자에게 물어봄).
     /// anisette 상태는 `state_dir`에 기기별로 캐시된다. `log`로 단계를 알린다(어디서 막히는지 보이게).
@@ -74,10 +86,11 @@ impl AppleSession {
     ) -> Result<Self> {
         // anisette_url을 두면 (fork 패치가) v1 원격을 쓴다. ani.sidestore.io는 v1(GET)을 지원 —
         // v3 프로비저닝(EndProvisioningError로 실패)을 피한다.
+        let aurl = anisette_url(&state_dir);
         let config = AnisetteConfiguration::new()
             .set_configuration_path(state_dir.clone())
-            .set_anisette_url("https://ani.sidestore.io".to_string());
-        log("anisette 준비 중(원격 v1: ani.sidestore.io)...");
+            .set_anisette_url(aurl.clone());
+        log(&format!("anisette 준비 중(v1: {aurl})..."));
         let anisette = icloud_auth::anisette::AnisetteData::new(config)
             .await
             .map_err(|e| anyhow!("anisette 실패: {e:?}"))?;
@@ -112,7 +125,7 @@ impl AppleSession {
         log("저장된 세션 발견 — 로그인 생략(anisette만 갱신)...");
         let config = AnisetteConfiguration::new()
             .set_configuration_path(state_dir.to_path_buf())
-            .set_anisette_url("https://ani.sidestore.io".to_string());
+            .set_anisette_url(anisette_url(state_dir));
         let anisette = icloud_auth::anisette::AnisetteData::new(config).await.ok()?;
         let mut account = AppleAccount::new_with_anisette(anisette).ok()?;
         account.spd = Some(spd);
