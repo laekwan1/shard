@@ -130,6 +130,15 @@ pub async fn resign_app(
             log(&format!(
                 "[진단] app-id={appid}, team={team}, get-task-allow={gta:?}, keychain={kag:?}"
             ));
+            // 프로파일이 실은 어떤 키를 실었는지 전체 — 최소집합(위 4개)으로 줄이기 전에 무엇을
+            // 버렸는지 확인용. 0xe8008016이 계속 나면 여기 여분 키(앱이 못 쓰는 항목)가 범인이었는지,
+            // 아니면 서명기(apple-codesign) 쪽 문제인지 이 로그로 갈린다.
+            let all_keys: Vec<&str> = ent.keys().map(String::as_str).collect();
+            log(&format!(
+                "[진단] 프로파일 엔티틀먼트 전체 키 {}개: {}",
+                all_keys.len(),
+                all_keys.join(", ")
+            ));
         }
         log(&format!("[진단] 프로파일 등록기기 {}대: {}", udids.len(), udids.join(", ")));
         log(&format!("[진단] 프로파일 인증서 {certs}개"));
@@ -567,35 +576,40 @@ fn entitlements_xml_from_profile(profile: &[u8]) -> Result<String> {
         .get("Entitlements")
         .and_then(Value::as_dictionary)
         .ok_or_else(|| anyhow!("프로파일에 Entitlements 없음"))?;
-    let mut ent = ent.clone();
-
-    // keychain-access-groups 와일드카드(`TEAMID.*`)를 **구체값으로 확정**한다. 프로파일의 와일드카드는
-    // "이 팀 프리픽스로 뭐든 허용"이라는 *authorization* 표현일 뿐, 실제 **서명 엔티틀먼트엔 구체 그룹**이
-    // 들어가야 iOS가 설치를 받는다 — 와일드카드를 그대로 서명에 박으면 0xe8008016(invalid entitlements)로
-    // 거부된다(폰 확인: device·cert·get-task-allow 다 정상인데 keychain만 `DM94SF72RB.*`였다). Xcode·
-    // Sideloadly도 여기서 application-identifier(=TEAMID.번들ID)로 펼친다. 앱이 별도 keychain 공유를
-    // 선언하지 않으므로 기본 그룹 하나(=app-identifier)로 충분하다.
-    if let Some(appid) = ent
-        .get("application-identifier")
-        .and_then(Value::as_string)
-        .map(str::to_string)
-    {
-        if let Some(kag) = ent.get("keychain-access-groups").and_then(Value::as_array) {
-            let has_wildcard = kag
-                .iter()
-                .filter_map(Value::as_string)
-                .any(|s| s.ends_with(".*") || s.ends_with('*'));
-            if has_wildcard {
-                ent.insert(
-                    "keychain-access-groups".into(),
-                    Value::Array(vec![Value::String(appid)]),
-                );
-            }
-        }
+    // 프로파일의 엔티틀먼트를 **통째로 복사하지 않고 최소 집합(4개)만** 골라 서명한다.
+    //
+    // AltStore/SideStore가 iOS 17~26에 실제로 설치되는 핵심이 이것이다: 재서명 엔티틀먼트를 딱 이
+    // 네 개로 줄인다. 무료 개발 프로파일(iOS Team Provisioning Profile)은 이 넷 말고도 앱이 실제로
+    // 쓰지 않는 항목(팀 기본 data-protection 등)이나 값이 어긋나는 항목을 얹어 오는데, 그걸 서명에
+    // 그대로 박으면 installd가 0xe8008016(invalid entitlements)로 **설치를 거부**한다(SideStore #782:
+    // 항목 과다/불일치가 원인 — 폰 확인: keychain 와일드카드를 구체값으로 고쳐도 전체 복사가 남아
+    // 여전히 0xe8008016이었다). Shard는 확장(.appex)도 앱그룹도 없어(번들 확인: 프레임워크 2개뿐)
+    // 아래 넷이면 충분하고, 이게 SideStore가 실제로 넣는 그 집합이다. 넷을 넘기지 않는 게 규칙.
+    let mut min = Dictionary::new();
+    // application-identifier: 프로파일 값 그대로(구체 TEAMID.번들ID).
+    if let Some(v) = ent.get("application-identifier").cloned() {
+        min.insert("application-identifier".into(), v);
+    }
+    // 팀 식별자.
+    if let Some(v) = ent.get("com.apple.developer.team-identifier").cloned() {
+        min.insert("com.apple.developer.team-identifier".into(), v);
+    }
+    // 개발 서명이라 반드시 true라야 설치·실행된다.
+    min.insert(
+        "get-task-allow".into(),
+        Value::Boolean(ent.get("get-task-allow").and_then(Value::as_boolean).unwrap_or(true)),
+    );
+    // keychain-access-groups: 와일드카드(`TEAMID.*`)가 아니라 **구체 그룹 하나**(=application-identifier).
+    // 와일드카드를 서명에 박으면 그것만으로도 0xe8008016이 난다(Xcode·Sideloadly도 여기서 구체값으로 편다).
+    if let Some(appid) = ent.get("application-identifier").and_then(Value::as_string) {
+        min.insert(
+            "keychain-access-groups".into(),
+            Value::Array(vec![Value::String(appid.to_string())]),
+        );
     }
 
     let mut xml = Vec::new();
-    plist::to_writer_xml(&mut xml, &Value::Dictionary(ent))?;
+    plist::to_writer_xml(&mut xml, &Value::Dictionary(min))?;
     String::from_utf8(xml).context("엔티틀먼트 XML utf8")
 }
 
@@ -647,6 +661,40 @@ mod tests {
                 .iter()
                 .any(|n| n == "Payload/Foo.app/Frameworks/Bar.framework/Bar"),
             "{names:?}"
+        );
+    }
+
+    // 서명 엔티틀먼트는 프로파일 전체가 아니라 **최소 4개**여야 iOS installd가 설치를 받는다
+    // (0xe8008016). 프로파일이 얹어 오는 여분 키(앱이 못 쓰는 항목)를 그대로 박으면 거부되고,
+    // keychain 와일드카드도 구체값으로 펴야 한다. 이 둘을 이 테스트가 지킨다 — 되돌리면 설치가 깨진다.
+    #[test]
+    fn signed_entitlements_are_the_minimal_four_with_a_concrete_keychain_group() {
+        // 프로파일은 CMS로 감싸여 있으나 우리는 안의 <?xml…</plist> 구간만 훑으므로 plist 그대로 넘긴다.
+        let profile = br#"<?xml version="1.0"?>
+<plist version="1.0"><dict>
+  <key>Entitlements</key><dict>
+    <key>application-identifier</key><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string>
+    <key>com.apple.developer.team-identifier</key><string>DM94SF72RB</string>
+    <key>get-task-allow</key><true/>
+    <key>keychain-access-groups</key><array><string>DM94SF72RB.*</string></array>
+    <key>com.apple.developer.default-data-protection</key><string>NSFileProtectionComplete</string>
+  </dict>
+</dict></plist>"#;
+
+        let xml = entitlements_xml_from_profile(profile).unwrap();
+
+        // 남아야 할 넷.
+        assert!(xml.contains("application-identifier"), "{xml}");
+        assert!(xml.contains("DM94SF72RB.net.sw.shard.DM94SF72RB"), "{xml}");
+        assert!(xml.contains("com.apple.developer.team-identifier"), "{xml}");
+        assert!(xml.contains("get-task-allow"), "{xml}");
+        assert!(xml.contains("keychain-access-groups"), "{xml}");
+        // keychain은 구체값 하나, 와일드카드는 사라져야 한다.
+        assert!(!xml.contains("DM94SF72RB.*"), "keychain 와일드카드가 남았다: {xml}");
+        // 프로파일이 얹어 온 여분 키는 버려야 한다.
+        assert!(
+            !xml.contains("default-data-protection"),
+            "여분 엔티틀먼트가 서명에 남았다(0xe8008016 원인): {xml}"
         );
     }
 }
