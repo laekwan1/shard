@@ -97,12 +97,18 @@ pub async fn resign_app(
     )
     .context("embedded.mobileprovision 쓰기")?;
     let entitlements_xml = entitlements_xml_from_profile(&profile.encoded_profile)?;
-    // 진단: iOS가 설치 직전 0xe8008016(invalid entitlements)로 거부할 때 원인을 좁힌다 — 서명에 들어갈
-    // 엔티틀먼트 키·get-task-allow·application-identifier와, 프로파일의 등록기기 수를 남긴다. 무료
-    // 개발 프로파일은 get-task-allow=true + 이 기기 UDID가 ProvisionedDevices에 있어야 설치·실행된다.
+    // 진단: iOS 설치 직전 0xe8008016(invalid entitlements) 원인 좁히기. 서명·엔티틀먼트 내용은 정상
+    // 확인됨(PC 재현: 메인 exe에 XML+DER 정확히 박힘) → 이제 프로파일이 **이 기기 UDID**와 **서명 인증서**를
+    // 포함하는지가 관건. 무료 개발 프로파일은 ProvisionedDevices에 기기가, DeveloperCertificates에 서명
+    // 인증서가 있어야 iOS가 설치를 받는다. 기기가 빠졌으면 dev_api에 addDevice(UDID 등록) 구현이 필요.
     if let Ok(pl) = plist_from_mobileprovision(&profile.encoded_profile) {
-        let devs = pl
+        let udids: Vec<String> = pl
             .get("ProvisionedDevices")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_string().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let certs = pl
+            .get("DeveloperCertificates")
             .and_then(Value::as_array)
             .map(|a| a.len())
             .unwrap_or(0);
@@ -112,12 +118,21 @@ pub async fn resign_app(
                 .get("application-identifier")
                 .and_then(Value::as_string)
                 .unwrap_or("?");
-            let keys: Vec<&str> = ent.keys().map(String::as_str).collect();
+            let team = ent
+                .get("com.apple.developer.team-identifier")
+                .and_then(Value::as_string)
+                .unwrap_or("?");
+            let kag: Vec<String> = ent
+                .get("keychain-access-groups")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|v| v.as_string().map(str::to_string)).collect())
+                .unwrap_or_default();
             log(&format!(
-                "[진단] 프로파일 등록기기={devs}, get-task-allow={gta:?}, application-identifier={appid}"
+                "[진단] app-id={appid}, team={team}, get-task-allow={gta:?}, keychain={kag:?}"
             ));
-            log(&format!("[진단] 엔티틀먼트 키: {}", keys.join(", ")));
         }
+        log(&format!("[진단] 프로파일 등록기기 {}대: {}", udids.len(), udids.join(", ")));
+        log(&format!("[진단] 프로파일 인증서 {certs}개"));
     }
 
     let signed = work.join("signed").join(app_dir.file_name().unwrap());

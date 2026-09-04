@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use apple_codesign::{
-    create_self_signed_code_signing_certificate, CertificateProfile, SignatureEntity,
-    SignatureReader, SigningSettings, UnifiedSigner,
+    create_self_signed_code_signing_certificate, CertificateProfile, SettingsScope,
+    SignatureEntity, SignatureReader, SigningSettings, UnifiedSigner,
 };
 use x509_certificate::KeyAlgorithm;
 
@@ -72,6 +72,20 @@ fn main() -> Result<()> {
     let mut settings = SigningSettings::default();
     settings.set_signing_key(&key, cert);
 
+    // 진단(0xe8008016): 실 흐름과 같은 4-키 엔티틀먼트를 Main 스코프로 넣고, 서명 후 메인 실행파일에
+    // XML+DER가 실제로 박히는지 아래 검증에서 센다. 값 구조는 폰 진단 로그의 실제 프로파일 엔티틀먼트와 동일.
+    const TEST_ENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string>
+<key>com.apple.developer.team-identifier</key><string>DM94SF72RB</string>
+<key>get-task-allow</key><true/>
+<key>keychain-access-groups</key><array><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string></array>
+</dict></plist>"#;
+    settings
+        .set_entitlements_xml(SettingsScope::Main, TEST_ENT)
+        .context("엔티틀먼트 설정")?;
+
     // 4) 번들 재서명. apple-codesign이 중첩 프레임워크(MobileVLCKit)를 먼저 서명하고
     //    최상위 앱을 서명하며 _CodeSignature/CodeResources를 쓴다.
     let signed = work.join("signed").join(app.file_name().unwrap());
@@ -107,11 +121,23 @@ fn main() -> Result<()> {
                         .map(|cd| cd.identifier.as_str())
                         .unwrap_or("<no-cd>");
                     println!(
-                        "    Mach-O  서명:O  CMS:{}  id={}  ({})",
+                        "    Mach-O  서명:O  CMS:{}  id={}  ent[XML {}줄/DER {}줄]  ({})",
                         if has_cms { "O" } else { "X(ad-hoc)" },
                         ident,
+                        sig.entitlements_plist.len(),
+                        sig.entitlements_der_plist.len(),
                         e.path.display()
                     );
+                    // 메인 실행파일(…/Shard.app/Shard)이면 엔티틀먼트 실물을 찍는다 — 0xe8008016 진단.
+                    if e.path.file_name().and_then(|n| n.to_str()) == Some("Shard")
+                        && !sig.entitlements_plist.is_empty()
+                    {
+                        println!("      ── 메인 exe 엔티틀먼트(XML) ──");
+                        for l in &sig.entitlements_plist {
+                            println!("      {l}");
+                        }
+                        println!("      ── DER 엔티틀먼트 줄 수: {} ──", sig.entitlements_der_plist.len());
+                    }
                 }
                 None => {
                     println!("    Mach-O  서명:X  ({})", e.path.display());
