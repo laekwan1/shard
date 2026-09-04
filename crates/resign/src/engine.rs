@@ -567,8 +567,35 @@ fn entitlements_xml_from_profile(profile: &[u8]) -> Result<String> {
         .get("Entitlements")
         .and_then(Value::as_dictionary)
         .ok_or_else(|| anyhow!("프로파일에 Entitlements 없음"))?;
+    let mut ent = ent.clone();
+
+    // keychain-access-groups 와일드카드(`TEAMID.*`)를 **구체값으로 확정**한다. 프로파일의 와일드카드는
+    // "이 팀 프리픽스로 뭐든 허용"이라는 *authorization* 표현일 뿐, 실제 **서명 엔티틀먼트엔 구체 그룹**이
+    // 들어가야 iOS가 설치를 받는다 — 와일드카드를 그대로 서명에 박으면 0xe8008016(invalid entitlements)로
+    // 거부된다(폰 확인: device·cert·get-task-allow 다 정상인데 keychain만 `DM94SF72RB.*`였다). Xcode·
+    // Sideloadly도 여기서 application-identifier(=TEAMID.번들ID)로 펼친다. 앱이 별도 keychain 공유를
+    // 선언하지 않으므로 기본 그룹 하나(=app-identifier)로 충분하다.
+    if let Some(appid) = ent
+        .get("application-identifier")
+        .and_then(Value::as_string)
+        .map(str::to_string)
+    {
+        if let Some(kag) = ent.get("keychain-access-groups").and_then(Value::as_array) {
+            let has_wildcard = kag
+                .iter()
+                .filter_map(Value::as_string)
+                .any(|s| s.ends_with(".*") || s.ends_with('*'));
+            if has_wildcard {
+                ent.insert(
+                    "keychain-access-groups".into(),
+                    Value::Array(vec![Value::String(appid)]),
+                );
+            }
+        }
+    }
+
     let mut xml = Vec::new();
-    plist::to_writer_xml(&mut xml, &Value::Dictionary(ent.clone()))?;
+    plist::to_writer_xml(&mut xml, &Value::Dictionary(ent))?;
     String::from_utf8(xml).context("엔티틀먼트 XML utf8")
 }
 
