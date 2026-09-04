@@ -34,15 +34,18 @@
     android:paddingHorizontal="12dp"
     android:paddingVertical="0dp">
 
-    <!-- Starts at the frame's right edge (78dp) so it reads as the frame's own bottom line
-         carrying on across the row. The frame is as tall as the row (both 44dp), so its
-         bottom edge IS the row floor where this line sits — no margin arithmetic needed. -->
+    <!-- Runs the full content width — from the thumbnail's own left edge across to the right —
+         so the line reads as one rule under the whole row. Stopped at the thumbnail's right edge
+         (the old 68dp start) the stacked thumbnails had no rule between them and ran together
+         down the left column; carried left to the thumbnail, every row gets a floor and one
+         picture is told from the next (user ask). No marginStart: the frame's 12dp padding
+         already insets this child to the thumbnail's left edge. The frame is as tall as the row,
+         so its bottom edge IS the row floor where this line sits. -->
     <View
         android:id="@+id/rowLine"
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_gravity="bottom"
-        android:layout_marginStart="68dp"
         android:background="@color/state_hover" />
 
     <LinearLayout

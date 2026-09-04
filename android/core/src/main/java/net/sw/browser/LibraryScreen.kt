@@ -291,7 +291,34 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             }
             if (bmp == null) return@execute
             thumbCache.put(item.uri, bmp)
-            ui.post { if (art.tag == item.uri) showThumb(art, badge, bmp, music) }
+            ui.post {
+                if (art.tag == item.uri) showThumb(art, badge, bmp, music)
+                // The row that kicked off this decode is not always the row on screen for the
+                // file: opening the library the ListView binds a throwaway row just to measure a
+                // row height, and that row's async frame would land on a view that is never shown
+                // while the real row kept its placeholder — the small centred icon. That is the
+                // "first thumbnail is small until you leave the folder and come back" bug: the
+                // frame WAS decoded and cached, so a later rebind hit the cache and filled. Paint
+                // the file into whatever visible row shows it now and it fills on first sight.
+                paintVisibleThumb(item.uri, bmp, music)
+            }
+        }
+    }
+
+    /**
+     * Paint an already-decoded frame into the visible list row for a file, if one is up.
+     *
+     * A companion to the captured-view fast path above, for when the view that started a
+     * decode is not the one now on screen (the ListView's throwaway measurement row, on the
+     * first open). Only the handful of on-screen children are scanned — no full relayout that
+     * would fight a scroll — and it is a no-op when nothing visible is showing this file.
+     */
+    private fun paintVisibleThumb(uri: android.net.Uri, bmp: android.graphics.Bitmap, music: Boolean) {
+        for (i in 0 until list.childCount) {
+            val row = list.getChildAt(i) ?: continue
+            val art = row.findViewById<com.google.android.material.imageview.ShapeableImageView>(R.id.art)
+                ?: continue
+            if (art.tag == uri) showThumb(art, row.findViewById(R.id.playBadge), bmp, music)
         }
     }
 

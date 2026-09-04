@@ -342,10 +342,9 @@ for (const button of document.querySelectorAll("#address button[data-steer]")) {
 // front the homepage (the one desktop way to "hold").
 const homeBtn = document.querySelector("#address [data-home]");
 homeBtn.addEventListener("click", () => {
-  // Steer the tab in front to the homepage; from the favorites page (no tab in
-  // front) open the homepage in a tab, which also leaves the favorites page.
-  if (browsing) send("steer", { what: "go", url: homepage });
-  else send("tab.new", { url: homepage });
+  // 현재(앞) 탭을 홈으로 이동. 화면이 앞이라 앞 탭이 없으면 Rust가 마지막 탭을 올려 홈으로,
+  // 탭이 아예 없을 때만 새 탭 — 홈을 누를 때마다 새 탭이 열리던 것 수정(사용자 지적). 판단은 home_go.
+  send("home.go", { url: homepage });
 });
 // A right-click opens the favorites page, where the homepage is typed.
 homeBtn.addEventListener("contextmenu", (e) => {

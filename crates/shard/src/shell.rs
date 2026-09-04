@@ -443,6 +443,8 @@ pub enum Ask {
     ChromeExtra(i32),
     /// Browsing: a tab to open, pick or drop, and where to point it.
     TabNew(String),
+    /// 홈 버튼 — 앞(또는 마지막) 탭을 홈으로 이동. 탭이 하나도 없을 때만 새 탭(새 탭 남발 방지).
+    HomeGo(String),
     TabPick(usize),
     TabShut(usize),
     Steer { what: String, url: String },
@@ -534,6 +536,7 @@ pub fn read_ask(body: &str) -> Ask {
         "playing" => Ask::Playing(body.contains(r#""on":true"#)),
         "chrome" => Ask::ChromeExtra(number(body, "extra").unwrap_or(0) as i32),
         "tab.new" => Ask::TabNew(field(body, "url").unwrap_or_default()),
+        "home.go" => Ask::HomeGo(field(body, "url").unwrap_or_default()),
         "tab.pick" => Ask::TabPick(number(body, "at").unwrap_or(0) as usize),
         "tab.shut" => Ask::TabShut(number(body, "at").unwrap_or(0) as usize),
         "browser.home" => Ask::BrowserHome,
@@ -1204,6 +1207,7 @@ pub fn preview() -> Result<()> {
         Ask::TabPick(at) => shell.show_tab(Some(at)),
         Ask::TabShut(at) => shell.close_tab(at),
         Ask::Steer { what, url } => shell.steer(&what, &url),
+        Ask::HomeGo(url) => shell.home_go(&url),
         // The start page asked for its tiles — the pinned sites and the ones
         // visited most. Read straight from the saved config.
         Ask::BrowserHome => {
@@ -2071,6 +2075,24 @@ impl Shell {
             forward = f.as_bool();
         }
         self.tell(&format!(r#"{{"t":"nav","back":{back},"forward":{forward}}}"#));
+    }
+
+    /// 홈 버튼. 앞에 탭이 있으면(browsing) 그 탭을 홈으로 이동한다. 화면(홈/즐겨찾기 등)이 앞이라
+    /// 앞 탭이 없지만 열린 탭이 있으면 **마지막 탭을 앞으로 올려** 홈으로 간다 — 예전엔 이 경우 새 탭을
+    /// 열어 홈을 누를 때마다 탭이 쌓였다(사용자 지적). 탭이 하나도 없을 때만 새로 연다.
+    pub fn home_go(&self, url: &str) {
+        if self.showing.get().is_some() {
+            self.steer("go", url);
+            return;
+        }
+        let last = self.tabs.borrow().len().checked_sub(1);
+        match last {
+            Some(i) => {
+                self.show_tab(Some(i));
+                self.steer("go", url);
+            }
+            None => self.open_tab(url),
+        }
     }
 
     /// Do something to the tab in front: go somewhere, or step through history.
