@@ -268,23 +268,27 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
             showThumb(art, badge, cached, music)
             return
         }
+        // A frame decoded on a past run is a tiny JPEG; read it right here on the bind so the row
+        // fills at once. An ASYNC disk read still flashes the empty tile first — on every relaunch,
+        // for every row, since the memory cache dies with the process — and a muted mark at half the
+        // tile height read as a half-size thumbnail (user: "재실행할 때마다 절반 크기"). Reading it
+        // synchronously here fills the row with no flash; it costs a few ms for a 320px JPEG and is
+        // paid once per row, since the frame is memoised in thumbCache on the next line.
+        val diskKey = ThumbStore.keyFor(item)
+        ThumbStore.load(activity, diskKey)?.let { onDisk ->
+            thumbCache.put(item.uri, onDisk)
+            showThumb(art, badge, onDisk, music)
+            return
+        }
         showTilePlaceholder(art, badge, music)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         thumbWork.execute {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-            // Disk first: a frame decoded on an earlier run reads back as a ready JPEG,
-            // so a fresh app launch fills the list at once instead of decoding every
-            // frame again and showing the small placeholder until each one lands. This
-            // is the "thumbnails are small on first launch until you leave and come
-            // back" fix — the memory cache dies with the process; the disk one does not.
-            val diskKey = ThumbStore.keyFor(item)
-            var bmp = ThumbStore.load(activity, diskKey)
-            val fromDisk = bmp != null
-            // A song carries no frame of its own. The picture inside the file is
-            // the first place to look — that is where a download puts it, and
-            // where every music app looks — then the one remembered beside it,
-            // from before songs carried their own.
-            if (bmp == null && music) bmp = embeddedArt(item)
+            // A true first-ever miss — nothing on disk yet. Decode a real frame at the video's own
+            // aspect, show it, and remember it on disk so the bind above reads it back next launch.
+            // A song carries no frame of its own: the picture inside the file first (where a download
+            // puts it and every music app looks), then the one remembered beside it.
+            var bmp = if (music) embeddedArt(item) else null
             if (bmp == null && music) bmp = Covers.load(activity, Covers.keyFor(item.name))
             // A real frame at the video's OWN aspect, so a 9:16 short comes back tall instead
             // of cropped to 16:9. loadThumbnail returns the requested (landscape) shape, which
@@ -298,8 +302,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 }.getOrNull()
             }
             if (bmp == null) return@execute
-            // Remember a freshly decoded frame so the next launch skips the decode.
-            if (!fromDisk) ThumbStore.save(activity, diskKey, bmp)
+            // Remember this freshly decoded frame so the next launch reads it back on the bind.
+            ThumbStore.save(activity, diskKey, bmp)
             thumbCache.put(item.uri, bmp)
             ui.post {
                 if (art.tag == item.uri) showThumb(art, badge, bmp, music)
@@ -435,10 +439,22 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         badge: android.widget.ImageView?,
         music: Boolean,
     ) {
-        art.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
-        art.setPadding(tilePad, tilePad, tilePad, tilePad)
         art.imageTintList = mutedTint
-        art.setImageResource(if (music) R.drawable.ic_music else R.drawable.ic_video)
+        if (music) {
+            // Music can carry no embedded art at all, so a type mark is the lasting fallback here.
+            art.scaleType = android.widget.ImageView.ScaleType.CENTER_INSIDE
+            art.setPadding(tilePad, tilePad, tilePad, tilePad)
+            art.setImageResource(R.drawable.ic_music)
+        } else {
+            // Video: no centred glyph while a frame is decoding. ic_video at 8dp padding fills ~56%
+            // of the tile's height — and a muted mark at half height reads as a HALF-SIZE THUMBNAIL,
+            // not "loading". That is the "썸네일이 처음 뜰 때 절반 크기" the user keeps hitting on every
+            // relaunch (the memory cache is empty until a frame lands). Show the bare tile instead —
+            // a clean, empty loading state that the real frame fills — so nothing ever looks like a
+            // broken half thumbnail. A video frame practically always decodes, so it does not linger.
+            art.setPadding(0, 0, 0, 0)
+            art.setImageDrawable(null)
+        }
         badge?.visibility = View.GONE
     }
 
