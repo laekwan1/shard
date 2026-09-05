@@ -1211,15 +1211,9 @@ pub fn preview() -> Result<()> {
         }
         Ask::TabNew(url) => {
             let url = if url.is_empty() { "https://www.youtube.com/".to_string() } else { url };
-            // Counted where a page is opened by hand, not on every heartbeat a tab
-            // sends: "자주 방문" is the sites you go to, and one visit is one arrival,
-            // not one second spent there. Persisted at once, the way settings are.
-            {
-                let core = engine.borrow();
-                let mut cfg = core.shared.config.write();
-                record_visit(&mut cfg.browser, &url);
-            }
-            engine.borrow().save_config();
+            // The visit is recorded when the tab actually lands on the page (Event::Navigated →
+            // note_visit), so it is counted once here whether the page is opened in a fresh tab or
+            // reached by a link — not twice, and not missed for in-tab navigations.
             shell.open_tab(&url);
         }
         Ask::TabPick(at) => shell.show_tab(Some(at)),
@@ -1679,6 +1673,17 @@ fn title_of(url: &str) -> String {
 /// Note that a site was opened: bump its host's visit count and keep the newest
 /// pages in history. Host granularity, because "자주 방문" answers "which sites",
 /// not "which pages" — a hundred YouTube videos are one place you keep going.
+/// Record a page the browser landed on, and save. Reaches the config through [`SHARED`] because the
+/// event loop that calls it (a page navigated) is a `Shell` method, which is handed no engine.
+fn note_visit(url: &str) {
+    SHARED.with(|cell| {
+        if let Some(shared) = cell.borrow().as_ref() {
+            record_visit(&mut shared.config.write().browser, url);
+            let _ = shared.config.read().save();
+        }
+    });
+}
+
 fn record_visit(b: &mut crate::config::Browser, url: &str) {
     if !url.starts_with("http") {
         return; // about:blank and the like are not places.
@@ -1851,14 +1856,12 @@ impl Shell {
         // and the answers the download hooks send back.
         for event in self.page_events() {
             match event {
-                // Nothing is written from here. This fires for whichever page
-                // is loading, which is not necessarily the page in front, and
-                // the report carries no way to tell which tab it came from —
-                // taking it as the front tab's was the other half of the label
-                // flickering between sites. Each page reports its own address
-                // and names itself when it does.
-                // The URL bar is each page's own business; nothing to do on a plain navigate.
-                crate::download::browser::Event::Navigated(_) => {}
+                // The URL bar is each page's own business (each page reports its own address and
+                // names itself, so the label does not flicker between a background tab's loads and
+                // the front one). But this IS where a visit is recorded — every real navigation, a
+                // link or an address or back/forward, not only a page opened in a fresh tab — so the
+                // history and the "자주 방문" counts are the pages actually visited, not a fraction.
+                crate::download::browser::Event::Navigated(url) => note_visit(&url),
                 // The back/forward list changed (navigation, shorts pushState, or a
                 // GoBack/GoForward) — re-check the front tab's arrows so they grey out with
                 // nowhere to go and light up once there is somewhere.
