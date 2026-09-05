@@ -1,7 +1,7 @@
-<!-- iOS-style screen-rotation glyph (user picked "device + arrow", candidate 2): a rounded
-     rectangle (the screen) with a curved arrow arching OVER the top, kept clear of the rectangle
-     so the two never touch (user asked). Not the old Material refresh loop, which read as "retry".
-     rotate.right = the arrow curves clockwise, arrowhead down on the right. -->
+<!-- iOS SF Symbol "rotate.right": a rounded square (the screen) whose top-LEFT corner is opened
+     and replaced by a small curved arrow arcing over it, arrowhead pointing right (clockwise).
+     User asked for exactly the iOS look — square with an arrow only at the top-left corner, not
+     the earlier over-the-top arch and not the old refresh loop. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -11,15 +11,17 @@
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.6"
-        android:pathData="M10.1,10.5 h3.8 a1.6,1.6 0 0 1 1.6,1.6 v6.8 a1.6,1.6 0 0 1 -1.6,1.6 h-3.8 a1.6,1.6 0 0 1 -1.6,-1.6 v-6.8 a1.6,1.6 0 0 1 1.6,-1.6 z" />
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M9.6,6.5 H15.5 A2,2 0 0 1 17.5,8.5 V15 A2,2 0 0 1 15.5,17 H8 A2,2 0 0 1 6,15 V9.4" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="1.6"
+        android:strokeWidth="1.5"
         android:strokeLineCap="round"
-        android:pathData="M5.5,9 C5.5,4 8.5,2.3 12,2.3 C15.5,2.3 18.5,4 18.5,8" />
+        android:pathData="M4.6,9.2 A4.6,4.6 0 0 1 9.5,4.7" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M16.3,7 l2.2,2.6 l2.2,-2.6 z" />
+        android:pathData="M9.9,2.6 l1.9,2.5 l-3,0.9 z" />
 </vector>

@@ -21,7 +21,10 @@ import org.json.JSONObject
  * The page itself does know, though: every request appears in Resource Timing,
  * media included. So the page is asked for that list too.
  */
-class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
+class VideoHook(
+    private val onLongPress: (VideoTarget) -> Unit,
+    private val onSeekTouch: (Boolean) -> Unit = {},
+) {
 
     /** What the page found under the finger. */
     data class VideoTarget(
@@ -64,6 +67,16 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
     fun onVideoLongPress(payload: String?) {
         val target = runCatching { parse(payload.orEmpty()) }.getOrNull() ?: return
         onLongPress(target)
+    }
+
+    // The page's own seek bar reports while a finger is on it, so the browser's edge-swipe
+    // (open the library / the address panel) does not ALSO fire from a scrub and yank a screen up
+    // mid-seek (user hit: dragging the web seek bar opened the library/address bar). The page's
+    // stopPropagation only stops DOM bubbling — the native gesture detector still sees the touch,
+    // so the page has to tell us out of band. Runs on the JS thread; the flag it sets is @Volatile.
+    @JavascriptInterface
+    fun seekTouch(active: Boolean) {
+        onSeekTouch(active)
     }
 
     private fun parse(payload: String): VideoTarget {
@@ -458,10 +471,22 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
                   vid.currentTime = f * vid.duration;
                   played.style.width = (f * 100) + '%';
                 };
-                bar.addEventListener('touchstart', function (e) { dragging = true; seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); }, { passive: false });
+                var release = function () { dragging = false; try { ${BRIDGE}.seekTouch(false); } catch (x) {} };
+                bar.addEventListener('touchstart', function (e) { dragging = true; try { ${BRIDGE}.seekTouch(true); } catch (x) {} seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); }, { passive: false });
                 bar.addEventListener('touchmove', function (e) { if (dragging) { seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); } }, { passive: false });
-                bar.addEventListener('touchend', function (e) { dragging = false; e.stopPropagation(); }, { passive: false });
+                bar.addEventListener('touchend', function (e) { release(); e.stopPropagation(); }, { passive: false });
+                bar.addEventListener('touchcancel', function () { release(); }, { passive: false });
               }
+              // While the page scrolls, hide the bar rather than chase the video's moving bottom
+              // edge every 250ms — the lagging fixed element left a ghost trail on scroll (user hit,
+              // same as iOS). It comes back, repositioned, once scrolling settles.
+              var scrolling = false, scrollTimer = null;
+              window.addEventListener('scroll', function () {
+                scrolling = true;
+                if (bar) bar.style.display = 'none';
+                if (scrollTimer) clearTimeout(scrollTimer);
+                scrollTimer = setTimeout(function () { scrolling = false; }, 150);
+              }, true);
               function pick() {
                 var best = null, area = 0, vids = document.getElementsByTagName('video');
                 for (var i = 0; i < vids.length; i++) {
@@ -473,6 +498,7 @@ class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
               function tick() {
                 try {
                   build();
+                  if (scrolling) { bar.style.display = 'none'; return; }
                   vid = pick();
                   if (!vid) { bar.style.display = 'none'; return; }
                   var r = vid.getBoundingClientRect();

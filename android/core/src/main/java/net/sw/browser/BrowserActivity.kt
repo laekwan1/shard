@@ -52,6 +52,11 @@ abstract class BrowserActivity : AppCompatActivity() {
     private var customView: View? = null
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
 
+    // True while a finger is on the page's own video seek bar (it tells us through the bridge).
+    // The edge-swipe that opens the library / address panel is held off then, so a scrub does not
+    // yank a screen up mid-seek (user hit). @Volatile: set on the JS thread, read on the UI thread.
+    @Volatile private var webSeekActive = false
+
     /**
      * The current page's title, kept here rather than read from the web view.
      *
@@ -549,8 +554,12 @@ abstract class BrowserActivity : AppCompatActivity() {
         // Video should start where the page says it starts, as in a real browser.
         settings.mediaPlaybackRequiresUserGesture = false
 
-        // The page reports long presses on video through this.
-        addJavascriptInterface(VideoHook(::onVideoLongPress), VideoHook.BRIDGE)
+        // The page reports long presses on video through this, and whether a finger is on its
+        // own seek bar (so the library/address edge-swipe is held off during a scrub).
+        addJavascriptInterface(
+            VideoHook(::onVideoLongPress) { active -> webSeekActive = active },
+            VideoHook.BRIDGE,
+        )
         addJavascriptInterface(YouTubeBridge(), YouTube.BRIDGE)
 
         // The YouTube recorder has to be in place before the page's own scripts
@@ -886,6 +895,8 @@ abstract class BrowserActivity : AppCompatActivity() {
                 val start = down ?: return false
                 // The favorites overlay owns its own touches; leave it alone.
                 if (favoritesShown) return false
+                // A finger on the page's video seek bar is scrubbing, not swiping to a screen.
+                if (webSeekActive) return false
 
                 val dx = current.rawX - start.rawX
                 val dy = current.rawY - start.rawY
@@ -946,7 +957,7 @@ abstract class BrowserActivity : AppCompatActivity() {
             // panel is furniture over it, and full screen is a player — a drag
             // in any of those belongs to what is in front, not to the page.
             pull.enabled = !panelShown && customView == null &&
-                !(libraryMade && library.isOpen)
+                !(libraryMade && library.isOpen) && !webSeekActive
             pull.onTouch(event)
 
             when (event.action) {
@@ -958,6 +969,9 @@ abstract class BrowserActivity : AppCompatActivity() {
                         dismissKeyboard()
                     }
                 }
+                // Clear the seek flag when the gesture ends, in case the page's touchend was
+                // missed — otherwise a stuck flag would swallow the next real edge-swipe.
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> webSeekActive = false
             }
         }
         return super.dispatchTouchEvent(event)
