@@ -30,11 +30,26 @@ jobs:
           brew install pkg-config openssl@3
           git clone --depth 1 https://github.com/zhlynn/zsign zsign-src
           cd zsign-src
-          # 브루 openssl을 pkg-config가 찾게 한다.
-          export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig"
-          make clean && make
-          ./zsign -v || true   # 버전 출력으로 빌드 확인
-          echo "ZSIGN=$PWD/zsign" >> "$GITHUB_ENV"
+          # zhlynn/zsign 최신 구조: Makefile에 clean 타깃이 없다(이전 CI가 `make clean && make`에서
+          # clean 실패로 make를 건너뛰어 바이너리를 못 만들었고, 그래서 diff가 apple(서명) vs zsign(미서명)
+          # 이라 무의미했다). 그냥 make만 돌리고, brew openssl 경로를 g++가 찾게 CPATH/LIBRARY_PATH로 준다.
+          OSSL="$(brew --prefix openssl@3)"
+          export PKG_CONFIG_PATH="$OSSL/lib/pkgconfig"
+          export CPATH="$OSSL/include" LIBRARY_PATH="$OSSL/lib"
+          # 최신 zsign은 bin/zsign에 낸다. make가 실패하면 소스를 직접 g++로 묶는다(하위호환).
+          make || {
+            echo "::warning::make failed; compiling zsign directly with g++"
+            g++ -std=c++14 -O2 -o bin/zsign *.cpp common/*.cpp \
+              -I"$OSSL/include" -L"$OSSL/lib" -lcrypto || \
+            g++ -std=c++14 -O2 -o zsign *.cpp common/*.cpp \
+              -I"$OSSL/include" -L"$OSSL/lib" -lcrypto
+          }
+          # 실제로 생긴 바이너리를 찾는다(bin/zsign 또는 zsign). **없으면 여기서 실패**한다 —
+          # 미서명 원본으로 조용히 diff 돌던 지난 실패를 되풀이하지 않는다.
+          ZBIN="$(find "$PWD" -maxdepth 2 -type f -name zsign -perm -u+x | head -1)"
+          test -n "$ZBIN" || { echo "::error::zsign binary not built"; ls -R; exit 1; }
+          "$ZBIN" -v || true   # 버전 출력으로 빌드 확인(일부 버전은 -v 미지원)
+          echo "ZSIGN=$ZBIN" >> "$GITHUB_ENV"
 
       - name: Self-signed identity + 4-key entitlements
         run: |
@@ -86,6 +101,7 @@ jobs:
       - name: Sign with zsign
         run: |
           set -eux
+          test -x "$ZSIGN"                      # 빌드 단계에서 보장하지만 재확인
           APP="$(ls -d base_zsign/Payload/*.app)"
           # -m(프로파일) 없이 -k/-c/-e 로 서명(구조 비교엔 embedded.mobileprovision 파일이 무관).
           # zsign은 기본이 이중 CD(hashType 1=SHA-1 주 + 2=SHA-256 대체) — 위 rcodesign과 같은 축.
@@ -94,6 +110,11 @@ jobs:
             "$ZSIGN" -a -f "$APP" || true
           }
           test -f "$APP/Shard"
+          # **실제로 서명이 박혔는지 검증**한다 — LC_CODE_SIGNATURE가 없으면(=미서명) 여기서 실패.
+          # 지난 실패: zsign 빌드가 안 돼 미서명 원본으로 조용히 diff가 돌았다. 다시는 안 되게 막는다.
+          otool -l "$APP/Shard" | grep -q LC_CODE_SIGNATURE || {
+            echo "::error::zsign produced NO signature (no LC_CODE_SIGNATURE)"; exit 1;
+          }
           cp -R "$APP" out_zsign_app
 
       # ── 1차(대표) 잣대: apple-codesign 자신의 리더로 **양쪽을 같은 눈**으로 읽어 diff한다.
