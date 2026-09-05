@@ -234,31 +234,112 @@ fn strip_framework_signatures(app_dir: &Path, log: &mut dyn FnMut(&str)) -> Resu
     Ok(())
 }
 
-/// thin 64비트 LE Mach-O에서 LC_CODE_SIGNATURE와 그 데이터를 떼어낸다. 제거하면 true.
+/// Mach-O에서 LC_CODE_SIGNATURE와 그 데이터를 떼어낸다(제거하면 true). thin·fat 둘 다 처리.
 ///
 /// 왜 손으로: apple-codesign은 서명 제거 API가 없고, 서명할 때 기존 서명의 엔티틀먼트를 보존한다.
-/// 프레임워크에 엔티틀먼트가 남지 않게 하려면 서명 자체가 없어야 한다. 손대는 건 세 곳뿐 —
-/// __LINKEDIT 세그먼트 크기, mach 헤더의 ncmds/sizeofcmds, 그리고 파일 끝(서명 데이터) 잘라내기.
+/// 프레임워크에 엔티틀먼트가 남지 않게 하려면 서명 자체가 없어야 한다. 프레임워크는 thin arm64
+/// (OpenSSL)일 수도, arm64 1개를 fat로 감싼 것(MobileVLCKit — magic cafebabe)일 수도 있어 둘 다 본다.
 pub fn strip_macho_code_signature(path: &Path) -> Result<bool> {
+    const FAT_MAGIC: u32 = 0xcafe_babe; // 32비트 fat(파일에 big-endian). fat_64(cafebabf)는 미대응.
+    let be = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+
+    let data = fs::read(path)?;
+    if data.len() < 8 {
+        return Ok(false);
+    }
+    if be(&data[0..4]) != FAT_MAGIC {
+        // thin: 통째로 처리.
+        return match strip_thin_bytes(&data)? {
+            Some(stripped) => {
+                fs::write(path, &stripped)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        };
+    }
+
+    // fat: 각 아치(thin Mach-O)를 떼어내고, 정렬을 지켜 오프셋을 다시 계산해 재조립한다.
+    let nfat = be(&data[4..8]) as usize;
+    if 8 + nfat * 20 > data.len() {
+        bail!("fat_arch 잘림");
+    }
+    struct Arch {
+        cputype: u32,
+        cpusubtype: u32,
+        align: u32,
+        macho: Vec<u8>,
+    }
+    let mut arches: Vec<Arch> = Vec::with_capacity(nfat);
+    let mut any = false;
+    for i in 0..nfat {
+        let e = 8 + i * 20;
+        let offset = be(&data[e + 8..e + 12]) as usize;
+        let size = be(&data[e + 12..e + 16]) as usize;
+        if offset + size > data.len() {
+            bail!("fat arch 범위 밖");
+        }
+        let macho = match strip_thin_bytes(&data[offset..offset + size])? {
+            Some(s) => {
+                any = true;
+                s
+            }
+            None => data[offset..offset + size].to_vec(),
+        };
+        arches.push(Arch {
+            cputype: be(&data[e..e + 4]),
+            cpusubtype: be(&data[e + 4..e + 8]),
+            align: be(&data[e + 16..e + 20]),
+            macho,
+        });
+    }
+    if !any {
+        return Ok(false); // 어느 아치에도 서명이 없었다.
+    }
+    let mut out: Vec<u8> = Vec::with_capacity(data.len());
+    out.extend_from_slice(&FAT_MAGIC.to_be_bytes());
+    out.extend_from_slice(&(nfat as u32).to_be_bytes());
+    let mut cursor = 8 + nfat * 20;
+    let mut offs = Vec::with_capacity(nfat);
+    for a in &arches {
+        let al = 1usize << a.align.min(31);
+        cursor = (cursor + al - 1) & !(al - 1);
+        offs.push(cursor);
+        cursor += a.macho.len();
+    }
+    for (i, a) in arches.iter().enumerate() {
+        out.extend_from_slice(&a.cputype.to_be_bytes());
+        out.extend_from_slice(&a.cpusubtype.to_be_bytes());
+        out.extend_from_slice(&(offs[i] as u32).to_be_bytes());
+        out.extend_from_slice(&(a.macho.len() as u32).to_be_bytes());
+        out.extend_from_slice(&a.align.to_be_bytes());
+    }
+    for (i, a) in arches.iter().enumerate() {
+        out.resize(offs[i], 0);
+        out.extend_from_slice(&a.macho);
+    }
+    fs::write(path, &out)?;
+    Ok(true)
+}
+
+/// thin 64비트 LE Mach-O에서 서명을 떼어낸 바이트를 돌려준다(서명 없거나 thin64가 아니면 None).
+/// 손대는 건 세 곳 — __LINKEDIT filesize, mach 헤더 ncmds/sizeofcmds, 파일 끝(서명 데이터) 잘라내기.
+fn strip_thin_bytes(input: &[u8]) -> Result<Option<Vec<u8>>> {
     const MH_MAGIC_64: u32 = 0xfeed_facf;
     const LC_SEGMENT_64: u32 = 0x19;
     const LC_CODE_SIGNATURE: u32 = 0x1d;
     let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
     let le64 = |b: &[u8]| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
 
-    let mut data = fs::read(path)?;
-    if data.len() < 32 || le(&data[0..4]) != MH_MAGIC_64 {
-        return Ok(false); // fat/32비트/다른 형식은 손대지 않는다(프레임워크는 thin arm64뿐).
+    if input.len() < 32 || le(&input[0..4]) != MH_MAGIC_64 {
+        return Ok(None);
     }
+    let mut data = input.to_vec();
     let ncmds = le(&data[16..20]);
     let sizeofcmds = le(&data[20..24]) as usize;
     let lc_end = 32 + sizeofcmds;
     if lc_end > data.len() {
         bail!("load command 영역이 파일 밖");
     }
-
-    // LC_CODE_SIGNATURE와 __LINKEDIT 세그먼트 로드커맨드를 찾는다. __LINKEDIT은 보통
-    // LC_CODE_SIGNATURE보다 앞에 오므로, 서명 커맨드를 지우기 전에 먼저 __LINKEDIT을 줄인다.
     let mut off = 32usize;
     let mut cs_off: Option<usize> = None;
     let (mut cs_dataoff, mut linkedit_off) = (0u32, None::<usize>);
@@ -280,28 +361,21 @@ pub fn strip_macho_code_signature(path: &Path) -> Result<bool> {
         off += cmdsize;
     }
     let Some(cs_off) = cs_off else {
-        return Ok(false); // 서명 없음 — 할 일 없음.
+        return Ok(None); // 서명 없음.
     };
-
-    // __LINKEDIT 파일 크기를 서명 앞까지로 줄인다(vmsize는 filesize 이상이면 되니 건드리지 않는다).
     if let Some(le_off) = linkedit_off {
         let fileoff = le64(&data[le_off + 40..le_off + 48]);
         let new_filesize = (cs_dataoff as u64).saturating_sub(fileoff);
         data[le_off + 48..le_off + 56].copy_from_slice(&new_filesize.to_le_bytes());
     }
-    // LC_CODE_SIGNATURE(cmdsize 16)를 로드커맨드 목록에서 들어낸다: 뒤 커맨드들을 16바이트 당기고
-    // 헤더의 ncmds/sizeofcmds를 줄인다.
     data.copy_within(cs_off + 16..lc_end, cs_off);
     for b in &mut data[lc_end - 16..lc_end] {
         *b = 0;
     }
     data[16..20].copy_from_slice(&(ncmds - 1).to_le_bytes());
     data[20..24].copy_from_slice(&((sizeofcmds - 16) as u32).to_le_bytes());
-    // 서명 데이터(파일 끝)를 잘라낸다.
     data.truncate(cs_dataoff as usize);
-
-    fs::write(path, &data)?;
-    Ok(true)
+    Ok(Some(data))
 }
 
 /// 서명된 번들을 다시 읽어 Mach-O마다 서명 구조를 로그로 찍는다 — 0xe8008016 원인 좁히기.

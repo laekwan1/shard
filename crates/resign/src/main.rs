@@ -94,6 +94,66 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // ── strip-only 검증: 원본 그대로 strip(서명 먼저 안 함 — fat 경로를 그대로 테스트) ──
+    if args.first().map(String::as_str) == Some("--strip-only") {
+        let bin = PathBuf::from(args.get(1).context("--strip-only <mach-o 바이너리> 필요")?);
+        let work = std::env::temp_dir().join("shard-strip-only");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        let target = work.join("bin");
+        fs::copy(&bin, &target)?;
+        println!("0) 원본            → {}", macho_state(&target).unwrap_or_else(|e| format!("읽기 실패: {e:?}")));
+        let stripped = resign::engine::strip_macho_code_signature(&target)?;
+        println!("1) strip(실행={stripped})  → {}", macho_state(&target).unwrap_or_else(|e| format!("읽기 실패(손상?): {e:?}")));
+        // 재서명(엔티틀먼트 없이) — 깨끗한 상태에서 다시 서명되는지.
+        let (cert, key) = create_self_signed_code_signing_certificate(
+            KeyAlgorithm::Rsa, CertificateProfile::AppleDevelopment, "SO", "Strip Only", "US",
+            chrono::Duration::try_days(365).context("유효기간")?,
+        )?;
+        let mut s = SigningSettings::default();
+        s.set_signing_key(&key, cert);
+        let re = work.join("bin2");
+        UnifiedSigner::new(s).sign_path(&target, &re).context("재서명")?;
+        println!("2) 엔티틀먼트 없이 재서명 → {}", macho_state(&re)?);
+        return Ok(());
+    }
+
+    // ── fat strip 검증: 서명된 thin을 fat(1아치)로 감싸 strip이 서명을 제거하는지 확인 ──
+    // (디바이스의 MobileVLCKit이 '서명된 fat'이라, apple-codesign이 thin으로 바꿔버리지 않는 이 경로가 관건)
+    if args.first().map(String::as_str) == Some("--fat-strip-test") {
+        let bin = PathBuf::from(args.get(1).context("--fat-strip-test <서명된 thin 바이너리> 필요")?);
+        let thin = fs::read(&bin)?;
+        if thin.len() < 12 {
+            anyhow::bail!("바이너리가 너무 작다");
+        }
+        let cputype = u32::from_le_bytes([thin[4], thin[5], thin[6], thin[7]]);
+        let cpusubtype = u32::from_le_bytes([thin[8], thin[9], thin[10], thin[11]]);
+        // fat(1아치) 래핑: cafebabe, nfat=1, arch(cputype,cpusubtype,offset,size,align=14/16KB).
+        let align = 14u32;
+        let al = 1usize << align;
+        let offset = ((8 + 20 + al - 1) & !(al - 1)) as u32;
+        let mut fat = Vec::new();
+        fat.extend_from_slice(&0xcafe_babeu32.to_be_bytes());
+        fat.extend_from_slice(&1u32.to_be_bytes());
+        fat.extend_from_slice(&cputype.to_be_bytes());
+        fat.extend_from_slice(&cpusubtype.to_be_bytes());
+        fat.extend_from_slice(&offset.to_be_bytes());
+        fat.extend_from_slice(&(thin.len() as u32).to_be_bytes());
+        fat.extend_from_slice(&align.to_be_bytes());
+        fat.resize(offset as usize, 0);
+        fat.extend_from_slice(&thin);
+        let work = std::env::temp_dir().join("shard-fat-strip");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        let fatpath = work.join("fatbin");
+        fs::write(&fatpath, &fat)?;
+        println!("0) fat 래핑(1아치) → {}", macho_state(&fatpath).unwrap_or_else(|e| format!("읽기 실패: {e:?}")));
+        let stripped = resign::engine::strip_macho_code_signature(&fatpath)?;
+        println!("1) fat strip(={stripped}) → {}", macho_state(&fatpath).unwrap_or_else(|e| format!("읽기 실패(손상?): {e:?}")));
+        println!("   기대: 0)서명 O → 1)서명 X (fat 재조립 무결)");
+        return Ok(());
+    }
+
     // ── 서명 모드 ──
     let ipa = args
         .first()
