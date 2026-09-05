@@ -15,7 +15,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context, Result};
 use apple_codesign::{
-    cryptography::DigestType, create_self_signed_code_signing_certificate, CertificateProfile,
+    cryptography::DigestType, create_self_signed_code_signing_certificate, AppleCertificate,
+    CertificateProfile, worldwide_developer_relations_signed_expression, CodeRequirementExpression,
     SettingsScope, SignatureEntity, SignatureReader, SigningSettings, UnifiedSigner,
 };
 use plist::{Dictionary, Value};
@@ -194,8 +195,45 @@ pub async fn resign_app(
     // 이 문제가 없다 — apple-codesign의 "기존 서명 보존" 모델이 재서명과 충돌한 것.
     strip_framework_signatures(&app_dir, log)?;
 
+    // 서명 인증서에서 CN과 **서명시점** Apple-루트 체인 해소 여부를 미리 뽑는다(set_signing_key가
+    // apple_cert를 move한다). leaf_chains가 false면 apple-codesign의 Auto DR이 non_apple 분기로 떨어져
+    // `certificate root = H(리프 SHA-1)`라는 만족 불가능한 요구를 박는다(policy.rs:196 분기 → 320+) —
+    // 그러면 iOS DR 평가가 무조건 실패해 0xe8008016이 난다. 폰 dump의 →Apple루트=true는 우리가 CMS에
+    // **심은** WWDR/루트 인증서의 플래그라 리프의 서명시점 해소와 다를 수 있어(오판 유발), 여기서
+    // 리프 자체의 값을 직접 찍어 확정한다.
+    let signing_cn = apple_cert.subject_common_name();
+    let leaf_chains_to_apple = apple_cert.chains_to_apple_root_ca();
+    log(&format!(
+        "[진단] 서명시점 리프 chains_to_apple_root_ca={leaf_chains_to_apple} \
+         (false면 Auto DR이 TRAP=만족불가 요구로 떨어짐 → 아래 DR 명시고정으로 우회)"
+    ));
+
     let mut settings = SigningSettings::default();
     settings.set_signing_key(&key, apple_cert);
+    // CD teamID를 **현재 팀으로 명시**한다. 안 하면 apple-codesign은 원본(이전 재서명본) 서명에서
+    // team_name을 import하는데(signing_settings.rs:1024), 그건 인증서가 Apple 체인으로 인식될 때만
+    // 보존되고 scope 불일치·세대 전파로 비거나 틀릴 수 있다. CD teamID가 team-identifier 엔티틀먼트와
+    // 안 맞으면 amfid가 0xe8008016(invalid entitlements)로 거부한다. 명시가 import를 이긴다(같은 파일
+    // 1024: "using team ID from settings"). zsign은 항상 현재 팀을 CD에 박는다(signing.cpp:468).
+    settings.set_team_id(&team.team_id);
+    // Designated Requirement를 **명시 고정**한다 — Auto DR의 chains_to_apple_root_ca() 의존을 없앤다.
+    // 위 술어가 false면 Auto는 리프 해시를 루트 위치(-1)에 박아 절대 참이 될 수 없는 DR을 만든다.
+    // Apple 정품 codesign이 개발 서명에 내는 그 표현식(GOOD 분기와 동일)을 직접 박는다 — 술어가
+    // true였어도 바이트 동일이라 무해하고, false여도 올바른 DR이 된다:
+    //   identifier <bundle_id> and anchor apple generic and leaf[subject.CN]=<CN> and cert 1[WWDR] exists
+    // zsign도 anchor apple generic으로 앵커한다(signing.cpp:204). 식별자는 CD identifier(=번들ID)와 일치해야 한다.
+    if let Some(cn) = signing_cn.clone() {
+        let dr = CodeRequirementExpression::And(
+            Box::new(CodeRequirementExpression::Identifier(req.bundle_id.as_str().into())),
+            Box::new(worldwide_developer_relations_signed_expression(cn)),
+        );
+        settings
+            .set_designated_requirement_expression(SettingsScope::Main, &dr)
+            .map_err(|e| anyhow!("[⑤ 서명] DR 명시 설정 실패: {e:?}"))?;
+        log("[⑤ 서명] DR 명시 고정(WWDR anchor) + CD teamID 명시 완료.");
+    } else {
+        log("[⑤ 서명] ⚠ 서명 인증서 CN 없음 — DR 명시 고정 건너뜀(Auto DR 사용)");
+    }
     settings
         .set_entitlements_xml(SettingsScope::Main, &entitlements_xml)
         .map_err(|e| anyhow!("엔티틀먼트 설정: {e:?}"))?;
@@ -439,12 +477,21 @@ fn dump_signed_bundle(app: &Path, log: &mut dyn FnMut(&str)) {
                 let digest = cd.map(|c| c.digest_type.as_str()).unwrap_or("?");
                 let alts = sig.alternative_code_directories.len();
                 let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                // teamID(CD)와 DR(설계 지정 요구)을 함께 찍는다 — 이 둘이 그동안 덤프에 없어
+                // "구조 정상인데 거부"의 원인(teamID 부재/DR TRAP)을 못 봤다. iOS는 이 둘을 검증한다.
+                let team = cd.and_then(|c| c.team_name.clone()).unwrap_or_else(|| "(없음)".into());
+                let dr = if sig.code_requirements.is_empty() {
+                    "(없음)".to_string()
+                } else {
+                    sig.code_requirements.join(" | ")
+                };
                 log(&format!(
-                    "[진단] {name}: CMS인증서 {cms_certs}개(→Apple루트={chains},WWDR={has_wwdr}), CD {digest}(+대체{alts}), ent[XML {}/DER {}], exec_seg={:?}",
+                    "[진단] {name}: CMS인증서 {cms_certs}개(→Apple루트={chains},WWDR={has_wwdr}), CD {digest}(+대체{alts}), teamID={team}, ent[XML {}/DER {}], exec_seg={:?}",
                     sig.entitlements_plist.len(),
                     sig.entitlements_der_plist.len(),
                     cd.and_then(|c| c.executable_segment_flags.clone()),
                 ));
+                log(&format!("[진단] {name} DR: {dr}"));
             }
         }
     }
