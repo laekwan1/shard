@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, Context, Result};
 use apple_codesign::{
     cryptography::DigestType, create_self_signed_code_signing_certificate, CertificateProfile,
-    SettingsScope, SigningSettings, UnifiedSigner,
+    SettingsScope, SignatureEntity, SignatureReader, SigningSettings, UnifiedSigner,
 };
 use plist::{Dictionary, Value};
 use x509_certificate::{
@@ -168,16 +168,60 @@ pub async fn resign_app(
     // SHA-256을 extra(대체 CD)로. iOS 26은 강한 것(SHA-256)을 쓰되 둘 다 있는 hash agility를 요구한다.
     settings.set_digest_type(SettingsScope::Main, DigestType::Sha1);
     settings.add_extra_digest(SettingsScope::Main, DigestType::Sha256);
+    // CMS에 Apple 체인(WWDR 중간 + 루트)을 넣는다. iOS amfid가 리프(개발 인증서)를 Apple 루트까지
+    // 검증하려면 **중간 인증서가 서명 안에** 있어야 한다 — 리프만 넣으면 체인을 못 세워
+    // ApplicationVerificationFailed(0xe8008016)가 난다. SideStore/Apple codesign이 하는 것.
+    // apple_root_certificate_chain으로 자동 구성(발급 인증서가 Apple 발급으로 인식될 때).
+    match settings.chain_apple_certificates() {
+        Some(chain) => log(&format!("[⑤ 서명] Apple 체인 {}개를 CMS에 포함", chain.len())),
+        None => log(
+            "[⑤ 서명] ⚠ Apple 체인 자동구성 실패 — 인증서가 Apple 발급으로 인식 안 됨(WWDR 중간 없이 서명될 수 있음)",
+        ),
+    }
     UnifiedSigner::new(settings)
         .sign_path(&app_dir, &signed)
         .map_err(|e| anyhow!("[⑤ 서명] 실패: {e:?}"))?;
     log("[⑤ 서명] 완료.");
+    // 진단: 서명 결과를 다시 읽어 iOS가 무엇을 거부하는지 구조로 찍는다 — CMS 인증서 수(체인 유무),
+    // CD 해시타입/대체 CD, DER 엔티틀먼트. 여러 번 서명기 가설이 빗나갔으니 실물을 본다.
+    dump_signed_bundle(&signed, log);
 
     // 7) 설치용 .ipa로 재포장(Payload/<app>).
     let out_ipa = work.join("Shard-signed.ipa");
     repackage_ipa(&signed, &out_ipa)?;
     log("[⑤ 서명] .ipa 재포장 완료.");
     Ok(out_ipa)
+}
+
+/// 서명된 번들을 다시 읽어 Mach-O마다 서명 구조를 로그로 찍는다 — 0xe8008016 원인 좁히기.
+///
+/// CMS 인증서 수(1이면 리프만=체인 없음, 2+면 WWDR 중간 포함), CD 해시타입·대체 CD 수(이중 여부),
+/// XML/DER 엔티틀먼트 줄 수, exec_seg_flags. iOS amfid가 무엇을 거부하는지 실물로 본다.
+fn dump_signed_bundle(app: &Path, log: &mut dyn FnMut(&str)) {
+    let entities = match SignatureReader::from_path(app).and_then(|r| r.entities()) {
+        Ok(e) => e,
+        Err(e) => {
+            log(&format!("[진단] 서명 읽기 실패: {e:?}"));
+            return;
+        }
+    };
+    for e in &entities {
+        if let SignatureEntity::MachO(m) = &e.entity {
+            if let Some(sig) = &m.signature {
+                let cms_certs = sig.cms.as_ref().map(|c| c.certificates.len()).unwrap_or(0);
+                let cd = sig.code_directory.as_ref();
+                let digest = cd.map(|c| c.digest_type.as_str()).unwrap_or("?");
+                let alts = sig.alternative_code_directories.len();
+                let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+                log(&format!(
+                    "[진단] {name}: CMS인증서 {cms_certs}개, CD {digest}(+대체{alts}), ent[XML {}/DER {}], exec_seg={:?}",
+                    sig.entitlements_plist.len(),
+                    sig.entitlements_der_plist.len(),
+                    cd.and_then(|c| c.executable_segment_flags.clone()),
+                ));
+            }
+        }
+    }
 }
 
 /// 서명된 `.app`을 `Payload/<app>` 구조의 .ipa(zip)로 묶는다.
