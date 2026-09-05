@@ -66,12 +66,18 @@ jobs:
           done
           ls -d base_apple/Payload/*.app base_zsign/Payload/*.app
 
-      - name: Sign with apple-codesign (PoC)
+      - name: Sign with apple-codesign (rcodesign)
         run: |
           set -eux
-          # PoC는 ipa를 받아 재서명하고 <out.app>에 낸다. 자체 self-signed 인증서 + TEST_ENT(4키).
-          cargo run -q -p resign --bin resign -- release/ios/Shard-unsigned.ipa "$PWD/out_apple/Shard.app"
-          test -f out_apple/Shard.app/Shard
+          # rcodesign = apple-codesign의 CLI(엔진과 같은 크레이트/버전 0.29). 엔진의 UnifiedSigner와
+          # 같은 서명 코드를 쓴다. resign 크레이트를 통째로 빌드하면 omnisette가 macOS 호스트에서만
+          # 컴파일 에러(AOSKitAnisetteProvider 트레이트 불일치 — iOS 타깃은 게이트되어 정상)라, 서명만
+          # 하는 rcodesign을 따로 설치해 우회한다.
+          cargo install apple-codesign --version 0.29.0
+          cat cert.pem key.pem > identity.pem
+          APP="$(ls -d base_apple/Payload/*.app)"
+          rcodesign sign --pem-source identity.pem --entitlements-xml-path ent.plist "$APP" out_apple_app
+          test -f out_apple_app/Shard
 
       - name: Sign with zsign
         run: |
@@ -89,28 +95,19 @@ jobs:
       - name: Dump both — zsign's native dumper (same lens, only the signer differs)
         run: |
           set -eux
-          "$ZSIGN" out_apple/Shard.app/Shard   > dump_apple.zsign.txt 2>&1 || true
+          "$ZSIGN" out_apple_app/Shard            > dump_apple.zsign.txt 2>&1 || true
           "$ZSIGN" "$(ls -d out_zsign_app)/Shard" > dump_zsign.zsign.txt 2>&1 || true
           echo "===== DIFF (zsign dumper): apple-codesign(<) vs zsign(>) =====" | tee diff.zsign.txt
           diff dump_apple.zsign.txt dump_zsign.zsign.txt | tee -a diff.zsign.txt || true
-
-      - name: Dump both — apple-codesign reader (second lens)
-        run: |
-          set -eux
-          cargo run -q -p resign --bin resign -- --dump "$PWD/out_apple/Shard.app"  > dump_apple.reader.txt 2>&1 || true
-          cargo run -q -p resign --bin resign -- --dump "$PWD/out_zsign_app"          > dump_zsign.reader.txt 2>&1 || true
-          echo "===== DIFF (apple-codesign reader): apple(<) vs zsign(>) =====" | tee diff.reader.txt
-          diff dump_apple.reader.txt dump_zsign.reader.txt | tee -a diff.reader.txt || true
 
       - name: Summary to the run log
         if: always()
         run: |
           {
             echo "## zsign vs apple-codesign — 요약"
-            echo '### zsign 덤퍼 diff'
-            echo '```'; sed -n '1,120p' diff.zsign.txt 2>/dev/null; echo '```'
-            echo '### apple-codesign 리더 diff'
-            echo '```'; sed -n '1,120p' diff.reader.txt 2>/dev/null; echo '```'
+            echo '두 서명기가 같은 앱을 서명한 결과를 zsign 덤퍼로 대조. 차이가 없으면 원인은 서명기가 아니다.'
+            echo '### zsign 덤퍼 diff (apple-codesign < vs zsign >)'
+            echo '```'; sed -n '1,160p' diff.zsign.txt 2>/dev/null; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload dumps + diffs
@@ -121,7 +118,4 @@ jobs:
           path: |
             dump_apple.zsign.txt
             dump_zsign.zsign.txt
-            dump_apple.reader.txt
-            dump_zsign.reader.txt
             diff.zsign.txt
-            diff.reader.txt
