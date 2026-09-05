@@ -85,6 +85,13 @@ pub const NOW_PLAYING: i32 = 58;
 const WIDTH: i32 = 500;
 const HEIGHT: i32 = 620 + BAR;
 
+/// The width the window grows to while a site is in front. Our own screens are a narrow phone-like
+/// column (`WIDTH`), but a desktop site laid out at a fixed width — 네이버 is ~1130px — needs room, so
+/// the window itself widens to fit the site instead of the site being zoomed down into a narrow one
+/// (the user chose this over shrinking the page). Capped to the work area at use, so it never runs
+/// off a small screen; below it a wide site scrolls sideways rather than shrinking.
+const BROWSE_WIDTH: i32 = 1200;
+
 /// The smallest it may be dragged to, the same floor the settings window had.
 const MIN_WIDTH: i32 = 440;
 const MIN_HEIGHT: i32 = 540 + BAR;
@@ -587,36 +594,6 @@ fn field(body: &str, name: &str) -> Option<String> {
     Some(unescape(&raw_field(body, name)?))
 }
 
-/// Injected into every browsed page: it measures how wide the page wants to be and tells the
-/// shell, so a desktop site too wide for the window can be zoomed to fit (see [`Shell::fit_width`]).
-/// Numbers go as strings because the shell's field reader takes quoted values. Debounced — the
-/// layout settles first, and a page speaks a few times, not once per reflow frame. `resize` covers
-/// our own zoom (which fires it) so the fit converges; `pageshow` covers coming back via bfcache.
-const FIT_WIDTH: &str = r#"
-(function () {
-  var timer = null;
-  function measure() {
-    timer = null;
-    try {
-      var de = document.documentElement, b = document.body;
-      var natural = Math.max(de ? de.scrollWidth : 0, b ? b.scrollWidth : 0);
-      var view = window.innerWidth;
-      if (natural > 0 && view > 0 && window.__shardTab != null) {
-        window.ipc.postMessage(JSON.stringify({
-          shardFit: "1",
-          tab: String(window.__shardTab),
-          natural: String(natural),
-          view: String(view)
-        }));
-      }
-    } catch (e) {}
-  }
-  function schedule() { if (timer == null) timer = setTimeout(measure, 300); }
-  window.addEventListener('load', schedule, { passive: true });
-  window.addEventListener('resize', schedule, { passive: true });
-  window.addEventListener('pageshow', schedule, { passive: true });
-})();
-"#;
 
 /// A field taken whole, escapes and all — for values that carry newlines.
 fn raw_field(body: &str, name: &str) -> Option<String> {
@@ -1805,11 +1782,6 @@ pub struct Tab {
     view: Rc<wry::WebView>,
     pub title: String,
     pub url: String,
-    /// The tab's fit-to-window zoom (1.0 = none). A desktop site laid out wider than
-    /// the window — 네이버 is ~1130px — is shrunk so it fits instead of spilling off the
-    /// right; a mobile/responsive site reports a width equal to the window and stays at
-    /// 1.0. Per tab, and kept here so a window resize can re-fit from where it was.
-    zoom: std::cell::Cell<f64>,
 }
 
 impl Shell {
@@ -1927,13 +1899,6 @@ impl Shell {
     /// is what matching on substrings did — put a page's own text through the
     /// download parser several times a second.
     fn from_page(&self, payload: &str) {
-        // A desktop site measured itself wider than the window: shrink it to fit. The page
-        // reports its natural width and the window's, and the fit is applied as a zoom (below).
-        // Mobile/responsive pages report a width equal to the window, so nothing is done to them.
-        if payload.contains("\"shardFit\"") {
-            self.fit_width(payload);
-            return;
-        }
         if let Some(frame) = field(payload, "frame") {
             // The hooks put the value in `text`, whatever the report is about.
             let Some(text) = field(payload, "text") else { return };
@@ -1977,42 +1942,6 @@ impl Shell {
         }
     }
 
-    /// Shrink a desktop site to fit the window, from a width the page just measured.
-    ///
-    /// The page reports its natural laid-out width and the window's inner width. When the site
-    /// is wider than the window — a fixed-width desktop layout in a narrow window, which 네이버
-    /// is — the view is zoomed down so it fits instead of spilling off the right, and grown back
-    /// toward 1.0 as the window widens. It converges: our own zoom fires the page's `resize`,
-    /// which re-measures, and once the content fits (width ≈ window) the ratio is 1 and nothing
-    /// moves. A tolerance band stops it chasing its own tail, and it never zooms past 1.0 (a
-    /// mobile/responsive page already fits, so it is left alone) or below 0.4 (unreadable).
-    /// Named by the tab's id, not "the front one", so a page loading in the background fits its
-    /// own view rather than whichever tab happens to be on top.
-    fn fit_width(&self, payload: &str) {
-        let natural = field(payload, "natural").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        let view = field(payload, "view").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        if natural <= 1.0 || view <= 1.0 {
-            return;
-        }
-        let Some(said_by) = field(payload, "tab").and_then(|s| s.parse::<u64>().ok()) else {
-            return;
-        };
-        let tabs = self.tabs.borrow();
-        let Some(tab) = tabs.iter().find(|t| t.id == said_by) else {
-            return;
-        };
-        let cur = tab.zoom.get();
-        // ratio < 1 means the content spills past the window at the current zoom.
-        let target = (cur * (view / natural)).clamp(0.4, 1.0);
-        // Within a hair of where it already is: leave it, or the resize our own zoom fires
-        // would come straight back and we would chase the value forever.
-        if (target - cur).abs() < 0.03 {
-            return;
-        }
-        tab.zoom.set(target);
-        let _ = tab.view.zoom(target);
-    }
-
     // ---- the sites being browsed -------------------------------------------
 
     /// Open a page in a tab of its own and bring it to the front.
@@ -2026,11 +1955,10 @@ impl Shell {
         // toggle is the whole of ad blocking, network AND video, not just trackers.
         let block_ads = crate::download::browser::is_ad_block_on();
         let startup = format!(
-            "window.__shardBlockAds = {block_ads};\n{}\n{}\n{}\n{}",
+            "window.__shardBlockAds = {block_ads};\n{}\n{}\n{}",
             crate::download::browser::PAGE_HOOKS,
             crate::download::youtube::RECORDER,
             crate::download::youtube::CONTROL,
-            FIT_WIDTH,
         );
         // Never reused, so a report from a page that is closing cannot land on
         // the tab that took its place.
@@ -2046,7 +1974,6 @@ impl Shell {
                     view,
                     title: title_of(url),
                     url: url.to_string(),
-                    zoom: std::cell::Cell::new(1.0),
                 });
                 let at = self.tabs.borrow().len() - 1;
                 self.show_tab(Some(at));
@@ -2067,8 +1994,17 @@ impl Shell {
         // Never past the end: a stale index from the page would otherwise show
         // nothing and leave the strip claiming a tab that is not there.
         let which = which.filter(|at| *at < self.tabs.borrow().len());
+        let was = self.showing.get();
         self.showing.set(which);
         SHOWING.with(|cell| cell.set(which));
+        // Browsing a site wants room; our own screens are a narrow column. Widen the window when a
+        // tab comes forward from a screen, narrow it back when a screen comes forward from a tab —
+        // only on that crossing, so switching tab-to-tab, or a size set by hand, is left alone.
+        match (was.is_some(), which.is_some()) {
+            (false, true) => resize_to(self.hwnd, BROWSE_WIDTH),
+            (true, false) => resize_to(self.hwnd, WIDTH),
+            _ => {}
+        }
         self.lay_out();
         // Keys go where the eye is: to the page in front, or back to our own
         // screens when there is none.
@@ -2557,6 +2493,33 @@ fn centre(hwnd: HWND) {
     let top = (work.top + (work.bottom - work.top - height) / 2).max(work.top);
     unsafe {
         SetWindowPos(hwnd, std::ptr::null_mut(), left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+/// Resize the window to a width (keeping its height) and re-centre it — used to widen for browsing
+/// a desktop site and narrow back for our own screens. Capped to the work area so the whole window
+/// stays on screen; left alone while maximised (it already fills the screen) or when the width is
+/// already what is wanted (so it does not fight a size the window is settling into).
+fn resize_to(hwnd: HWND, width: i32) {
+    if unsafe { IsZoomed(hwnd) } != 0 {
+        return;
+    }
+    let mut work = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    if unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) } == 0 {
+        return;
+    }
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetWindowRect(hwnd, &mut r) };
+    let height = r.bottom - r.top;
+    // A margin so a title bar and its edges are never pushed off the work area's right.
+    let width = width.min(work.right - work.left - 32).max(MIN_WIDTH);
+    if (r.right - r.left) == width {
+        return;
+    }
+    let left = (work.left + (work.right - work.left - width) / 2).max(work.left);
+    let top = r.top.max(work.top);
+    unsafe {
+        SetWindowPos(hwnd, std::ptr::null_mut(), left, top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 
