@@ -1,6 +1,6 @@
-<!-- The mirror of ic_rotate_right — iOS SF Symbol "rotate.left". Same rounded square with a
-     curved corner arrow, flipped horizontally so the arrow sits at the top-right and turns the
-     other way; shown while in landscape so the button reads as "turn back". -->
+<!-- The mirror of ic_rotate_right — iOS SF Symbol "rotate.left". Complete (closed) rounded square
+     with the curved arrow at the top-RIGHT corner, turning the other way; shown while in landscape
+     so the button reads as "turn back". Flipped horizontally. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -12,17 +12,16 @@
             android:fillColor="#00000000"
             android:strokeColor="#FFFFFF"
             android:strokeWidth="1.5"
-            android:strokeLineCap="round"
             android:strokeLineJoin="round"
-            android:pathData="M9.6,6.5 H15.5 A2,2 0 0 1 17.5,8.5 V15 A2,2 0 0 1 15.5,17 H8 A2,2 0 0 1 6,15 V9.4" />
+            android:pathData="M9.2,8 H15.3 a2.2,2.2 0 0 1 2.2,2.2 V16.3 a2.2,2.2 0 0 1 -2.2,2.2 H9.2 a2.2,2.2 0 0 1 -2.2,-2.2 V10.2 a2.2,2.2 0 0 1 2.2,-2.2 z" />
         <path
             android:fillColor="#00000000"
             android:strokeColor="#FFFFFF"
             android:strokeWidth="1.5"
             android:strokeLineCap="round"
-            android:pathData="M4.6,9.2 A4.6,4.6 0 0 1 9.5,4.7" />
+            android:pathData="M4,10.5 A6,6 0 0 1 10.5,4" />
         <path
             android:fillColor="#FFFFFF"
-            android:pathData="M9.9,2.6 l1.9,2.5 l-3,0.9 z" />
+            android:pathData="M8.4,2.2 l2.7,1.9 l-2.2,2.5 z" />
     </group>
 </vector>

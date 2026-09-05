@@ -24,6 +24,7 @@ import org.json.JSONObject
 class VideoHook(
     private val onLongPress: (VideoTarget) -> Unit,
     private val onSeekTouch: (Boolean) -> Unit = {},
+    private val onSeekBand: (Float, Float) -> Unit = { _, _ -> },
 ) {
 
     /** What the page found under the finger. */
@@ -77,6 +78,15 @@ class VideoHook(
     @JavascriptInterface
     fun seekTouch(active: Boolean) {
         onSeekTouch(active)
+    }
+
+    // The seek bar reports its vertical band (top + height, in CSS px, viewport-relative) so the
+    // native side knows where it is BEFORE a finger lands — no race with the async touchstart above.
+    // A press whose Y falls in this band (converted to screen px) is a scrub, so the edge-swipe is
+    // held off. top < 0 means the bar is hidden. Runs on the JS thread; fields it feeds are @Volatile.
+    @JavascriptInterface
+    fun seekBand(topCss: Float, heightCss: Float) {
+        onSeekBand(topCss, heightCss)
     }
 
     private fun parse(payload: String): VideoTarget {
@@ -477,15 +487,25 @@ class VideoHook(
                 bar.addEventListener('touchend', function (e) { release(); e.stopPropagation(); }, { passive: false });
                 bar.addEventListener('touchcancel', function () { release(); }, { passive: false });
               }
-              // While the page scrolls, hide the bar rather than chase the video's moving bottom
-              // edge every 250ms — the lagging fixed element left a ghost trail on scroll (user hit,
-              // same as iOS). It comes back, repositioned, once scrolling settles.
-              var scrolling = false, scrollTimer = null;
+              // Follow the video's bottom edge in REAL TIME while the page scrolls — on every
+              // animation frame, not the 250ms tick. The tick alone lagged behind a smooth scroll,
+              // so the position:fixed bar left a ghost trail (user hit; iOS fixed it the same way,
+              // per-frame). place() just moves the bar to the video's current rect right now.
+              function place() {
+                if (!vid || !bar) return;
+                var r = vid.getBoundingClientRect();
+                bar.style.top = (r.bottom - 18) + 'px';
+                bar.style.left = r.left + 'px';
+                bar.style.width = r.width + 'px';
+                // Tell native where the scrub band is (a bit taller than the visible 18px line so a
+                // finger a hair above still counts), so the edge-swipe is held off there. CSS px.
+                try { ${BRIDGE}.seekBand(r.bottom - 34, 48); } catch (x) {}
+              }
+              var rafPending = false;
               window.addEventListener('scroll', function () {
-                scrolling = true;
-                if (bar) bar.style.display = 'none';
-                if (scrollTimer) clearTimeout(scrollTimer);
-                scrollTimer = setTimeout(function () { scrolling = false; }, 150);
+                if (rafPending) return;
+                rafPending = true;
+                requestAnimationFrame(function () { rafPending = false; place(); });
               }, true);
               function pick() {
                 var best = null, area = 0, vids = document.getElementsByTagName('video');
@@ -498,14 +518,14 @@ class VideoHook(
               function tick() {
                 try {
                   build();
-                  if (scrolling) { bar.style.display = 'none'; return; }
                   vid = pick();
-                  if (!vid) { bar.style.display = 'none'; return; }
+                  if (!vid) { bar.style.display = 'none'; try { ${BRIDGE}.seekBand(-1, 0); } catch (x) {} return; }
                   var r = vid.getBoundingClientRect();
                   bar.style.display = 'block';
                   bar.style.left = r.left + 'px';
                   bar.style.width = r.width + 'px';
                   bar.style.top = (r.bottom - 18) + 'px';
+                  try { ${BRIDGE}.seekBand(r.bottom - 34, 48); } catch (x) {}
                   if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
                     played.style.width = ((vid.currentTime / vid.duration) * 100) + '%';
                   }

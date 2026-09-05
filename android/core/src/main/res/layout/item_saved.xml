@@ -61,7 +61,8 @@
     <FrameLayout
         android:layout_width="68dp"
         android:layout_height="36dp"
-        android:layout_marginEnd="12dp">
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="2dp">
 
         <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/art"

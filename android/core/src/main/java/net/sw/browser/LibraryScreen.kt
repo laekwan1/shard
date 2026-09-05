@@ -1228,11 +1228,23 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         androidx.core.view.ViewCompat.requestApplyInsets(root)
         reload()
         watch()
+        // The very first time the library opens, the earliest thumbnails decode a beat after the
+        // list first lays out — some land on the ListView's throwaway measurement row and leave the
+        // visible row showing its placeholder at the wrong size (user hit: "first entry thumbnails
+        // don't fit"). A single re-bind once they have had a moment to decode fixes it, the same way
+        // leaving and re-entering a folder did by hand. Once is enough — later opens are warm.
+        if (!warmedThumbs) {
+            warmedThumbs = true
+            ui.postDelayed({ if (isOpen) adapter.notifyDataSetChanged() }, 500)
+        }
         // Something left playing when the library was last closed is still going,
         // so its player comes back with the screen — but only onto the shelf it
         // belongs to.
         syncPlayerView()
     }
+
+    /** First-open thumbnail warm-up runs once; see [open]. */
+    private var warmedThumbs = false
 
     /**
      * Show the player that belongs to the shelf being looked at, and only that.

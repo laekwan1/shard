@@ -56,6 +56,13 @@ abstract class BrowserActivity : AppCompatActivity() {
     // The edge-swipe that opens the library / address panel is held off then, so a scrub does not
     // yank a screen up mid-seek (user hit). @Volatile: set on the JS thread, read on the UI thread.
     @Volatile private var webSeekActive = false
+    // Where the seek bar sits, in the page's CSS px (top + height, viewport-relative); top < 0 =
+    // hidden. Reported ahead of any touch so ACTION_DOWN can tell a scrub from a swipe without the
+    // async-touchstart race that let a scrub still open the library. Converted to screen px on use.
+    @Volatile private var seekBandTopCss = -1f
+    @Volatile private var seekBandHeightCss = 0f
+    // Set on ACTION_DOWN when the press lands in that band; the edge-swipe is held off for the gesture.
+    private var pressInSeekBand = false
 
     /**
      * The current page's title, kept here rather than read from the web view.
@@ -554,10 +561,14 @@ abstract class BrowserActivity : AppCompatActivity() {
         // Video should start where the page says it starts, as in a real browser.
         settings.mediaPlaybackRequiresUserGesture = false
 
-        // The page reports long presses on video through this, and whether a finger is on its
-        // own seek bar (so the library/address edge-swipe is held off during a scrub).
+        // The page reports long presses on video through this, whether a finger is on its own seek
+        // bar, and where that bar is (so the library/address edge-swipe is held off during a scrub).
         addJavascriptInterface(
-            VideoHook(::onVideoLongPress) { active -> webSeekActive = active },
+            VideoHook(
+                ::onVideoLongPress,
+                onSeekTouch = { active -> webSeekActive = active },
+                onSeekBand = { top, height -> seekBandTopCss = top; seekBandHeightCss = height },
+            ),
             VideoHook.BRIDGE,
         )
         addJavascriptInterface(YouTubeBridge(), YouTube.BRIDGE)
@@ -895,8 +906,9 @@ abstract class BrowserActivity : AppCompatActivity() {
                 val start = down ?: return false
                 // The favorites overlay owns its own touches; leave it alone.
                 if (favoritesShown) return false
-                // A finger on the page's video seek bar is scrubbing, not swiping to a screen.
-                if (webSeekActive) return false
+                // A finger on the page's video seek bar is scrubbing, not swiping to a screen —
+                // caught by the flag, or (race-free) by the press having landed in the reported band.
+                if (webSeekActive || pressInSeekBand) return false
 
                 val dx = current.rawX - start.rawX
                 val dy = current.rawY - start.rawY
@@ -957,7 +969,7 @@ abstract class BrowserActivity : AppCompatActivity() {
             // panel is furniture over it, and full screen is a player — a drag
             // in any of those belongs to what is in front, not to the page.
             pull.enabled = !panelShown && customView == null &&
-                !(libraryMade && library.isOpen) && !webSeekActive
+                !(libraryMade && library.isOpen) && !webSeekActive && !pressInSeekBand
             pull.onTouch(event)
 
             when (event.action) {
@@ -968,10 +980,15 @@ abstract class BrowserActivity : AppCompatActivity() {
                     if (binding.url.hasFocus() && !touchIsInside(binding.url, event)) {
                         dismissKeyboard()
                     }
+                    // Decide on the DOWN whether this press is a scrub — no race with the page.
+                    pressInSeekBand = pressLandsOnSeekBar(event)
                 }
-                // Clear the seek flag when the gesture ends, in case the page's touchend was
+                // Clear the seek flags when the gesture ends, in case the page's touchend was
                 // missed — otherwise a stuck flag would swallow the next real edge-swipe.
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> webSeekActive = false
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    webSeekActive = false
+                    pressInSeekBand = false
+                }
             }
         }
         return super.dispatchTouchEvent(event)
@@ -985,6 +1002,25 @@ abstract class BrowserActivity : AppCompatActivity() {
      * the whole screen — a rightward swipe anywhere on the left opens the address,
      * a leftward swipe anywhere on the right opens the library.
      */
+    /**
+     * Whether an ACTION_DOWN lands in the page's video seek bar, from the band the page reported.
+     *
+     * The band is CSS px, viewport-relative; a video page uses a device-width viewport, so the web
+     * view renders 1 CSS px = one density-scaled pixel and its top on screen is the viewport's top.
+     * So screen Y = web view's top on screen + cssY x density. Deciding here on the down means there
+     * is no race with the page's async touchstart — the scrub is known before the swipe develops.
+     */
+    private fun pressLandsOnSeekBar(event: MotionEvent): Boolean {
+        val top = seekBandTopCss
+        if (top < 0f) return false
+        val density = resources.displayMetrics.density
+        val loc = IntArray(2)
+        binding.web.getLocationOnScreen(loc)
+        val bandTop = loc[1] + top * density
+        val bandBottom = bandTop + seekBandHeightCss * density
+        return event.rawY in bandTop..bandBottom
+    }
+
     private fun startsInAddressBand(x: Float, y: Float): Boolean {
         val density = resources.displayMetrics.density
         val w = resources.displayMetrics.widthPixels
