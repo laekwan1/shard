@@ -73,6 +73,14 @@ abstract class BrowserActivity : AppCompatActivity() {
     private var panelShown = false
 
     /**
+     * True once the current touch gesture has fired its one swipe action (open/close the address
+     * panel, or open the library). onScroll fires many times per swipe; this keeps the first action
+     * the only one, so dismissing the panel and opening the library take two separate swipes. Reset
+     * on ACTION_DOWN.
+     */
+    private var swipeHandled = false
+
+    /**
      * The id of the short the Shorts reel was entered on — its first video.
      *
      * On that first short a downward swipe has no previous short to step to, so it
@@ -934,25 +942,35 @@ abstract class BrowserActivity : AppCompatActivity() {
                 val sideways = kotlin.math.abs(dx) > swipeThreshold() &&
                     kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.2f
                 if (!sideways) return false
+                // One action per gesture. onScroll fires many times across a single swipe; the
+                // first sideways sample that acts must be the last one that does. Without this a
+                // left-swipe over an open panel hid it (panelShown → false) on an early sample and
+                // then OPENED THE LIBRARY on a later sample of the SAME swipe — so the panel never
+                // got a step of its own and the address bar "jumped straight to the library" (user
+                // hit). The user asked for two steps: one swipe dismisses the address bar, the next
+                // opens the library. Reset per gesture on ACTION_DOWN (see dispatchTouchEvent).
+                if (swipeHandled) return true
 
                 if (dx > 0) {
                     // Rightward from the left half opens the address panel.
                     if (!panelShown && startsInAddressBand(start.rawX, start.rawY)) {
                         showPanel()
+                        swipeHandled = true
                         return true
                     }
                 } else {
-                    // Leftward: if the address panel is open, the first swipe just
-                    // puts it away; the next one (panel closed) opens the library —
-                    // the same two-step iOS does. Otherwise open the library from
-                    // the right half, but only over the front-most page.
+                    // Leftward: if the address panel is open, this swipe just puts it away; the
+                    // NEXT swipe (panel closed) opens the library — the same two-step iOS does.
+                    // Otherwise open the library from the right half, but only over the front page.
                     if (panelShown) {
                         hidePanel()
+                        swipeHandled = true
                         return true
                     }
                     if (startsInLibraryBand(start.rawX, start.rawY) &&
                         customView == null && !(libraryMade && library.isOpen)) {
                         openLibrary()
+                        swipeHandled = true
                         return true
                     }
                 }
@@ -998,6 +1016,8 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    // A new gesture: let it fire one swipe action again.
+                    swipeHandled = false
                     // Only the keyboard is put away on the down. Closing the panel is
                     // done on a single TAP (see onSingleTapUp) so a left-swipe is not
                     // pre-dismissed before its dismiss-then-library step can run.
