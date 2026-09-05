@@ -208,7 +208,7 @@ pub async fn resign_app(
 /// 엔티틀먼트 **블록이 있는 것 자체**를 거부한다(폰 확인: XML 5로 줄여도 0xe8008016). Apple 프레임워크는
 /// 블록이 아예 없다. 그래서 서명을 제거해 두면 상위 번들 서명이 새로 서명할 때 보존할 엔티틀먼트가 없어
 /// **엔티틀먼트 블록 없이** 깨끗이 서명된다. 프레임워크는 thin arm64(64비트 LE)뿐이라 그 경우만 처리.
-fn strip_framework_signatures(app_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<()> {
+pub fn strip_framework_signatures(app_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<()> {
     let fw_dir = app_dir.join("Frameworks");
     if !fw_dir.is_dir() {
         return Ok(());

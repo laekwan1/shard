@@ -154,6 +154,76 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // ── 전체 재현 하네스: 디바이스 시나리오(프레임워크에 엔티틀먼트가 박힌 앱)를 PC에서 그대로
+    //    재현하고 엔진 서명 흐름(strip + 번들 서명)을 돌려, 폰에 올리기 전에 전체 서명을 검증한다.
+    //    이게 진작 있었어야 했다 — PoC가 CI 미서명 앱(프레임워크 깨끗)만 서명해서 프레임워크 문제를
+    //    재현 못 했다. 여기서는 Sideloadly처럼 프레임워크에 엔티틀먼트를 박은 뒤 엔진 흐름을 태운다.
+    if args.first().map(String::as_str) == Some("--full-sign-test") {
+        let ipa = args
+            .get(1)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("release/ios/Shard-unsigned.ipa"));
+        let work = std::env::temp_dir().join("shard-full-sign");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        let app = extract_ipa(&ipa, &work.join("extracted"))?;
+        let mkid = |n: &str| {
+            create_self_signed_code_signing_certificate(
+                KeyAlgorithm::Rsa,
+                CertificateProfile::AppleDevelopment,
+                n,
+                "Full Sign Test",
+                "US",
+                chrono::Duration::try_days(365).unwrap(),
+            )
+        };
+
+        println!("=== 1) Sideloadly 시뮬: 프레임워크 바이너리에 앱 엔티틀먼트 박기 ===");
+        let (scert, skey) = mkid("SIM")?;
+        let fw_dir = app.join("Frameworks");
+        if fw_dir.is_dir() {
+            for e in fs::read_dir(&fw_dir)? {
+                let fw = e?.path();
+                if fw.extension().and_then(|x| x.to_str()) != Some("framework") {
+                    continue;
+                }
+                let stem = fw.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                let bin = fw.join(&stem);
+                if !bin.is_file() {
+                    continue;
+                }
+                let mut s = SigningSettings::default();
+                s.set_signing_key(&skey, scert.clone());
+                s.set_entitlements_xml(SettingsScope::Main, TEST_ENT)?;
+                let tmp = bin.with_file_name(format!("{stem}.sim"));
+                UnifiedSigner::new(s).sign_path(&bin, &tmp)?;
+                fs::rename(&tmp, &bin)?;
+                println!("  {stem} → {}", macho_state(&bin)?);
+            }
+        }
+
+        println!("=== 2) 엔진 흐름: strip_framework_signatures + 번들 서명(4키+이중CD+체인) ===");
+        let mut logf = |m: &str| println!("  {m}");
+        resign::engine::strip_framework_signatures(&app, &mut logf)?;
+        let (cert, key) = mkid("SIGN")?;
+        let mut s = SigningSettings::default();
+        s.set_signing_key(&key, cert);
+        s.set_entitlements_xml(SettingsScope::Main, TEST_ENT)?;
+        s.set_digest_type(SettingsScope::Main, apple_codesign::cryptography::DigestType::Sha1);
+        s.add_extra_digest(SettingsScope::Main, apple_codesign::cryptography::DigestType::Sha256);
+        s.chain_apple_certificates(); // self-signed라 None(체인 검증은 실 인증서로 폰에서만)
+        let out = work.join("signed").join(app.file_name().unwrap());
+        fs::create_dir_all(out.parent().unwrap())?;
+        UnifiedSigner::new(s)
+            .sign_path(&app, &out)
+            .context("엔진 흐름 번들 서명")?;
+
+        println!("=== 3) 결과 덤프(폰 dump_signed_bundle와 같은 잣대) ===");
+        dump_signature(&out)?;
+        println!("\n기대: 메인 exe만 엔티틀먼트(XML 16줄/DER 15줄), 프레임워크는 XML 0/DER 0, 전부 CMS 서명.");
+        return Ok(());
+    }
+
     // ── 서명 모드 ──
     let ipa = args
         .first()
