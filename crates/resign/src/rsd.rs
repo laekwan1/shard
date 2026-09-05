@@ -155,6 +155,17 @@ pub async fn rsd_install(
     let mut rpf = load_rp_pairing(&pairing)?;
     // 어댑터를 설치 끝까지 소유(드롭 금지 — 스트림이 죽는다).
     let (mut adapter, mut hs) = rppairing_tunnel(addr, &mut rpf, log).await?;
+    // 진단(0xe8008016): 이 폰의 UDID를 찍어 위 "프로파일 등록기기" 목록과 대조하려는 것. 서명·엔티틀먼트
+    // 는 완벽(PC 재현 확인)한데 설치가 거부되니, 남은 원인은 ⓐ 이 폰이 프로파일에 없음(→ addDevice
+    // 구현이면 해결) ⓑ apple-codesign 서명이 iOS 26 비호환(→ zsign 교체)뿐이다. UDID가 목록에 있으면 ⓑ,
+    // 없으면 ⓐ. 여기서 한 줄로 판별된다.
+    match hs.properties.get("UniqueDeviceID").and_then(|v| v.as_string()) {
+        Some(u) => log(&format!("[진단] 이 폰 UDID: {u} — 위 프로파일 등록기기 목록에 있는지 확인")),
+        None => {
+            let keys: Vec<&str> = hs.properties.keys().map(String::as_str).collect();
+            log(&format!("[진단] UDID 프로퍼티 못 찾음. 가용 키: {}", keys.join(", ")));
+        }
+    }
     log("⑤ AFC 업로드 + installation_proxy 설치...");
     // options=None이면 helper가 .ipa에서 CFBundleIdentifier를 읽어 PublicStaging 업로드 후 설치한다.
     install_package_rsd(&mut adapter, &mut hs, ipa, None)

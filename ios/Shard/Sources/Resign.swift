@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit  // UIApplication/UIResponder — 키보드 내리기(hideKeyboard). SwiftUI가 늘 재노출하진 않음.
-import Security  // Keychain — Apple ID 비밀번호를 안전하게 저장(재입력 없이 갱신).
 import UniformTypeIdentifiers
 import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
 
@@ -57,44 +56,37 @@ struct SignedAccount: Codable, Identifiable {
     var id: String { email }
 }
 
-// Apple ID 비밀번호를 **Keychain**에 저장한다(UserDefaults는 평문이라 안 됨). 계정별 1개.
-// 사용자 요청: 매번 비밀번호를 다시 치지 않고 "지금 갱신"만 누르게. 저장은 사용자가 직접 로그인/
-// 갱신을 실행할 때만 하고, 화면에 뜰 땐 저장된 걸 불러와 채운다. Claude가 값을 만지지 않는다 —
-// 사용자의 앱이 사용자의 Keychain에 사용자의 비밀번호를 넣는, 흔한 "기억하기" 기능일 뿐이다.
+// Apple ID 비밀번호를 **앱 컨테이너 파일**에 저장한다(사용자 요청: 매번 안 치고 "지금 갱신"만).
+// Keychain을 먼저 썼으나 사이드로드 앱에선 접근 그룹 문제로 저장이 안 됐다(사용자 확인). 그래서 앱
+// 샌드박스 파일로 — 이 앱만 읽고, `.completeFileProtection`으로 기기 잠금 시 암호화된다. 코드베이스가
+// gstoken/anisette 캐시도 컨테이너 파일로 두는 것과 같은 결. 계정별로 담아 계정 변경도 처리한다.
+// Claude가 값을 만지지 않는다 — 사용자의 앱이 사용자의 비밀번호를 사용자 기기에 기억하는 기능일 뿐.
 enum PasswordStore {
-    private static let service = "net.sw.shard.resign.applepw"
+    private static var fileURL: URL? {
+        let fm = FileManager.default
+        guard let dir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("resign_pw.json")
+    }
+
+    private static func loadMap() -> [String: String] {
+        guard let url = fileURL, let data = try? Data(contentsOf: url),
+              let map = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        else { return [:] }
+        return map
+    }
 
     static func save(_ password: String, for email: String) {
-        let account = email.lowercased()
-        guard !account.isEmpty else { return }
-        let base: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        SecItemDelete(base as CFDictionary)
-        guard !password.isEmpty else { return }
-        var add = base
-        add[kSecValueData as String] = Data(password.utf8)
-        // 이 기기에서만, 잠금 해제 후에만 읽힌다.
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(add as CFDictionary, nil)
+        let key = email.lowercased()
+        guard !key.isEmpty, let url = fileURL else { return }
+        var map = loadMap()
+        if password.isEmpty { map.removeValue(forKey: key) } else { map[key] = password }
+        guard let data = try? JSONSerialization.data(withJSONObject: map) else { return }
+        try? data.write(to: url, options: [.atomic, .completeFileProtection])
     }
 
     static func load(for email: String) -> String {
-        let account = email.lowercased()
-        guard !account.isEmpty else { return "" }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var out: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
-              let data = out as? Data else { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+        loadMap()[email.lowercased()] ?? ""
     }
 }
 
