@@ -55,12 +55,14 @@
         android:gravity="center_vertical">
 
     <!-- 68 by 36: the menu button (38dp) still sets the row height, and the thumbnail is a hair
-         shorter (1dp of breathing room top and bottom), centred in the row — user asked to trim
-         it a touch. Rows are packed tight (no vertical padding) so more of the library is on
-         screen. 68 keeps it ~16:9. -->
+         shorter (1dp of breathing room top and bottom). Nudged up half a step: in this
+         center_vertical row a bottom margin raises the tile by HALF the margin, so 1dp lifts it
+         0.5dp off centre — the amount the user asked for. Rows are packed tight (no vertical
+         padding) so more of the library is on screen. 68 keeps it ~16:9. -->
     <FrameLayout
         android:layout_width="68dp"
         android:layout_height="36dp"
+        android:layout_marginBottom="1dp"
         android:layout_marginEnd="12dp">
 
         <com.google.android.material.imageview.ShapeableImageView

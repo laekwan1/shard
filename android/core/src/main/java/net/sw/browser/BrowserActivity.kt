@@ -73,6 +73,41 @@ abstract class BrowserActivity : AppCompatActivity() {
     private var panelShown = false
 
     /**
+     * The id of the short the Shorts reel was entered on — its first video.
+     *
+     * On that first short a downward swipe has no previous short to step to, so it
+     * should reload (user ask); on any later short the same swipe steps back one and
+     * must not reload. Knowing which short is the entry is the whole difference, and
+     * the reel keeps no "previous" above the one it opened on, so entry == first.
+     * Null when not in Shorts, so leaving and re-entering captures a fresh first.
+     */
+    private var shortsEntryId: String? = null
+
+    /** The video id in a `/shorts/<id>` url, or null when the url is not a short. */
+    private fun shortsIdOf(url: String?): String? {
+        val u = url ?: return null
+        val at = u.indexOf("/shorts/")
+        if (at < 0) return null
+        val rest = u.substring(at + 8)
+        val end = rest.indexOfFirst { it == '?' || it == '/' || it == '#' || it == '&' }
+        return (if (end < 0) rest else rest.substring(0, end)).ifEmpty { null }
+    }
+
+    /**
+     * Remember the first short of a reel, and forget it on the way out.
+     *
+     * The first `/shorts/` url after arriving is the entry; later shorts keep that
+     * same entry so only the true first video enables the reload swipe.
+     */
+    private fun noteShortsUrl(url: String?) {
+        val id = shortsIdOf(url)
+        when {
+            id == null -> shortsEntryId = null
+            shortsEntryId == null -> shortsEntryId = id
+        }
+    }
+
+    /**
      * Drag down from the top of a page to reload it.
      *
      * Made after the layout exists, since it parks its own indicator.
@@ -574,6 +609,8 @@ abstract class BrowserActivity : AppCompatActivity() {
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 binding.url.setText(url)
+                // Track which short is the reel's first, so only there does a pull reload.
+                noteShortsUrl(url)
                 // The star follows the page in front, and hides on the start page.
                 updateStar(url)
                 // A new page has no title yet; the chrome client fills it in.
@@ -617,6 +654,8 @@ abstract class BrowserActivity : AppCompatActivity() {
             override fun doUpdateVisitedHistory(view: WebView, url: String, isReload: Boolean) {
                 if (url != binding.url.text.toString()) {
                     binding.url.setText(url)
+                    // Shorts step between videos here (SPA), not through onPageStarted.
+                    noteShortsUrl(url)
                     // In-app navigation (YouTube's SPA) changes the page too.
                     updateStar(url)
                     // A different video's streams are not this one's.
@@ -946,12 +985,15 @@ abstract class BrowserActivity : AppCompatActivity() {
             // Only while the page is the screen. The library covers it, the
             // panel is furniture over it, and full screen is a player — a drag
             // in any of those belongs to what is in front, not to the page.
-            // Not on YouTube Shorts: there a vertical swipe steps between shorts, and the one that
-            // goes back to the previous short starts at the top — pull-to-refresh caught it and
-            // reloaded the page instead (user hit). The page owns vertical swipes there.
+            // On YouTube Shorts a vertical swipe steps between shorts, so the page owns it —
+            // EXCEPT on the reel's first short, where a downward swipe has no previous short to
+            // step to and should reload instead (user ask). So refresh is off mid-feed and on
+            // for the first video; the swipe that steps back to a previous short never reloads.
+            val sid = shortsIdOf(binding.web.url)
+            val blockForShorts = sid != null && sid != shortsEntryId
             pull.enabled = !panelShown && customView == null &&
                 !(libraryMade && library.isOpen) &&
-                binding.web.url?.contains("/shorts/") != true
+                !blockForShorts
             pull.onTouch(event)
 
             when (event.action) {

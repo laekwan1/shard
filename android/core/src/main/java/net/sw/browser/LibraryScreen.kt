@@ -272,11 +272,19 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         thumbWork.execute {
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            // Disk first: a frame decoded on an earlier run reads back as a ready JPEG,
+            // so a fresh app launch fills the list at once instead of decoding every
+            // frame again and showing the small placeholder until each one lands. This
+            // is the "thumbnails are small on first launch until you leave and come
+            // back" fix — the memory cache dies with the process; the disk one does not.
+            val diskKey = ThumbStore.keyFor(item)
+            var bmp = ThumbStore.load(activity, diskKey)
+            val fromDisk = bmp != null
             // A song carries no frame of its own. The picture inside the file is
             // the first place to look — that is where a download puts it, and
             // where every music app looks — then the one remembered beside it,
             // from before songs carried their own.
-            var bmp = if (music) embeddedArt(item) else null
+            if (bmp == null && music) bmp = embeddedArt(item)
             if (bmp == null && music) bmp = Covers.load(activity, Covers.keyFor(item.name))
             // A real frame at the video's OWN aspect, so a 9:16 short comes back tall instead
             // of cropped to 16:9. loadThumbnail returns the requested (landscape) shape, which
@@ -290,6 +298,8 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
                 }.getOrNull()
             }
             if (bmp == null) return@execute
+            // Remember a freshly decoded frame so the next launch skips the decode.
+            if (!fromDisk) ThumbStore.save(activity, diskKey, bmp)
             thumbCache.put(item.uri, bmp)
             ui.post {
                 if (art.tag == item.uri) showThumb(art, badge, bmp, music)
