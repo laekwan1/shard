@@ -113,6 +113,10 @@ fn main() -> Result<()> {
     settings
         .set_entitlements_xml(SettingsScope::Main, TEST_ENT)
         .context("엔티틀먼트 설정")?;
+    // 이중 CD(SHA-1 주 + SHA-256 대체) — 엔진(engine.rs)과 같은 설정. 아래 덤프가 메인 exe에서
+    // "CD[sha1 주+대체1]"로 나와야 zsign/SideStore와 같은 hash agility가 박힌 것.
+    settings.set_digest_type(SettingsScope::Main, apple_codesign::cryptography::DigestType::Sha1);
+    settings.add_extra_digest(SettingsScope::Main, apple_codesign::cryptography::DigestType::Sha256);
 
     // 4) 번들 재서명. apple-codesign이 중첩 프레임워크(MobileVLCKit)를 먼저 서명하고
     //    최상위 앱을 서명하며 _CodeSignature/CodeResources를 쓴다.

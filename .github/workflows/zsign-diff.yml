@@ -14,7 +14,6 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/zsign-diff.yml'
-      - 'crates/resign/src/main.rs'
 
 jobs:
   diff:

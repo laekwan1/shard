@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
 use apple_codesign::{
-    create_self_signed_code_signing_certificate, CertificateProfile, SettingsScope, SigningSettings,
-    UnifiedSigner,
+    cryptography::DigestType, create_self_signed_code_signing_certificate, CertificateProfile,
+    SettingsScope, SigningSettings, UnifiedSigner,
 };
 use plist::{Dictionary, Value};
 use x509_certificate::{
@@ -160,6 +160,14 @@ pub async fn resign_app(
     settings
         .set_entitlements_xml(SettingsScope::Main, &entitlements_xml)
         .map_err(|e| anyhow!("엔티틀먼트 설정: {e:?}"))?;
+    // 이중 CodeDirectory(SHA-1 주 + SHA-256 대체) — zsign/SideStore가 iOS 26에 설치되는 마지막 조각.
+    // apple-codesign은 modern 타깃 메인 exe에 **단일 SHA-256** CD만 낸다(폰 실측 확인). 그런데 폰
+    // 진단으로 신원(app-id·서명자·기기 등록)과 엔티틀먼트(정확히 SideStore 최소 4키)가 모두 맞는데도
+    // 설치가 0xe8008016 ApplicationVerificationFailed로 거부됐다 — 남은 차이는 서명 구조뿐이고, 그게
+    // 이 이중 CD다. zsign 기본값(hashType 1=SHA-1 주, 2=SHA-256 대체)을 그대로 맞춘다: 주를 SHA-1로,
+    // SHA-256을 extra(대체 CD)로. iOS 26은 강한 것(SHA-256)을 쓰되 둘 다 있는 hash agility를 요구한다.
+    settings.set_digest_type(SettingsScope::Main, DigestType::Sha1);
+    settings.add_extra_digest(SettingsScope::Main, DigestType::Sha256);
     UnifiedSigner::new(settings)
         .sign_path(&app_dir, &signed)
         .map_err(|e| anyhow!("[⑤ 서명] 실패: {e:?}"))?;
