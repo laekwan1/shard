@@ -30,25 +30,18 @@ jobs:
           brew install pkg-config openssl@3
           git clone --depth 1 https://github.com/zhlynn/zsign zsign-src
           cd zsign-src
-          # zhlynn/zsign 최신 구조: Makefile에 clean 타깃이 없다(이전 CI가 `make clean && make`에서
-          # clean 실패로 make를 건너뛰어 바이너리를 못 만들었고, 그래서 diff가 apple(서명) vs zsign(미서명)
-          # 이라 무의미했다). 그냥 make만 돌리고, brew openssl 경로를 g++가 찾게 CPATH/LIBRARY_PATH로 준다.
+          # zhlynn/zsign 최신 구조: 소스는 src/, 빌드는 build/<os>/Makefile로 이동했다(루트에 Makefile·
+          # .cpp가 없어 이전 CI의 `make`가 "no makefile found"로 실패, zsign이 안 만들어져 미서명 원본으로
+          # diff가 돌았다). macOS는 build/macos에서 make → bin/zsign에 출력. openssl은 pkg-config로 찾으므로
+          # PKG_CONFIG_PATH만 brew openssl@3로 준다. zlib/minizip은 vendored(추가 의존 없음).
           OSSL="$(brew --prefix openssl@3)"
           export PKG_CONFIG_PATH="$OSSL/lib/pkgconfig"
-          export CPATH="$OSSL/include" LIBRARY_PATH="$OSSL/lib"
-          # 최신 zsign은 bin/zsign에 낸다. make가 실패하면 소스를 직접 g++로 묶는다(하위호환).
-          make || {
-            echo "::warning::make failed; compiling zsign directly with g++"
-            g++ -std=c++14 -O2 -o bin/zsign *.cpp common/*.cpp \
-              -I"$OSSL/include" -L"$OSSL/lib" -lcrypto || \
-            g++ -std=c++14 -O2 -o zsign *.cpp common/*.cpp \
-              -I"$OSSL/include" -L"$OSSL/lib" -lcrypto
-          }
-          # 실제로 생긴 바이너리를 찾는다(bin/zsign 또는 zsign). **없으면 여기서 실패**한다 —
+          make -C build/macos
+          # 출력은 bin/zsign(build/macos/Makefile: BINDIR=../../bin). **없으면 여기서 실패**한다 —
           # 미서명 원본으로 조용히 diff 돌던 지난 실패를 되풀이하지 않는다.
-          ZBIN="$(find "$PWD" -maxdepth 2 -type f -name zsign -perm -u+x | head -1)"
-          test -n "$ZBIN" || { echo "::error::zsign binary not built"; ls -R; exit 1; }
-          "$ZBIN" -v || true   # 버전 출력으로 빌드 확인(일부 버전은 -v 미지원)
+          ZBIN="$PWD/bin/zsign"
+          test -x "$ZBIN" || { echo "::error::zsign binary not built"; find "$PWD" -maxdepth 3 -type f; exit 1; }
+          "$ZBIN" -v || true   # 버전 출력으로 빌드 확인
           echo "ZSIGN=$ZBIN" >> "$GITHUB_ENV"
 
       - name: Self-signed identity + 4-key entitlements
