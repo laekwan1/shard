@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit  // UIApplication/UIResponder — 키보드 내리기(hideKeyboard). SwiftUI가 늘 재노출하진 않음.
+import Security  // Keychain — Apple ID 비밀번호를 안전하게 저장(재입력 없이 갱신).
 import UniformTypeIdentifiers
 import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
 
@@ -54,6 +55,47 @@ struct SignedAccount: Codable, Identifiable {
     var appId: String
     var date: Date
     var id: String { email }
+}
+
+// Apple ID 비밀번호를 **Keychain**에 저장한다(UserDefaults는 평문이라 안 됨). 계정별 1개.
+// 사용자 요청: 매번 비밀번호를 다시 치지 않고 "지금 갱신"만 누르게. 저장은 사용자가 직접 로그인/
+// 갱신을 실행할 때만 하고, 화면에 뜰 땐 저장된 걸 불러와 채운다. Claude가 값을 만지지 않는다 —
+// 사용자의 앱이 사용자의 Keychain에 사용자의 비밀번호를 넣는, 흔한 "기억하기" 기능일 뿐이다.
+enum PasswordStore {
+    private static let service = "net.sw.shard.resign.applepw"
+
+    static func save(_ password: String, for email: String) {
+        let account = email.lowercased()
+        guard !account.isEmpty else { return }
+        let base: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(base as CFDictionary)
+        guard !password.isEmpty else { return }
+        var add = base
+        add[kSecValueData as String] = Data(password.utf8)
+        // 이 기기에서만, 잠금 해제 후에만 읽힌다.
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(add as CFDictionary, nil)
+    }
+
+    static func load(for email: String) -> String {
+        let account = email.lowercased()
+        guard !account.isEmpty else { return "" }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var out: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &out) == errSecSuccess,
+              let data = out as? Data else { return "" }
+        return String(data: data, encoding: .utf8) ?? ""
+    }
 }
 
 enum SignedAccountStore {
@@ -501,18 +543,24 @@ struct ResignView: View {
                         SecureField("••••••••", text: $password)
                     }
 
-                    Button {
-                        model.run(email: email, password: password)
-                    } label: {
-                        Text(model.running ? "진행 중..." : "인증서 발급")
-                            .font(.body.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
-                            .background(runnable ? Color.accent : Color.toolbar)
-                            .foregroundColor(runnable ? .onAccent : .muted)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    // "인증서 발급"은 계정 설정·변경용이다 — 이미 발급받은 계정이 있고 변경 중이 아니면
+                    // 숨긴다(사용자 지적: 발급은 계정 변경할 때만). 평소엔 "지금 갱신"만 쓰면 되고, 갱신이
+                    // 로그인→발급→재서명→설치를 안에서 한 번에 한다.
+                    if editingAccount || model.accounts.isEmpty {
+                        Button {
+                            PasswordStore.save(password, for: email)
+                            model.run(email: email, password: password)
+                        } label: {
+                            Text(model.running ? "진행 중..." : "인증서 발급")
+                                .font(.body.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(runnable ? Color.accent : Color.toolbar)
+                                .foregroundColor(runnable ? .onAccent : .muted)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                        .disabled(!runnable)
                     }
-                    .disabled(!runnable)
 
                     // 2FA 코드 입력 — 로그인 중 코드가 필요할 때만 나타난다(alert 대신 인라인).
                     if model.needs2FA {
@@ -577,22 +625,27 @@ struct ResignView: View {
                         }
                         // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. rppairing 터널(TCP→RemotePairing
                         // →TLS-PSK→jktcp 어댑터)을 세우고 터널 안 RSD 서비스 목록을 확인. RP 페어링 필요.
-                        Button {
-                            model.rsdProbe(addr: probeAddr)
-                        } label: {
-                            Text(model.running ? "확인 중..." : "연결 테스트 (RSD)")
-                                .font(.body.weight(.semibold))
-                                .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
-                                .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        // 한 번 통과하면 끝이므로, 페어링이 있고 터널을 바꾸는 중이 아니면 숨긴다(사용자
+                        // 지적: 연결 테스트는 끝난 것). 터널 변경(editingTunnel) 때나 페어링 전에만 보인다.
+                        if editingTunnel || !model.hasPairing {
+                            Button {
+                                model.rsdProbe(addr: probeAddr)
+                            } label: {
+                                Text(model.running ? "확인 중..." : "연결 테스트 (RSD)")
+                                    .font(.body.weight(.semibold))
+                                    .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                    .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
+                                    .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                            }
+                            .disabled(!model.hasPairing || model.running)
+                            Text("LocalDevVPN 켜고 누르세요. 로그의 ‘터널 안 서비스’에 installation_proxy가 보이면 설치 준비 완료. 페어링은 idevice_pair로 만든 RP 페어링이어야 합니다(classic .mobiledevicepairing은 안 됨).")
+                                .font(.caption2).foregroundColor(.muted)
                         }
-                        .disabled(!model.hasPairing || model.running)
-                        Text("LocalDevVPN 켜고 누르세요. 로그의 ‘터널 안 서비스’에 installation_proxy가 보이면 설치 준비 완료. 페어링은 idevice_pair로 만든 RP 페어링이어야 합니다(classic .mobiledevicepairing은 안 됨).")
-                            .font(.caption2).foregroundColor(.muted)
 
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
+                            PasswordStore.save(password, for: email)
                             model.selfUpdate(email: email, password: password, addr: probeAddr)
                         } label: {
                             Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
@@ -624,7 +677,11 @@ struct ResignView: View {
                 }
                 .padding()
                 // anisette 칸을 접어 두면 그 칸의 onAppear가 안 뜨므로, 저장은 여기서(늘 실행) 한다.
-                .onAppear { model.saveAnisetteURL(anisetteURL) }
+                // 저장해 둔 비밀번호가 있으면 채운다 — 그러면 재입력 없이 "지금 갱신"만 누르면 된다.
+                .onAppear {
+                    model.saveAnisetteURL(anisetteURL)
+                    if password.isEmpty { password = PasswordStore.load(for: email) }
+                }
             }
             // 키보드가 안 내려가던 것 — 숫자패드·URL 키보드엔 완료(Return)가 없어서다. 키보드 위에
             // "완료" 버튼을 달아 어느 칸에서든 내릴 수 있게 한다(사용자 지적).
