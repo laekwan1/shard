@@ -155,6 +155,15 @@ pub async fn resign_app(
     let signed = work.join("signed").join(app_dir.file_name().unwrap());
     fs::create_dir_all(signed.parent().unwrap())?;
 
+    // 프레임워크 엔티틀먼트 비우기 — 번들 서명 전에 각 프레임워크 바이너리를 빈 엔티틀먼트로 개별
+    // 재서명한다. apple-codesign 번들 서명기는 기존 서명의 중첩 엔티틀먼트를 **보존**하는데
+    // (import_settings_from_macho), Sideloadly가 프레임워크에 앱 엔티틀먼트(application-identifier·
+    // get-task-allow)를 박아둬서 그게 보존되면 iOS가 "프레임워크에 부적절한 엔티틀먼트"로 설치를
+    // 거부한다(0xe8008016 — 폰 진단 확인: MobileVLCKit·OpenSSL이 XML 16줄). 엔티틀먼트는 중첩
+    // 스코프로 상속되지 않아 Path 스코프로 못 덮으므로, 프레임워크마다 직접 빈 엔티틀먼트로 덮어
+    // 무효 항목을 지운다(빈 dict는 검증 대상이 없어 통과). zsign은 새로 서명해 이 문제가 없다.
+    clear_framework_entitlements(&app_dir, &key, &apple_cert, log)?;
+
     let mut settings = SigningSettings::default();
     settings.set_signing_key(&key, apple_cert);
     settings
@@ -191,6 +200,54 @@ pub async fn resign_app(
     repackage_ipa(&signed, &out_ipa)?;
     log("[⑤ 서명] .ipa 재포장 완료.");
     Ok(out_ipa)
+}
+
+/// 각 프레임워크 바이너리를 빈 엔티틀먼트로 개별 재서명해, 이전(Sideloadly) 서명이 남긴 앱
+/// 엔티틀먼트를 지운다. 번들 서명기가 중첩 엔티틀먼트를 보존하므로(import_settings_from_macho)
+/// 여기서 먼저 비운다 — 프레임워크가 application-identifier를 가지면 iOS가 설치를 거부한다.
+fn clear_framework_entitlements(
+    app_dir: &Path,
+    key: &InMemorySigningKeyPair,
+    cert: &CapturedX509Certificate,
+    log: &mut dyn FnMut(&str),
+) -> Result<()> {
+    const EMPTY_ENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict/></plist>"#;
+    let fw_dir = app_dir.join("Frameworks");
+    if !fw_dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&fw_dir)? {
+        let fw = entry?.path();
+        if fw.extension().and_then(|e| e.to_str()) != Some("framework") {
+            continue;
+        }
+        // 프레임워크 메인 바이너리 = Frameworks/X.framework/X (확장자 없는 같은 이름).
+        let Some(stem) = fw.file_stem().and_then(|s| s.to_str()).map(str::to_string) else {
+            continue;
+        };
+        let bin = fw.join(&stem);
+        if !bin.is_file() {
+            continue;
+        }
+        let mut s = SigningSettings::default();
+        s.set_signing_key(key, cert.clone());
+        s.set_entitlements_xml(SettingsScope::Main, EMPTY_ENT)
+            .map_err(|e| anyhow!("프레임워크 엔티틀먼트: {e:?}"))?;
+        s.set_digest_type(SettingsScope::Main, DigestType::Sha1);
+        s.add_extra_digest(SettingsScope::Main, DigestType::Sha256);
+        s.chain_apple_certificates();
+        // sign_path(파일→파일): 프레임워크 Mach-O만 재서명한다. 번들의 _CodeSignature는
+        // 뒤이은 상위 번들 서명이 새로 만든다(그때 import가 이 빈 엔티틀먼트를 읽어 보존).
+        let tmp = bin.with_file_name(format!("{stem}.resign_tmp"));
+        UnifiedSigner::new(s)
+            .sign_path(&bin, &tmp)
+            .map_err(|e| anyhow!("프레임워크 재서명 실패({stem}): {e:?}"))?;
+        fs::rename(&tmp, &bin)?;
+        log(&format!("[⑤ 서명] 프레임워크 엔티틀먼트 비움: {stem}"));
+    }
+    Ok(())
 }
 
 /// 서명된 번들을 다시 읽어 Mach-O마다 서명 구조를 로그로 찍는다 — 0xe8008016 원인 좁히기.
