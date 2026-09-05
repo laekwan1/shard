@@ -97,6 +97,14 @@ pub async fn resign_app(
     )
     .context("embedded.mobileprovision 쓰기")?;
     let entitlements_xml = entitlements_xml_from_profile(&profile.encoded_profile)?;
+    // 진단: 실제로 **서명에 박는** 엔티틀먼트(최소 4개여야 함). 위 프로파일 전체 키 로그와 함께 보면
+    // 0xe8008016이 계속 날 때 "엔티틀먼트가 틀렸나"(이 XML로 판별) vs "엔티틀먼트는 맞는데 서명기
+    // (apple-codesign)가 iOS 26이 안 받는 서명을 만드나"가 갈린다. 한 줄로 접어 찍는다.
+    log(&format!(
+        "[진단] 서명 엔티틀먼트({}자): {}",
+        entitlements_xml.len(),
+        entitlements_xml.replace('\n', " ").replace("  ", " ")
+    ));
     // 진단: iOS 설치 직전 0xe8008016(invalid entitlements) 원인 좁히기. 서명·엔티틀먼트 내용은 정상
     // 확인됨(PC 재현: 메인 exe에 XML+DER 정확히 박힘) → 이제 프로파일이 **이 기기 UDID**와 **서명 인증서**를
     // 포함하는지가 관건. 무료 개발 프로파일은 ProvisionedDevices에 기기가, DeveloperCertificates에 서명

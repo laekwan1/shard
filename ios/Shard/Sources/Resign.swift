@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit  // UIApplication/UIResponder — 키보드 내리기(hideKeyboard). SwiftUI가 늘 재노출하진 않음.
 import UniformTypeIdentifiers
 import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
 
@@ -435,6 +436,11 @@ struct ResignView: View {
     @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
     // 전용 anisette 서버 주소(비우면 기본 공유서버). 고정 기기 정체성 → 잠금·재로그인 근본 차단.
     @AppStorage("resign.anisetteURL") private var anisetteURL = ""
+    // 발급·페어링이 끝난 뒤엔 ID·anisette·터널 칸을 접어 두고(값은 @AppStorage로 기억됨) "변경"으로만
+    // 편다 — 매번 다시 입력할 필요가 없고 화면도 깔끔해진다(사용자 요청). 처음이거나 계정 기록이
+    // 없으면 펴진 채로 시작한다(accountKnown).
+    @State private var editingAccount = false
+    @State private var editingTunnel = false
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -457,25 +463,43 @@ struct ResignView: View {
                     Text("Apple ID로 로그인해 이 앱의 개발 인증서·프로비저닝 프로파일을 발급받습니다. (.ipa 서명·설치는 다음 단계)")
                         .font(.caption).foregroundColor(.muted)
 
-                    labeled("Apple ID (보조 계정 권장)") {
-                        TextField("you@example.com", text: $email)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.emailAddress)
-                            .disableAutocorrection(true)
+                    // ID·anisette는 값이 기억돼 있으면(accountKnown) 접어 요약만 보이고, "변경"으로 편다.
+                    if accountKnown && !editingAccount {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("계정: \(shownEmail)")
+                                    .font(.footnote.weight(.semibold)).foregroundColor(.onSurface)
+                                Text("anisette: \(anisetteURL.isEmpty ? "기본 서버(앱 내장)" : anisetteURL)")
+                                    .font(.caption2).foregroundColor(.muted)
+                            }
+                            Spacer()
+                            Button("변경") { editingAccount = true }
+                                .font(.footnote.weight(.semibold)).foregroundColor(.accent)
+                        }
+                        .padding(12).background(Color.chrome)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        labeled("Apple ID (보조 계정 권장)") {
+                            TextField("you@example.com", text: $email)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.emailAddress)
+                                .disableAutocorrection(true)
+                        }
+                        labeled("anisette 서버 (비우면 앱 내장 기본)") {
+                            TextField("http://<홈서버>:6969", text: $anisetteURL)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                .disableAutocorrection(true)
+                                .onChange(of: anisetteURL) { v in model.saveAnisetteURL(v) }
+                        }
+                        Text("전용 서버(고정 기기 정체성)를 쓰면 계정 잠금·재로그인이 근본적으로 준다. 도커 anisette-v3-server를 홈서버에 올리고 폰에서 닿게(LAN 또는 DuckDNS:6969).")
+                            .font(.caption2).foregroundColor(.muted)
                     }
+                    // 비밀번호는 보안상 기억하지 않으므로 늘 보인다 — 세션 만료 시 로그인에 필요하고, 발급·
+                    // 갱신 버튼(canSelfUpdate)도 이 값을 요구한다.
                     labeled("비밀번호 (앱 암호 권장)") {
                         SecureField("••••••••", text: $password)
                     }
-                    labeled("anisette 서버 (비우면 기본 공유서버)") {
-                        TextField("http://<홈서버>:6969", text: $anisetteURL)
-                            .textInputAutocapitalization(.never)
-                            .keyboardType(.URL)
-                            .disableAutocorrection(true)
-                            .onChange(of: anisetteURL) { v in model.saveAnisetteURL(v) }
-                    }
-                    .onAppear { model.saveAnisetteURL(anisetteURL) }
-                    Text("전용 서버(고정 기기 정체성)를 쓰면 계정 잠금·재로그인이 근본적으로 준다. 도커 anisette-v3-server를 홈서버에 올리고 폰에서 닿게(LAN 또는 DuckDNS:6969).")
-                        .font(.caption2).foregroundColor(.muted)
 
                     Button {
                         model.run(email: email, password: password)
@@ -535,10 +559,21 @@ struct ResignView: View {
                             Button(model.hasPairing ? "교체" : "가져오기") { showPairingPicker = true }
                                 .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                         }
-                        labeled("터널 주소 (LocalDevVPN 기본 10.7.0.1)") {
-                            TextField("10.7.0.1", text: $probeAddr)
-                                .keyboardType(.numbersAndPunctuation)
-                                .disableAutocorrection(true)
+                        // 터널 주소도 기억되므로 접어 두고 "변경"으로만 편다.
+                        if !editingTunnel {
+                            HStack {
+                                Text("터널 주소: \(probeAddr)")
+                                    .font(.footnote).foregroundColor(.onSurface)
+                                Spacer()
+                                Button("변경") { editingTunnel = true }
+                                    .font(.footnote.weight(.semibold)).foregroundColor(.accent)
+                            }
+                        } else {
+                            labeled("터널 주소 (LocalDevVPN 기본 10.7.0.1)") {
+                                TextField("10.7.0.1", text: $probeAddr)
+                                    .keyboardType(.numbersAndPunctuation)
+                                    .disableAutocorrection(true)
+                            }
                         }
                         // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. rppairing 터널(TCP→RemotePairing
                         // →TLS-PSK→jktcp 어댑터)을 세우고 터널 안 RSD 서비스 목록을 확인. RP 페어링 필요.
@@ -588,6 +623,16 @@ struct ResignView: View {
                     }
                 }
                 .padding()
+                // anisette 칸을 접어 두면 그 칸의 onAppear가 안 뜨므로, 저장은 여기서(늘 실행) 한다.
+                .onAppear { model.saveAnisetteURL(anisetteURL) }
+            }
+            // 키보드가 안 내려가던 것 — 숫자패드·URL 키보드엔 완료(Return)가 없어서다. 키보드 위에
+            // "완료" 버튼을 달아 어느 칸에서든 내릴 수 있게 한다(사용자 지적).
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("완료") { hideKeyboard() }
+                }
             }
         }
         .background(Color.surface.ignoresSafeArea())
@@ -650,6 +695,18 @@ struct ResignView: View {
         let f = DateFormatter()
         f.dateFormat = "yyyy.MM.dd"
         return f.string(from: d)
+    }
+
+    // 계정 기록이 있으면(이메일이 기억돼 있거나 발급한 계정이 있으면) ID·anisette 칸을 접는다.
+    private var accountKnown: Bool { !email.isEmpty || !model.accounts.isEmpty }
+
+    // 접힌 요약에 보일 이메일 — 입력값이 있으면 그것, 없으면 발급한 첫 계정.
+    private var shownEmail: String { email.isEmpty ? (model.accounts.first?.email ?? "") : email }
+
+    // 키보드를 내린다 — 지금 first responder에게 사임을 보내는 표준 방법(NavigationView 없이도 됨).
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private var runnable: Bool {
