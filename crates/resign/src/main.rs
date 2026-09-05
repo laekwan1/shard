@@ -62,6 +62,38 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // ── strip 검증 모드: 프레임워크 서명 제거(Mach-O 수술)가 무결한지 확인 ──
+    // 바이너리에 엔티틀먼트로 서명(Sideloadly 재현) → strip → 파싱/재서명 확인.
+    if args.first().map(String::as_str) == Some("--strip-test") {
+        let bin = PathBuf::from(args.get(1).context("--strip-test <mach-o 바이너리> 필요")?);
+        let work = std::env::temp_dir().join("shard-strip-test");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        let (cert, key) = create_self_signed_code_signing_certificate(
+            KeyAlgorithm::Rsa, CertificateProfile::AppleDevelopment, "STRIP", "Strip Test", "US",
+            chrono::Duration::try_days(365).context("유효기간")?,
+        )?;
+        let mut s1 = SigningSettings::default();
+        s1.set_signing_key(&key, cert);
+        s1.set_entitlements_xml(SettingsScope::Main, TEST_ENT)?;
+        let signed = work.join("bin");
+        UnifiedSigner::new(s1).sign_path(&bin, &signed).context("1) 서명")?;
+        println!("1) 엔티틀먼트로 서명   → {}", macho_state(&signed)?);
+        let stripped = resign::engine::strip_macho_code_signature(&signed)?;
+        println!("2) strip(실행={stripped})    → {}", macho_state(&signed)?);
+        let (cert2, key2) = create_self_signed_code_signing_certificate(
+            KeyAlgorithm::Rsa, CertificateProfile::AppleDevelopment, "STRIP2", "Strip Test2", "US",
+            chrono::Duration::try_days(365).context("유효기간")?,
+        )?;
+        let mut s2 = SigningSettings::default();
+        s2.set_signing_key(&key2, cert2);
+        let resigned = work.join("bin2");
+        UnifiedSigner::new(s2).sign_path(&signed, &resigned).context("3) 재서명")?;
+        println!("3) 엔티틀먼트 없이 재서명 → {}", macho_state(&resigned)?);
+        println!("   기대: 1)엔티틀먼트 O → 2)서명 X → 3)서명 O·엔티틀먼트 0줄");
+        return Ok(());
+    }
+
     // ── 서명 모드 ──
     let ipa = args
         .first()
@@ -221,6 +253,24 @@ fn dump_signature(app: &Path) -> Result<()> {
     }
     println!("  ✅ 덤프 완료.");
     Ok(())
+}
+
+/// 한 Mach-O의 서명 상태를 한 줄로: 서명 유무·엔티틀먼트 줄 수·CMS 유무.
+fn macho_state(path: &Path) -> Result<String> {
+    let entities = SignatureReader::from_path(path)?.entities()?;
+    for e in &entities {
+        if let SignatureEntity::MachO(m) = &e.entity {
+            return Ok(match &m.signature {
+                Some(sig) => format!(
+                    "서명 O, 엔티틀먼트 {}줄, CMS {}",
+                    sig.entitlements_plist.len(),
+                    if sig.cms.is_some() { "O" } else { "X" }
+                ),
+                None => "서명 X".to_string(),
+            });
+        }
+    }
+    Ok("Mach-O 아님".to_string())
 }
 
 /// .ipa(zip)를 dest로 풀고 Payload/ 아래 첫 .app 디렉터리 경로를 돌려준다.

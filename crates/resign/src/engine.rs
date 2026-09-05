@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use apple_codesign::{
     cryptography::DigestType, create_self_signed_code_signing_certificate, CertificateProfile,
     SettingsScope, SignatureEntity, SignatureReader, SigningSettings, UnifiedSigner,
@@ -155,14 +155,13 @@ pub async fn resign_app(
     let signed = work.join("signed").join(app_dir.file_name().unwrap());
     fs::create_dir_all(signed.parent().unwrap())?;
 
-    // 프레임워크 엔티틀먼트 비우기 — 번들 서명 전에 각 프레임워크 바이너리를 빈 엔티틀먼트로 개별
-    // 재서명한다. apple-codesign 번들 서명기는 기존 서명의 중첩 엔티틀먼트를 **보존**하는데
-    // (import_settings_from_macho), Sideloadly가 프레임워크에 앱 엔티틀먼트(application-identifier·
-    // get-task-allow)를 박아둬서 그게 보존되면 iOS가 "프레임워크에 부적절한 엔티틀먼트"로 설치를
-    // 거부한다(0xe8008016 — 폰 진단 확인: MobileVLCKit·OpenSSL이 XML 16줄). 엔티틀먼트는 중첩
-    // 스코프로 상속되지 않아 Path 스코프로 못 덮으므로, 프레임워크마다 직접 빈 엔티틀먼트로 덮어
-    // 무효 항목을 지운다(빈 dict는 검증 대상이 없어 통과). zsign은 새로 서명해 이 문제가 없다.
-    clear_framework_entitlements(&app_dir, &key, &apple_cert, log)?;
+    // 프레임워크 서명 제거 — 번들 서명 **전에** 각 프레임워크의 기존 코드 서명을 떼어낸다. apple-codesign
+    // 번들 서명기는 기존 서명의 중첩 엔티틀먼트를 **보존**하는데(import_settings_from_macho), Sideloadly가
+    // 프레임워크에 앱 엔티틀먼트를 박아둬서 그게 보존되면 iOS가 거부한다(폰 확인: XML 16). 빈 엔티틀먼트로
+    // 덮으면 빈 dict 블록이 남고 그것도 거부됐다(폰 확인: XML 5). 서명을 아예 제거해두면 상위 번들 서명이
+    // 보존할 게 없어 **엔티틀먼트 블록 없이** 깨끗이 서명한다(Apple 프레임워크처럼). zsign은 새로 서명해
+    // 이 문제가 없다 — apple-codesign의 "기존 서명 보존" 모델이 재서명과 충돌한 것.
+    strip_framework_signatures(&app_dir, log)?;
 
     let mut settings = SigningSettings::default();
     settings.set_signing_key(&key, apple_cert);
@@ -202,18 +201,14 @@ pub async fn resign_app(
     Ok(out_ipa)
 }
 
-/// 각 프레임워크 바이너리를 빈 엔티틀먼트로 개별 재서명해, 이전(Sideloadly) 서명이 남긴 앱
-/// 엔티틀먼트를 지운다. 번들 서명기가 중첩 엔티틀먼트를 보존하므로(import_settings_from_macho)
-/// 여기서 먼저 비운다 — 프레임워크가 application-identifier를 가지면 iOS가 설치를 거부한다.
-fn clear_framework_entitlements(
-    app_dir: &Path,
-    key: &InMemorySigningKeyPair,
-    cert: &CapturedX509Certificate,
-    log: &mut dyn FnMut(&str),
-) -> Result<()> {
-    const EMPTY_ENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict/></plist>"#;
+/// 각 프레임워크 바이너리의 **기존 코드 서명을 제거**한다(빈 엔티틀먼트로 덮는 게 아님).
+///
+/// 이전(Sideloadly) 서명이 프레임워크에 앱 엔티틀먼트를 박아두는데, 번들 서명기가 그걸 보존한다
+/// (import_settings_from_macho). 빈 엔티틀먼트로 덮으면 **빈 dict 블록**이 남고, iOS는 프레임워크에
+/// 엔티틀먼트 **블록이 있는 것 자체**를 거부한다(폰 확인: XML 5로 줄여도 0xe8008016). Apple 프레임워크는
+/// 블록이 아예 없다. 그래서 서명을 제거해 두면 상위 번들 서명이 새로 서명할 때 보존할 엔티틀먼트가 없어
+/// **엔티틀먼트 블록 없이** 깨끗이 서명된다. 프레임워크는 thin arm64(64비트 LE)뿐이라 그 경우만 처리.
+fn strip_framework_signatures(app_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<()> {
     let fw_dir = app_dir.join("Frameworks");
     if !fw_dir.is_dir() {
         return Ok(());
@@ -223,7 +218,6 @@ fn clear_framework_entitlements(
         if fw.extension().and_then(|e| e.to_str()) != Some("framework") {
             continue;
         }
-        // 프레임워크 메인 바이너리 = Frameworks/X.framework/X (확장자 없는 같은 이름).
         let Some(stem) = fw.file_stem().and_then(|s| s.to_str()).map(str::to_string) else {
             continue;
         };
@@ -231,23 +225,83 @@ fn clear_framework_entitlements(
         if !bin.is_file() {
             continue;
         }
-        let mut s = SigningSettings::default();
-        s.set_signing_key(key, cert.clone());
-        s.set_entitlements_xml(SettingsScope::Main, EMPTY_ENT)
-            .map_err(|e| anyhow!("프레임워크 엔티틀먼트: {e:?}"))?;
-        s.set_digest_type(SettingsScope::Main, DigestType::Sha1);
-        s.add_extra_digest(SettingsScope::Main, DigestType::Sha256);
-        s.chain_apple_certificates();
-        // sign_path(파일→파일): 프레임워크 Mach-O만 재서명한다. 번들의 _CodeSignature는
-        // 뒤이은 상위 번들 서명이 새로 만든다(그때 import가 이 빈 엔티틀먼트를 읽어 보존).
-        let tmp = bin.with_file_name(format!("{stem}.resign_tmp"));
-        UnifiedSigner::new(s)
-            .sign_path(&bin, &tmp)
-            .map_err(|e| anyhow!("프레임워크 재서명 실패({stem}): {e:?}"))?;
-        fs::rename(&tmp, &bin)?;
-        log(&format!("[⑤ 서명] 프레임워크 엔티틀먼트 비움: {stem}"));
+        match strip_macho_code_signature(&bin) {
+            Ok(true) => log(&format!("[⑤ 서명] 프레임워크 서명 제거(재서명 시 엔티틀먼트 없이): {stem}")),
+            Ok(false) => log(&format!("[⑤ 서명] {stem}: 제거할 서명 없음(또는 미지원 형식) — 건너뜀")),
+            Err(e) => log(&format!("[⑤ 서명] ⚠ {stem} 서명 제거 실패(무시하고 진행): {e:?}")),
+        }
     }
     Ok(())
+}
+
+/// thin 64비트 LE Mach-O에서 LC_CODE_SIGNATURE와 그 데이터를 떼어낸다. 제거하면 true.
+///
+/// 왜 손으로: apple-codesign은 서명 제거 API가 없고, 서명할 때 기존 서명의 엔티틀먼트를 보존한다.
+/// 프레임워크에 엔티틀먼트가 남지 않게 하려면 서명 자체가 없어야 한다. 손대는 건 세 곳뿐 —
+/// __LINKEDIT 세그먼트 크기, mach 헤더의 ncmds/sizeofcmds, 그리고 파일 끝(서명 데이터) 잘라내기.
+pub fn strip_macho_code_signature(path: &Path) -> Result<bool> {
+    const MH_MAGIC_64: u32 = 0xfeed_facf;
+    const LC_SEGMENT_64: u32 = 0x19;
+    const LC_CODE_SIGNATURE: u32 = 0x1d;
+    let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    let le64 = |b: &[u8]| u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]);
+
+    let mut data = fs::read(path)?;
+    if data.len() < 32 || le(&data[0..4]) != MH_MAGIC_64 {
+        return Ok(false); // fat/32비트/다른 형식은 손대지 않는다(프레임워크는 thin arm64뿐).
+    }
+    let ncmds = le(&data[16..20]);
+    let sizeofcmds = le(&data[20..24]) as usize;
+    let lc_end = 32 + sizeofcmds;
+    if lc_end > data.len() {
+        bail!("load command 영역이 파일 밖");
+    }
+
+    // LC_CODE_SIGNATURE와 __LINKEDIT 세그먼트 로드커맨드를 찾는다. __LINKEDIT은 보통
+    // LC_CODE_SIGNATURE보다 앞에 오므로, 서명 커맨드를 지우기 전에 먼저 __LINKEDIT을 줄인다.
+    let mut off = 32usize;
+    let mut cs_off: Option<usize> = None;
+    let (mut cs_dataoff, mut linkedit_off) = (0u32, None::<usize>);
+    for _ in 0..ncmds {
+        if off + 8 > lc_end {
+            bail!("load command 잘림");
+        }
+        let cmd = le(&data[off..off + 4]);
+        let cmdsize = le(&data[off + 4..off + 8]) as usize;
+        if cmdsize == 0 || off + cmdsize > lc_end {
+            bail!("잘못된 cmdsize");
+        }
+        if cmd == LC_CODE_SIGNATURE {
+            cs_off = Some(off);
+            cs_dataoff = le(&data[off + 8..off + 12]);
+        } else if cmd == LC_SEGMENT_64 && &data[off + 8..off + 24] == b"__LINKEDIT\0\0\0\0\0\0" {
+            linkedit_off = Some(off);
+        }
+        off += cmdsize;
+    }
+    let Some(cs_off) = cs_off else {
+        return Ok(false); // 서명 없음 — 할 일 없음.
+    };
+
+    // __LINKEDIT 파일 크기를 서명 앞까지로 줄인다(vmsize는 filesize 이상이면 되니 건드리지 않는다).
+    if let Some(le_off) = linkedit_off {
+        let fileoff = le64(&data[le_off + 40..le_off + 48]);
+        let new_filesize = (cs_dataoff as u64).saturating_sub(fileoff);
+        data[le_off + 48..le_off + 56].copy_from_slice(&new_filesize.to_le_bytes());
+    }
+    // LC_CODE_SIGNATURE(cmdsize 16)를 로드커맨드 목록에서 들어낸다: 뒤 커맨드들을 16바이트 당기고
+    // 헤더의 ncmds/sizeofcmds를 줄인다.
+    data.copy_within(cs_off + 16..lc_end, cs_off);
+    for b in &mut data[lc_end - 16..lc_end] {
+        *b = 0;
+    }
+    data[16..20].copy_from_slice(&(ncmds - 1).to_le_bytes());
+    data[20..24].copy_from_slice(&((sizeofcmds - 16) as u32).to_le_bytes());
+    // 서명 데이터(파일 끝)를 잘라낸다.
+    data.truncate(cs_dataoff as usize);
+
+    fs::write(path, &data)?;
+    Ok(true)
 }
 
 /// 서명된 번들을 다시 읽어 Mach-O마다 서명 구조를 로그로 찍는다 — 0xe8008016 원인 좁히기.
