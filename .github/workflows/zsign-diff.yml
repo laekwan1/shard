@@ -1,0 +1,127 @@
+# zsign vs apple-codesign — 서명 실측 대조.
+#
+# 왜: iOS 26 설치 0xe8008016을 두고 "apple-codesign 서명이 비호환"이라는 가설이 있었는데, PC 실측
+# 결과 apple-codesign 서명이 구조적으로 Apple 정품과 동등해 보였다(DER 엔티틀먼트 바이트 동일,
+# exec_seg_flags·CMS 서명속성·Requirements 모두 존재). 그렇다면 zsign으로 바꿔도 안 고쳐질 공산이
+# 크다. 이 워크플로가 그걸 **바이트로** 확정한다: 같은 앱을 zsign과 apple-codesign으로 각각 서명하고,
+# 두 서명본을 (ⓐ zsign 자체 덤퍼 ⓑ apple-codesign 리더) 같은 잣대로 덤프해 diff한다. 차이가 없으면
+# 원인은 서명기가 아니다(→ 설치 신원 불일치 등 다른 곳). 차이가 있으면 정확히 무엇인지 드러난다.
+name: zsign vs apple-codesign diff
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/zsign-diff.yml'
+      - 'crates/resign/src/main.rs'
+
+jobs:
+  diff:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Build zsign (macOS)
+        run: |
+          set -eux
+          brew install pkg-config openssl@3
+          git clone --depth 1 https://github.com/zhlynn/zsign zsign-src
+          cd zsign-src
+          # 브루 openssl을 pkg-config가 찾게 한다.
+          export PKG_CONFIG_PATH="$(brew --prefix openssl@3)/lib/pkgconfig"
+          make clean && make
+          ./zsign -v || true   # 버전 출력으로 빌드 확인
+          echo "ZSIGN=$PWD/zsign" >> "$GITHUB_ENV"
+
+      - name: Self-signed identity + 4-key entitlements
+        run: |
+          set -eux
+          # apple-codesign PoC(TEST_ENT)와 **같은 4키** — 두 서명기의 엔티틀먼트를 바이트로 비교하려면 동일해야 한다.
+          cat > ent.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+          <key>application-identifier</key><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string>
+          <key>com.apple.developer.team-identifier</key><string>DM94SF72RB</string>
+          <key>get-task-allow</key><true/>
+          <key>keychain-access-groups</key><array><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string></array>
+          </dict></plist>
+          PLIST
+          # zsign이 쓸 self-signed 인증서+키(코드서명용). apple-codesign PoC는 자체 self-signed를 쓰지만
+          # DER 엔티틀먼트·CD 구조는 인증서와 무관하므로 대조에 지장 없다(요구사항 CN·CMS 바이트만 다름).
+          openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 365 -nodes \
+            -subj "/CN=Apple Development: Shard Resign PoC/C=US"
+
+      - name: Extract base app (from the unsigned ipa)
+        run: |
+          set -eux
+          test -f release/ios/Shard-unsigned.ipa
+          for d in base_apple base_zsign; do
+            rm -rf "$d"; mkdir -p "$d"
+            (cd "$d" && unzip -oqq "$OLDPWD/release/ios/Shard-unsigned.ipa")
+          done
+          ls -d base_apple/Payload/*.app base_zsign/Payload/*.app
+
+      - name: Sign with apple-codesign (PoC)
+        run: |
+          set -eux
+          # PoC는 ipa를 받아 재서명하고 <out.app>에 낸다. 자체 self-signed 인증서 + TEST_ENT(4키).
+          cargo run -q -p resign --bin resign -- release/ios/Shard-unsigned.ipa "$PWD/out_apple/Shard.app"
+          test -f out_apple/Shard.app/Shard
+
+      - name: Sign with zsign
+        run: |
+          set -eux
+          APP="$(ls -d base_zsign/Payload/*.app)"
+          # -m(프로파일) 없이 -k/-c/-e 로 서명 시도(구조 비교엔 embedded.mobileprovision 파일이 무관).
+          # 실패하면 로그로 드러난다 — 그땐 최소 프로파일을 만들어 -m을 준다.
+          "$ZSIGN" -f -k key.pem -c cert.pem -e ent.plist "$APP" || {
+            echo "::warning::zsign -k/-c/-e (no -m) failed; retrying ad-hoc for a structural sample"
+            "$ZSIGN" -a -f "$APP" || true
+          }
+          test -f "$APP/Shard"
+          cp -R "$APP" out_zsign_app
+
+      - name: Dump both — zsign's native dumper (same lens, only the signer differs)
+        run: |
+          set -eux
+          "$ZSIGN" out_apple/Shard.app/Shard   > dump_apple.zsign.txt 2>&1 || true
+          "$ZSIGN" "$(ls -d out_zsign_app)/Shard" > dump_zsign.zsign.txt 2>&1 || true
+          echo "===== DIFF (zsign dumper): apple-codesign(<) vs zsign(>) =====" | tee diff.zsign.txt
+          diff dump_apple.zsign.txt dump_zsign.zsign.txt | tee -a diff.zsign.txt || true
+
+      - name: Dump both — apple-codesign reader (second lens)
+        run: |
+          set -eux
+          cargo run -q -p resign --bin resign -- --dump "$PWD/out_apple/Shard.app"  > dump_apple.reader.txt 2>&1 || true
+          cargo run -q -p resign --bin resign -- --dump "$PWD/out_zsign_app"          > dump_zsign.reader.txt 2>&1 || true
+          echo "===== DIFF (apple-codesign reader): apple(<) vs zsign(>) =====" | tee diff.reader.txt
+          diff dump_apple.reader.txt dump_zsign.reader.txt | tee -a diff.reader.txt || true
+
+      - name: Summary to the run log
+        if: always()
+        run: |
+          {
+            echo "## zsign vs apple-codesign — 요약"
+            echo '### zsign 덤퍼 diff'
+            echo '```'; sed -n '1,120p' diff.zsign.txt 2>/dev/null; echo '```'
+            echo '### apple-codesign 리더 diff'
+            echo '```'; sed -n '1,120p' diff.reader.txt 2>/dev/null; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload dumps + diffs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zsign-diff
+          path: |
+            dump_apple.zsign.txt
+            dump_zsign.zsign.txt
+            dump_apple.reader.txt
+            dump_zsign.reader.txt
+            diff.zsign.txt
+            diff.reader.txt

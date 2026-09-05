@@ -23,7 +23,10 @@ use idevice::remote_pairing::{
 use idevice::rsd::RsdHandshake;
 use idevice::tcp::adapter::Adapter;
 use idevice::tcp::handle::AdapterHandle;
+use idevice::services::installation_proxy::InstallationProxyClient;
 use idevice::utils::installation::install_package_rsd;
+// connect_rsd는 RsdService 트레이트 메서드라 스코프에 있어야 호출된다.
+use idevice::RsdService;
 
 // 우리 호스트가 기기에 제시하는 이름. pair-verify는 파일 안 Ed25519 신원으로 하므로 이 값은 크게
 // 중요치 않다(pair-setup 때만 identifier 계산에 쓰임). 안정적인 고정값을 둔다.
@@ -166,8 +169,66 @@ pub async fn rsd_install(
             log(&format!("[진단] UDID 프로퍼티 못 찾음. 가용 키: {}", keys.join(", ")));
         }
     }
+    // 진단(0xe8008016 좁히기): 같은 번들ID 앱이 이미 설치돼 있으면 이건 in-place 업그레이드이고, iOS는
+    // 새 서명의 application-identifier(= 팀ID+번들ID)가 **설치본의 그것과 일치**해야 받아준다. Sideloadly
+    // 같은 다른 도구가 다른 Apple ID(팀)나 다른 번들ID 접미사로 설치했다면 여기서 어긋나 0xe8008016이
+    // 난다 — 서명기(apple-codesign/zsign)와 무관. 설치본의 신원을 읽어 위 '[진단] app-id='(새 서명)와
+    // 대조하면 원인이 서명이 아니라 이 불일치인지 한 줄로 갈린다. connect_rsd는 &mut을 반환 시점에 놓아주니
+    // 뒤의 install_package_rsd 차용과 겹치지 않는다.
+    match InstallationProxyClient::connect_rsd(&mut adapter, &mut hs).await {
+        Ok(mut inst) => {
+            let mut ro = plist::Dictionary::new();
+            ro.insert("ApplicationType".into(), plist::Value::String("Any".into()));
+            ro.insert(
+                "ReturnAttributes".into(),
+                plist::Value::Array(vec![
+                    plist::Value::String("CFBundleIdentifier".into()),
+                    plist::Value::String("SignerIdentity".into()),
+                    plist::Value::String("Entitlements".into()),
+                ]),
+            );
+            match inst.browse(Some(plist::Value::Dictionary(ro))).await {
+                Ok(apps) => {
+                    let mut hits = 0usize;
+                    for a in &apps {
+                        let Some(d) = a.as_dictionary() else { continue };
+                        let bid = d
+                            .get("CFBundleIdentifier")
+                            .and_then(|v| v.as_string())
+                            .unwrap_or("");
+                        if !bid.to_lowercase().contains("shard") {
+                            continue;
+                        }
+                        let appident = d
+                            .get("Entitlements")
+                            .and_then(|v| v.as_dictionary())
+                            .and_then(|e| e.get("application-identifier"))
+                            .and_then(|v| v.as_string())
+                            .unwrap_or("(없음)");
+                        let signer = d
+                            .get("SignerIdentity")
+                            .and_then(|v| v.as_string())
+                            .unwrap_or("(없음)");
+                        log(&format!(
+                            "[진단] 설치본 {bid}: application-identifier={appident}, signer={signer} \
+                             — 위 새 서명 app-id와 다르면 그게 0xe8008016 원인(업그레이드 신원 불일치)"
+                        ));
+                        hits += 1;
+                    }
+                    if hits == 0 {
+                        log("[진단] 같은 번들ID(shard) 설치본 없음 — 첫 설치이거나 번들ID가 달라 업그레이드가 아님");
+                    }
+                }
+                Err(e) => log(&format!("[진단] 설치앱 조회 실패(무시하고 설치 진행): {e:?}")),
+            }
+        }
+        Err(e) => log(&format!("[진단] instproxy(RSD) 연결 실패(무시하고 설치 진행): {e:?}")),
+    }
+
     log("⑤ AFC 업로드 + installation_proxy 설치...");
     // options=None이면 helper가 .ipa에서 CFBundleIdentifier를 읽어 PublicStaging 업로드 후 설치한다.
+    // 실패 에러 {e:?}에는 installd의 ErrorDescription(구체 사유)이 담긴다 — 0xe8008016만이 아니라
+    // 이 문자열 전체를 봐야 한다(예: MismatchedApplicationIdentifierEntitlement).
     install_package_rsd(&mut adapter, &mut hs, ipa, None)
         .await
         .map_err(|e| anyhow!("[⑤ 설치] 실패: {e:?}"))?;

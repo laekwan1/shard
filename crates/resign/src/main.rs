@@ -6,12 +6,19 @@
 //!   박혔음을(각 Mach-O의 CodeDirectory + 암호 서명 CMS) 다시 읽어 검증할 수 있다.
 //! - 즉 ① 조각은 SideStore 없이, 실기기 없이 여기까지 확실히 동작한다.
 //!
+//! 모드
+//! - `resign [<ipa>] [<out.app>]` — <ipa>(기본 release/ios/Shard-unsigned.ipa)를 재서명하고
+//!   구조를 덤프한다. <out.app>을 주면 서명 결과 .app을 그 경로에 낸다(CI가 zsign 서명본과
+//!   나란히 비교하려고 결정적 위치가 필요하다).
+//! - `resign --dump <ipa|app>` — 서명하지 않고 이미 서명된 번들의 구조만 덤프한다. zsign이 서명한
+//!   번들을 **같은 apple-codesign 리더**로 읽어, 두 서명기의 슬롯·해시타입·엔티틀먼트·CMS를
+//!   같은 잣대로 대조하기 위한 2차 뷰.
+//!
 //! 한계 (docs/재서명-엔진.md 참고)
 //! - 여기 쓰는 인증서는 self-signed다. iOS는 self-signed로 서명된 앱의 *설치*를 거부한다 —
 //!   애플이 발급한 개발 인증서라야 하고 그건 ②(Developer API)의 몫, 설치는 ④(minimuxer,
 //!   실기기)의 몫. 그래서 이 PoC의 증명 범위는 "서명 파이프라인이 실제 번들에 대해
 //!   동작한다"까지다. 설치 가능성이 아니라 서명 생성/구조를 증명한다.
-//! - 실전에선 아래 (cert, key)만 ②가 발급한 값으로 바뀐다. 파이프라인은 그대로다.
 
 use std::fs::{self, File};
 use std::io;
@@ -24,10 +31,40 @@ use apple_codesign::{
 };
 use x509_certificate::KeyAlgorithm;
 
+/// 실 흐름과 같은 4-키 엔티틀먼트. zsign 대조 때 `-e`로 넘기는 파일과 **같은 내용**이어야
+/// 두 서명기의 DER/XML 엔티틀먼트를 바이트로 비교하는 의미가 있다.
+const TEST_ENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>application-identifier</key><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string>
+<key>com.apple.developer.team-identifier</key><string>DM94SF72RB</string>
+<key>get-task-allow</key><true/>
+<key>keychain-access-groups</key><array><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string></array>
+</dict></plist>"#;
+
 fn main() -> Result<()> {
-    // 기본 대상은 배포용 미서명 .ipa. 워크스페이스 루트에서 실행한다고 가정.
-    let ipa = std::env::args()
-        .nth(1)
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // ── 덤프 전용 모드: 이미 서명된 번들(예: zsign 출력)의 구조만 읽어 찍는다 ──
+    if args.first().map(String::as_str) == Some("--dump") {
+        let target = PathBuf::from(args.get(1).context("--dump <ipa|app> 경로 필요")?);
+        let work = std::env::temp_dir().join("shard-resign-dump");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        // .app 디렉터리면 그대로, .ipa면 풀어서 Payload/*.app.
+        let app = if target.is_dir() {
+            target.clone()
+        } else {
+            extract_ipa(&target, &work.join("x"))?
+        };
+        println!("=== 덤프(서명 안 함): {} ===", app.display());
+        dump_signature(&app)?;
+        return Ok(());
+    }
+
+    // ── 서명 모드 ──
+    let ipa = args
+        .first()
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("release/ios/Shard-unsigned.ipa"));
     if !ipa.exists() {
@@ -36,6 +73,8 @@ fn main() -> Result<()> {
             ipa.display()
         );
     }
+    // 선택 2번째 인자: 서명 결과 .app을 낼 결정적 경로(CI 대조용).
+    let out_app: Option<PathBuf> = args.get(1).map(PathBuf::from);
 
     // 매 실행마다 깨끗한 작업 폴더에서. (이전 서명 잔재가 검증을 오염시키지 않도록.)
     let work = std::env::temp_dir().join("shard-resign-poc");
@@ -71,25 +110,17 @@ fn main() -> Result<()> {
     // 3) 서명 설정에 신원 주입. 이게 없으면 ad-hoc(암호 서명 없는 다이제스트뿐)이 된다.
     let mut settings = SigningSettings::default();
     settings.set_signing_key(&key, cert);
-
-    // 진단(0xe8008016): 실 흐름과 같은 4-키 엔티틀먼트를 Main 스코프로 넣고, 서명 후 메인 실행파일에
-    // XML+DER가 실제로 박히는지 아래 검증에서 센다. 값 구조는 폰 진단 로그의 실제 프로파일 엔티틀먼트와 동일.
-    const TEST_ENT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>application-identifier</key><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string>
-<key>com.apple.developer.team-identifier</key><string>DM94SF72RB</string>
-<key>get-task-allow</key><true/>
-<key>keychain-access-groups</key><array><string>DM94SF72RB.net.sw.shard.DM94SF72RB</string></array>
-</dict></plist>"#;
     settings
         .set_entitlements_xml(SettingsScope::Main, TEST_ENT)
         .context("엔티틀먼트 설정")?;
 
     // 4) 번들 재서명. apple-codesign이 중첩 프레임워크(MobileVLCKit)를 먼저 서명하고
     //    최상위 앱을 서명하며 _CodeSignature/CodeResources를 쓴다.
-    let signed = work.join("signed").join(app.file_name().unwrap());
+    let signed = out_app.unwrap_or_else(|| work.join("signed").join(app.file_name().unwrap()));
     fs::create_dir_all(signed.parent().unwrap())?;
+    if signed.exists() {
+        fs::remove_dir_all(&signed).ok();
+    }
     UnifiedSigner::new(settings)
         .sign_path(&app, &signed)
         .context("번들 서명 실패")?;
@@ -97,8 +128,16 @@ fn main() -> Result<()> {
     println!();
 
     // 5) 검증 — 서명된 번들을 *다시 읽어* Mach-O마다 서명이 박혔는지 센다.
-    //    코드가 "서명했다"고 말하는 것으로는 부족하다(CLAUDE.md: 결과물을 뜯어본다).
-    let entities = SignatureReader::from_path(&signed)
+    dump_signature(&signed)?;
+    Ok(())
+}
+
+/// 서명된 번들을 apple-codesign 리더로 읽어 Mach-O마다 서명 구조를 찍는다.
+///
+/// 코드가 "서명했다"고 말하는 것으로는 부족하다(CLAUDE.md: 결과물을 뜯어본다). zsign 대조에서는
+/// 이 함수를 zsign 출력에도 그대로 돌려 같은 잣대로 슬롯·해시타입·엔티틀먼트를 본다.
+fn dump_signature(app: &Path) -> Result<()> {
+    let entities = SignatureReader::from_path(app)
         .context("서명 읽기 실패")?
         .entities()
         .context("엔티티 열거 실패")?;
@@ -115,28 +154,48 @@ fn main() -> Result<()> {
                     if has_cms {
                         cms_signed += 1;
                     }
-                    let ident = sig
-                        .code_directory
-                        .as_ref()
-                        .map(|cd| cd.identifier.as_str())
-                        .unwrap_or("<no-cd>");
+                    let cd = sig.code_directory.as_ref();
+                    let ident = cd.map(|cd| cd.identifier.as_str()).unwrap_or("<no-cd>");
+                    let digest = cd.map(|cd| cd.digest_type.as_str()).unwrap_or("?");
+                    let alts = sig.alternative_code_directories.len();
                     println!(
-                        "    Mach-O  서명:O  CMS:{}  id={}  ent[XML {}줄/DER {}줄]  ({})",
+                        "    Mach-O  서명:O  CMS:{}  id={}  CD[{} 주+대체{}]  ent[XML {}줄/DER {}줄]  ({})",
                         if has_cms { "O" } else { "X(ad-hoc)" },
                         ident,
+                        digest,
+                        alts,
                         sig.entitlements_plist.len(),
                         sig.entitlements_der_plist.len(),
                         e.path.display()
                     );
-                    // 메인 실행파일(…/Shard.app/Shard)이면 엔티틀먼트 실물을 찍는다 — 0xe8008016 진단.
-                    if e.path.file_name().and_then(|n| n.to_str()) == Some("Shard")
-                        && !sig.entitlements_plist.is_empty()
-                    {
-                        println!("      ── 메인 exe 엔티틀먼트(XML) ──");
-                        for l in &sig.entitlements_plist {
-                            println!("      {l}");
+                    // 메인 실행파일(…/Shard.app/Shard)이면 CD 세부를 찍는다 — 0xe8008016 진단.
+                    // zsign은 SHA-1+SHA-256 이중 CD를 낸다. apple-codesign이 무엇을 내는지(digest,
+                    // 이중 CD, flags, exec_seg_flags)가 iOS 26 설치 거부의 남은 후보다.
+                    if e.path.file_name().and_then(|n| n.to_str()) == Some("Shard") {
+                        if let Some(cd) = cd {
+                            println!("      ── 메인 exe CD 세부 ──");
+                            println!("      version={}  platform={}", cd.version, cd.platform);
+                            println!("      digest_type(주)={}", cd.digest_type);
+                            println!("      flags={}", cd.flags);
+                            println!("      exec_seg_flags={:?}", cd.executable_segment_flags);
+                            println!("      runtime_version={:?}", cd.runtime_version);
+                            println!(
+                                "      대체 CD {}개: {}",
+                                sig.alternative_code_directories.len(),
+                                sig.alternative_code_directories
+                                    .iter()
+                                    .map(|(slot, c)| format!("{slot}:{}", c.digest_type))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            );
                         }
-                        println!("      ── DER 엔티틀먼트 줄 수: {} ──", sig.entitlements_der_plist.len());
+                        if !sig.entitlements_plist.is_empty() {
+                            println!("      ── 메인 exe 엔티틀먼트(XML) ──");
+                            for l in &sig.entitlements_plist {
+                                println!("      {l}");
+                            }
+                            println!("      ── DER 엔티틀먼트 줄 수: {} ──", sig.entitlements_der_plist.len());
+                        }
                     }
                 }
                 None => {
@@ -153,10 +212,10 @@ fn main() -> Result<()> {
         "  검증: 서명된 Mach-O {}개(그중 CMS 암호서명 {}개), _CodeSignature 파일 {}개",
         signed_machos, cms_signed, cs_files
     );
-    if signed_machos == 0 || cms_signed == 0 {
-        bail!("서명이 제대로 안 박혔다 — 파이프라인 실패");
+    if signed_machos == 0 {
+        bail!("서명된 Mach-O가 없다 — 파이프라인 실패 또는 미서명 번들");
     }
-    println!("  ✅ ① 서명 파이프라인: 실제 Shard.app 재서명·검증 성공 (PC, self-signed).");
+    println!("  ✅ 덤프 완료.");
     Ok(())
 }
 
