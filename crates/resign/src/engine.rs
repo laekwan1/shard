@@ -152,6 +152,37 @@ pub async fn resign_app(
         log(&format!("[진단] 프로파일 인증서 {certs}개"));
     }
 
+    // 진단(0xe8008016 최종): 서명 구조가 완벽한데도 거부되면 남은 건 **인증서 관계**다.
+    // (a) 서명에 쓴 인증서가 프로파일 DeveloperCertificates에 실제로 들어 있는지 — 없으면(재사용/폐기
+    //     불일치) iOS가 서명 검증을 거부한다. (b) 서명 인증서의 발급자(WWDR)가 무엇인지 — CMS에 넣는
+    //     WWDR 중간과 맞아야 Apple 루트까지 체인이 선다. DER 바이트로 대조(직렬번호 포맷 무관).
+    log(&format!(
+        "[진단] 서명 인증서: subject={:?}, issuer={:?}",
+        apple_cert.subject_common_name(),
+        apple_cert.issuer_common_name(),
+    ));
+    if let Ok(pl) = plist_from_mobileprovision(&profile.encoded_profile) {
+        let sign_der = apple_cert.constructed_data();
+        let pcerts: Vec<Vec<u8>> = pl
+            .get("DeveloperCertificates")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_data().map(|d| d.to_vec())).collect())
+            .unwrap_or_default();
+        let in_profile = pcerts.iter().any(|c| c.as_slice() == sign_der);
+        log(&format!(
+            "[진단] 서명 인증서가 프로파일에 포함={in_profile} — false면 이게 0xe8008016 원인(인증서 불일치)"
+        ));
+        for (i, c) in pcerts.iter().enumerate() {
+            if let Ok(pc) = CapturedX509Certificate::from_der(c.clone()) {
+                log(&format!(
+                    "[진단]   프로파일 인증서[{i}]: subject={:?}, issuer={:?}",
+                    pc.subject_common_name(),
+                    pc.issuer_common_name()
+                ));
+            }
+        }
+    }
+
     let signed = work.join("signed").join(app_dir.file_name().unwrap());
     fs::create_dir_all(signed.parent().unwrap())?;
 
@@ -393,13 +424,23 @@ fn dump_signed_bundle(app: &Path, log: &mut dyn FnMut(&str)) {
     for e in &entities {
         if let SignatureEntity::MachO(m) = &e.entity {
             if let Some(sig) = &m.signature {
-                let cms_certs = sig.cms.as_ref().map(|c| c.certificates.len()).unwrap_or(0);
+                let (cms_certs, chains, has_wwdr) = sig
+                    .cms
+                    .as_ref()
+                    .map(|c| {
+                        (
+                            c.certificates.len(),
+                            c.certificates.iter().any(|ci| ci.chains_to_apple_root_ca),
+                            c.certificates.iter().any(|ci| ci.is_apple_intermediate_ca),
+                        )
+                    })
+                    .unwrap_or((0, false, false));
                 let cd = sig.code_directory.as_ref();
                 let digest = cd.map(|c| c.digest_type.as_str()).unwrap_or("?");
                 let alts = sig.alternative_code_directories.len();
                 let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                 log(&format!(
-                    "[진단] {name}: CMS인증서 {cms_certs}개, CD {digest}(+대체{alts}), ent[XML {}/DER {}], exec_seg={:?}",
+                    "[진단] {name}: CMS인증서 {cms_certs}개(→Apple루트={chains},WWDR={has_wwdr}), CD {digest}(+대체{alts}), ent[XML {}/DER {}], exec_seg={:?}",
                     sig.entitlements_plist.len(),
                     sig.entitlements_der_plist.len(),
                     cd.and_then(|c| c.executable_segment_flags.clone()),
