@@ -446,24 +446,10 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         // resolutions showed at different sizes. Now every video thumbnail fills the frame's
         // height consistently. Music: album art is square, CENTER_CROP fills rather than
         // sitting in side bars.
-        val scale = if (music) android.widget.ImageView.ScaleType.CENTER_CROP
-                    else android.widget.ImageView.ScaleType.FIT_CENTER
-        art.scaleType = scale
+        art.scaleType = if (music) android.widget.ImageView.ScaleType.CENTER_CROP
+                        else android.widget.ImageView.ScaleType.FIT_CENTER
         art.setImageBitmap(bmp)
         badge?.visibility = if (music) View.GONE else View.VISIBLE
-        // FIT_CENTER sizes the picture from the view's bounds, and at the very first bind — the
-        // first time the library opens — the row is not laid out yet (width 0), so the frame came
-        // out shrunk and only a later relayout (leaving the folder and coming back) filled it (the
-        // "first thumbnails don't fill" bug). When the view has no size yet, re-apply once it does.
-        // Clearing the drawable first forces the matrix to be recomputed — re-setting the same
-        // bitmap alone is a no-op because the drawable is unchanged.
-        if (art.width == 0 || art.height == 0) {
-            art.post {
-                art.scaleType = scale
-                art.setImageDrawable(null)
-                art.setImageBitmap(bmp)
-            }
-        }
     }
 
     // ---- the music bar ----------------------------------------------------
@@ -1228,23 +1214,11 @@ class LibraryScreen(private val activity: Activity, parent: ViewGroup) {
         androidx.core.view.ViewCompat.requestApplyInsets(root)
         reload()
         watch()
-        // The very first time the library opens, the earliest thumbnails decode a beat after the
-        // list first lays out — some land on the ListView's throwaway measurement row and leave the
-        // visible row showing its placeholder at the wrong size (user hit: "first entry thumbnails
-        // don't fit"). A single re-bind once they have had a moment to decode fixes it, the same way
-        // leaving and re-entering a folder did by hand. Once is enough — later opens are warm.
-        if (!warmedThumbs) {
-            warmedThumbs = true
-            ui.postDelayed({ if (isOpen) adapter.notifyDataSetChanged() }, 500)
-        }
         // Something left playing when the library was last closed is still going,
         // so its player comes back with the screen — but only onto the shelf it
         // belongs to.
         syncPlayerView()
     }
-
-    /** First-open thumbnail warm-up runs once; see [open]. */
-    private var warmedThumbs = false
 
     /**
      * Show the player that belongs to the shelf being looked at, and only that.

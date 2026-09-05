@@ -85,13 +85,6 @@ pub const NOW_PLAYING: i32 = 58;
 const WIDTH: i32 = 500;
 const HEIGHT: i32 = 620 + BAR;
 
-/// The width the window grows to while a site is in front. Our own screens are a narrow phone-like
-/// column (`WIDTH`), but a desktop site laid out at a fixed width — 네이버 is ~1130px — needs room, so
-/// the window itself widens to fit the site instead of the site being zoomed down into a narrow one
-/// (the user chose this over shrinking the page). Capped to the work area at use, so it never runs
-/// off a small screen; below it a wide site scrolls sideways rather than shrinking.
-const BROWSE_WIDTH: i32 = 1200;
-
 /// The smallest it may be dragged to, the same floor the settings window had.
 const MIN_WIDTH: i32 = 440;
 const MIN_HEIGHT: i32 = 540 + BAR;
@@ -1994,17 +1987,8 @@ impl Shell {
         // Never past the end: a stale index from the page would otherwise show
         // nothing and leave the strip claiming a tab that is not there.
         let which = which.filter(|at| *at < self.tabs.borrow().len());
-        let was = self.showing.get();
         self.showing.set(which);
         SHOWING.with(|cell| cell.set(which));
-        // Browsing a site wants room; our own screens are a narrow column. Widen the window when a
-        // tab comes forward from a screen, narrow it back when a screen comes forward from a tab —
-        // only on that crossing, so switching tab-to-tab, or a size set by hand, is left alone.
-        match (was.is_some(), which.is_some()) {
-            (false, true) => resize_to(self.hwnd, BROWSE_WIDTH),
-            (true, false) => resize_to(self.hwnd, WIDTH),
-            _ => {}
-        }
         self.lay_out();
         // Keys go where the eye is: to the page in front, or back to our own
         // screens when there is none.
@@ -2493,33 +2477,6 @@ fn centre(hwnd: HWND) {
     let top = (work.top + (work.bottom - work.top - height) / 2).max(work.top);
     unsafe {
         SetWindowPos(hwnd, std::ptr::null_mut(), left, top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-    }
-}
-
-/// Resize the window to a width (keeping its height) and re-centre it — used to widen for browsing
-/// a desktop site and narrow back for our own screens. Capped to the work area so the whole window
-/// stays on screen; left alone while maximised (it already fills the screen) or when the width is
-/// already what is wanted (so it does not fight a size the window is settling into).
-fn resize_to(hwnd: HWND, width: i32) {
-    if unsafe { IsZoomed(hwnd) } != 0 {
-        return;
-    }
-    let mut work = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    if unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) } == 0 {
-        return;
-    }
-    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    unsafe { GetWindowRect(hwnd, &mut r) };
-    let height = r.bottom - r.top;
-    // A margin so a title bar and its edges are never pushed off the work area's right.
-    let width = width.min(work.right - work.left - 32).max(MIN_WIDTH);
-    if (r.right - r.left) == width {
-        return;
-    }
-    let left = (work.left + (work.right - work.left - width) / 2).max(work.left);
-    let top = r.top.max(work.top);
-    unsafe {
-        SetWindowPos(hwnd, std::ptr::null_mut(), left, top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 

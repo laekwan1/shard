@@ -675,16 +675,12 @@ struct ResignView: View {
                     if password.isEmpty { password = PasswordStore.load(for: email) }
                 }
             }
-            // 키보드가 안 내려가던 것 — 숫자패드·URL 키보드엔 완료(Return)가 없어서다. 키보드 위에
-            // "완료" 버튼을 달아 어느 칸에서든 내릴 수 있게 한다(사용자 지적).
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("완료") { hideKeyboard() }
-                }
-            }
         }
         .background(Color.surface.ignoresSafeArea())
+        // 키보드는 **화면의 빈 곳을 탭**하면 내려간다(버튼 말고 — 사용자 지적). 컨트롤(필드·버튼) 위
+        // 탭은 그 컨트롤이 먼저 먹으므로 입력·동작엔 지장 없고, 스크롤(드래그)과도 구분된다.
+        .contentShape(Rectangle())
+        .onTapGesture { hideKeyboard() }
     }
 
     // 현재 서명의 정확한 남은 일수(모래시계는 '양'으로, 여기선 숫자로). 없으면 정보 없음.

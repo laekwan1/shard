@@ -21,11 +21,7 @@ import org.json.JSONObject
  * The page itself does know, though: every request appears in Resource Timing,
  * media included. So the page is asked for that list too.
  */
-class VideoHook(
-    private val onLongPress: (VideoTarget) -> Unit,
-    private val onSeekTouch: (Boolean) -> Unit = {},
-    private val onSeekBand: (Float, Float) -> Unit = { _, _ -> },
-) {
+class VideoHook(private val onLongPress: (VideoTarget) -> Unit) {
 
     /** What the page found under the finger. */
     data class VideoTarget(
@@ -70,24 +66,6 @@ class VideoHook(
         onLongPress(target)
     }
 
-    // The page's own seek bar reports while a finger is on it, so the browser's edge-swipe
-    // (open the library / the address panel) does not ALSO fire from a scrub and yank a screen up
-    // mid-seek (user hit: dragging the web seek bar opened the library/address bar). The page's
-    // stopPropagation only stops DOM bubbling — the native gesture detector still sees the touch,
-    // so the page has to tell us out of band. Runs on the JS thread; the flag it sets is @Volatile.
-    @JavascriptInterface
-    fun seekTouch(active: Boolean) {
-        onSeekTouch(active)
-    }
-
-    // The seek bar reports its vertical band (top + height, in CSS px, viewport-relative) so the
-    // native side knows where it is BEFORE a finger lands — no race with the async touchstart above.
-    // A press whose Y falls in this band (converted to screen px) is a scrub, so the edge-swipe is
-    // held off. top < 0 means the bar is hidden. Runs on the JS thread; fields it feeds are @Volatile.
-    @JavascriptInterface
-    fun seekBand(topCss: Float, heightCss: Float) {
-        onSeekBand(topCss, heightCss)
-    }
 
     private fun parse(payload: String): VideoTarget {
         val json = JSONObject(payload)
@@ -456,83 +434,6 @@ class VideoHook(
               }, true);
             })();
 
-            // A thin seek bar pinned to the bottom edge of the playing video —
-            // always visible, dragged to scrub. Mobile YouTube (m.youtube.com)
-            // renders its own controls lazily and hides them, so there was no way
-            // to scrub without first tapping; this is our own, on any site.
-            (function () {
-              if (window.__shardSeek) return;
-              window.__shardSeek = true;
-              var bar, played, dragging = false, vid = null;
-              function build() {
-                if (bar) return;
-                bar = document.createElement('div');
-                bar.style.cssText = 'position:fixed;left:0;height:18px;z-index:2147483000;display:none;touch-action:none;background:transparent;';
-                var track = document.createElement('div');
-                track.style.cssText = 'position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.28);';
-                played = document.createElement('div');
-                played.style.cssText = 'position:absolute;left:0;bottom:0;height:3px;width:0;background:#ff0033;';
-                bar.appendChild(track); bar.appendChild(played);
-                (document.body || document.documentElement).appendChild(bar);
-                var seek = function (cx) {
-                  if (!vid || !isFinite(vid.duration) || vid.duration <= 0) return;
-                  var r = bar.getBoundingClientRect();
-                  var f = Math.min(1, Math.max(0, (cx - r.left) / r.width));
-                  vid.currentTime = f * vid.duration;
-                  played.style.width = (f * 100) + '%';
-                };
-                var release = function () { dragging = false; try { ${BRIDGE}.seekTouch(false); } catch (x) {} };
-                bar.addEventListener('touchstart', function (e) { dragging = true; try { ${BRIDGE}.seekTouch(true); } catch (x) {} seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); }, { passive: false });
-                bar.addEventListener('touchmove', function (e) { if (dragging) { seek(e.touches[0].clientX); e.preventDefault(); e.stopPropagation(); } }, { passive: false });
-                bar.addEventListener('touchend', function (e) { release(); e.stopPropagation(); }, { passive: false });
-                bar.addEventListener('touchcancel', function () { release(); }, { passive: false });
-              }
-              // Follow the video's bottom edge in REAL TIME while the page scrolls — on every
-              // animation frame, not the 250ms tick. The tick alone lagged behind a smooth scroll,
-              // so the position:fixed bar left a ghost trail (user hit; iOS fixed it the same way,
-              // per-frame). place() just moves the bar to the video's current rect right now.
-              function place() {
-                if (!vid || !bar) return;
-                var r = vid.getBoundingClientRect();
-                bar.style.top = (r.bottom - 18) + 'px';
-                bar.style.left = r.left + 'px';
-                bar.style.width = r.width + 'px';
-                // Tell native where the scrub band is (a bit taller than the visible 18px line so a
-                // finger a hair above still counts), so the edge-swipe is held off there. CSS px.
-                try { ${BRIDGE}.seekBand(r.bottom - 34, 48); } catch (x) {}
-              }
-              var rafPending = false;
-              window.addEventListener('scroll', function () {
-                if (rafPending) return;
-                rafPending = true;
-                requestAnimationFrame(function () { rafPending = false; place(); });
-              }, true);
-              function pick() {
-                var best = null, area = 0, vids = document.getElementsByTagName('video');
-                for (var i = 0; i < vids.length; i++) {
-                  var v = vids[i], r = v.getBoundingClientRect(), a = r.width * r.height;
-                  if (a > area && r.width > 120 && r.height > 80 && r.bottom > 0 && r.top < innerHeight) { best = v; area = a; }
-                }
-                return best;
-              }
-              function tick() {
-                try {
-                  build();
-                  vid = pick();
-                  if (!vid) { bar.style.display = 'none'; try { ${BRIDGE}.seekBand(-1, 0); } catch (x) {} return; }
-                  var r = vid.getBoundingClientRect();
-                  bar.style.display = 'block';
-                  bar.style.left = r.left + 'px';
-                  bar.style.width = r.width + 'px';
-                  bar.style.top = (r.bottom - 18) + 'px';
-                  try { ${BRIDGE}.seekBand(r.bottom - 34, 48); } catch (x) {}
-                  if (!dragging && isFinite(vid.duration) && vid.duration > 0) {
-                    played.style.width = ((vid.currentTime / vid.duration) * 100) + '%';
-                  }
-                } catch (e) {}
-              }
-              setInterval(tick, 250);
-            })();
         """.trimIndent()
     }
 }
