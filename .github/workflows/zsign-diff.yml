@@ -65,25 +65,30 @@ jobs:
           done
           ls -d base_apple/Payload/*.app base_zsign/Payload/*.app
 
-      - name: Sign with apple-codesign (rcodesign)
+      - name: Sign with apple-codesign (rcodesign) — **엔진과 동일 설정**
         run: |
           set -eux
-          # rcodesign = apple-codesign의 CLI(엔진과 같은 크레이트/버전 0.29). 엔진의 UnifiedSigner와
-          # 같은 서명 코드를 쓴다. resign 크레이트를 통째로 빌드하면 omnisette가 macOS 호스트에서만
-          # 컴파일 에러(AOSKitAnisetteProvider 트레이트 불일치 — iOS 타깃은 게이트되어 정상)라, 서명만
-          # 하는 rcodesign을 따로 설치해 우회한다.
+          # rcodesign = apple-codesign의 CLI(엔진과 같은 크레이트/버전 0.29). 엔진 UnifiedSigner와
+          # 같은 서명 코드를 쓴다. 결정적: 엔진은 **이중 CD**(주 SHA-1 + 대체 SHA-256)로 서명한다
+          # (engine.rs: set_digest_type(Sha1)+add_extra_digest(Sha256)). 기본 rcodesign은 단일
+          # SHA-256만 내므로, --digest를 두 번(sha1,sha256) 줘 엔진 출력과 **바이트로 동일**하게 맞춘다.
+          # 첫 --digest=주 CD, 이후=대체 CD(cli/mod.rs: i==0→set_digest_type, else→add_extra_digest).
           cargo install apple-codesign --version 0.29.0
           cat cert.pem key.pem > identity.pem
           APP="$(ls -d base_apple/Payload/*.app)"
-          rcodesign sign --pem-source identity.pem --entitlements-xml-path ent.plist "$APP" out_apple_app
+          rcodesign sign \
+            --pem-source identity.pem \
+            --digest sha1 --digest sha256 \
+            --entitlements-xml-path ent.plist \
+            "$APP" out_apple_app
           test -f out_apple_app/Shard
 
       - name: Sign with zsign
         run: |
           set -eux
           APP="$(ls -d base_zsign/Payload/*.app)"
-          # -m(프로파일) 없이 -k/-c/-e 로 서명 시도(구조 비교엔 embedded.mobileprovision 파일이 무관).
-          # 실패하면 로그로 드러난다 — 그땐 최소 프로파일을 만들어 -m을 준다.
+          # -m(프로파일) 없이 -k/-c/-e 로 서명(구조 비교엔 embedded.mobileprovision 파일이 무관).
+          # zsign은 기본이 이중 CD(hashType 1=SHA-1 주 + 2=SHA-256 대체) — 위 rcodesign과 같은 축.
           "$ZSIGN" -f -k key.pem -c cert.pem -e ent.plist "$APP" || {
             echo "::warning::zsign -k/-c/-e (no -m) failed; retrying ad-hoc for a structural sample"
             "$ZSIGN" -a -f "$APP" || true
@@ -91,7 +96,26 @@ jobs:
           test -f "$APP/Shard"
           cp -R "$APP" out_zsign_app
 
-      - name: Dump both — zsign's native dumper (same lens, only the signer differs)
+      # ── 1차(대표) 잣대: apple-codesign 자신의 리더로 **양쪽을 같은 눈**으로 읽어 diff한다.
+      # 이게 핵심이다: 지금까지 폰 진단은 apple-codesign 출력을 apple-codesign 리더로만 봐서
+      # "다 정상"으로 나왔다(자기 출력을 자기가 검증하는 맹점). zsign이 만든 **정상 설치되는** 서명을
+      # 같은 리더로 나란히 놓으면, apple-codesign이 빠뜨리거나 다르게 쓰는 필드가 +/-로 드러난다.
+      - name: DIFF (rcodesign 중립 리더) — apple-codesign(-) vs zsign(+)
+        if: always()
+        run: |
+          set -eux
+          ZAPP="$(ls -d out_zsign_app)"
+          # 상세 YAML 덤프(각각) — 필드별 대조용.
+          rcodesign print-signature-info out_apple_app/Shard > info_apple.yaml 2>&1 || true
+          rcodesign print-signature-info "$ZAPP/Shard"       > info_zsign.yaml 2>&1 || true
+          # diff-signatures: 두 서명을 같은 리더로 읽어 YAML changeset(-=apple, +=zsign).
+          rcodesign diff-signatures out_apple_app/Shard "$ZAPP/Shard" > diff.rcodesign.txt 2>&1 || true
+          echo "----- info_apple.yaml (head) -----"; sed -n '1,80p' info_apple.yaml || true
+          echo "----- info_zsign.yaml (head) -----"; sed -n '1,80p' info_zsign.yaml || true
+          echo "----- diff.rcodesign.txt -----";     sed -n '1,200p' diff.rcodesign.txt || true
+
+      - name: Dump both — zsign's native dumper (2차 잣대, 서명기만 다름)
+        if: always()
         run: |
           set -eux
           "$ZSIGN" out_apple_app/Shard            > dump_apple.zsign.txt 2>&1 || true
@@ -104,8 +128,12 @@ jobs:
         run: |
           {
             echo "## zsign vs apple-codesign — 요약"
-            echo '두 서명기가 같은 앱을 서명한 결과를 zsign 덤퍼로 대조. 차이가 없으면 원인은 서명기가 아니다.'
-            echo '### zsign 덤퍼 diff (apple-codesign < vs zsign >)'
+            echo '엔진과 **동일 설정**(이중 CD SHA-1+SHA-256, 같은 4키 엔티틀먼트, 같은 self-signed 인증서)으로'
+            echo '같은 앱을 두 서명기로 서명하고, apple-codesign 자신의 중립 리더로 나란히 대조.'
+            echo '**diff가 비면** 원인은 서명기가 아니다(→ 프로파일/기기/설치 경로). **diff가 있으면** 그게 0xe8008016의 정체.'
+            echo '### ① diff-signatures (중립 리더, apple-codesign `-` vs zsign `+`)'
+            echo '```diff'; sed -n '1,200p' diff.rcodesign.txt 2>/dev/null; echo '```'
+            echo '### ② zsign 덤퍼 diff (apple-codesign < vs zsign >)'
             echo '```'; sed -n '1,160p' diff.zsign.txt 2>/dev/null; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -115,6 +143,9 @@ jobs:
         with:
           name: zsign-diff
           path: |
+            info_apple.yaml
+            info_zsign.yaml
+            diff.rcodesign.txt
             dump_apple.zsign.txt
             dump_zsign.zsign.txt
             diff.zsign.txt
