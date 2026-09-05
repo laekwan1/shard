@@ -159,6 +159,22 @@ pub struct Config {
     /// The browser's home page — bookmarks, history, homepage.
     #[serde(default)]
     pub browser: Browser,
+    /// Where the window was last left — so it opens there next time instead of always centred.
+    /// `None` until the window is first moved, resized, or maximised.
+    #[serde(default)]
+    pub window: Option<WindowBox>,
+}
+
+/// The window's normal (un-maximised) position and size, plus whether it was left maximised.
+/// Saved when the window is moved/resized/closed and restored on the next launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowBox {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    #[serde(default)]
+    pub maximized: bool,
 }
 
 impl Default for Config {
@@ -184,6 +200,7 @@ impl Default for Config {
             doh: Doh::default(),
             hotkey: "Ctrl+Shift+KeyS".to_string(),
             browser: Browser::default(),
+            window: None,
         }
     }
 }

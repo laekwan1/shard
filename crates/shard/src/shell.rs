@@ -293,6 +293,9 @@ thread_local! {
     static SHELL_WINDOW: std::cell::Cell<HWND> = const { std::cell::Cell::new(std::ptr::null_mut()) };
     /// Whether that has been said already.
     static SUNK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The shared state, held so the window procedure can save the window's size and position to
+    /// the config when it is moved, resized, or closed — it is handed only a handle otherwise.
+    static SHARED: RefCell<Option<std::sync::Arc<crate::engine::Shared>>> = const { RefCell::new(None) };
 }
 
 /// Put the shell and the page in front where they belong.
@@ -1029,7 +1032,19 @@ pub fn open(title: &str, on_ask: impl Fn(&Shell, Ask) + 'static) -> Result<Shell
         said_downloads: RefCell::new(String::new()),
     };
     shell.lay_out();
-    unsafe { ShowWindow(hwnd, SW_SHOW) };
+    // Open where it was last left — position and size, and maximised if it was. The centred
+    // default that create_window set stands when nothing was saved (or the spot is off-screen now).
+    let maximized = restore_window(hwnd);
+    unsafe {
+        ShowWindow(
+            hwnd,
+            if maximized {
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWMAXIMIZED
+            } else {
+                SW_SHOW
+            },
+        )
+    };
     // The page is served and the channel is open; the first messages arrive
     // once the loop starts turning.
     Ok(shell)
@@ -1109,6 +1124,8 @@ pub fn preview() -> Result<()> {
     let shared = Shared::new(config);
     let core = std::rc::Rc::new(RefCell::new(EngineCore::new(shared.clone())));
     let saving = std::rc::Rc::new(RefCell::new(crate::downloads::Downloads::new(shared)));
+    // The window procedure saves the window's size and position here when it changes.
+    SHARED.with(|c| *c.borrow_mut() = Some(core.borrow().shared.clone()));
 
     // Honoured here as it is in the settled window: the setting is offered on
     // the settings screen, so a build that ignored it would be lying.
@@ -2480,6 +2497,65 @@ fn centre(hwnd: HWND) {
     }
 }
 
+/// The window's **normal** (un-maximised) box and whether it is currently maximised. The normal
+/// rect comes from the placement, not `GetWindowRect`, so a maximised window still remembers the
+/// size to restore to.
+fn window_box_of(hwnd: HWND) -> Option<crate::config::WindowBox> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowPlacement, WINDOWPLACEMENT};
+    let mut wp: WINDOWPLACEMENT = unsafe { std::mem::zeroed() };
+    wp.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    if unsafe { GetWindowPlacement(hwnd, &mut wp) } == 0 {
+        return None;
+    }
+    let r = wp.rcNormalPosition;
+    Some(crate::config::WindowBox {
+        x: r.left,
+        y: r.top,
+        w: r.right - r.left,
+        h: r.bottom - r.top,
+        maximized: unsafe { IsZoomed(hwnd) } != 0,
+    })
+}
+
+/// Save the window's box to the config so it opens there next time — on move/resize and on close.
+fn save_window(hwnd: HWND) {
+    let Some(b) = window_box_of(hwnd) else { return };
+    SHARED.with(|cell| {
+        if let Some(shared) = cell.borrow().as_ref() {
+            let mut cfg = shared.config.write();
+            // Nothing to write when nothing moved: this runs on every resize gesture and close.
+            if cfg.window != Some(b) {
+                cfg.window = Some(b);
+                drop(cfg);
+                let _ = shared.config.read().save();
+            }
+        }
+    });
+}
+
+/// Put the window back where it was last left, if a box was saved and still lands on a screen.
+/// Returns whether it should open maximised (applied by the caller's `ShowWindow`). Otherwise the
+/// centred default that [`create_window`] set stands.
+fn restore_window(hwnd: HWND) -> bool {
+    let Some(b) = crate::config::Config::load().window else {
+        return false;
+    };
+    let mut work = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    if unsafe { SystemParametersInfoW(SPI_GETWORKAREA, 0, (&mut work as *mut RECT).cast(), 0) } == 0 {
+        return false;
+    }
+    // Clamp to the primary work area, so a spot saved on a monitor that is now unplugged still
+    // opens somewhere its title bar can be grabbed.
+    let w = b.w.clamp(MIN_WIDTH, work.right - work.left);
+    let h = b.h.clamp(MIN_HEIGHT, work.bottom - work.top);
+    let x = b.x.clamp(work.left, (work.right - 120).max(work.left));
+    let y = b.y.clamp(work.top, (work.bottom - 60).max(work.top));
+    unsafe {
+        SetWindowPos(hwnd, std::ptr::null_mut(), x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    b.maximized
+}
+
 /// Ask the desktop manager for a dark, rounded frame — the same three lines the
 /// browser window has always used.
 ///
@@ -2597,9 +2673,20 @@ unsafe extern "system" fn procedure(
         }
         // The close button is "put it away", the way it was when the settings
         // window closed to the tray. Only an explicit quit ends the program, and
-        // that sets the flag before asking the window to close.
-        WM_CLOSE if !QUITTING.with(|cell| cell.get()) => {
-            unsafe { ShowWindow(hwnd, SW_HIDE) };
+        // that sets the flag before asking the window to close. Either way, the
+        // window's size and position are remembered so it opens there next time.
+        WM_CLOSE => {
+            save_window(hwnd);
+            if QUITTING.with(|cell| cell.get()) {
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            } else {
+                unsafe { ShowWindow(hwnd, SW_HIDE) };
+                0
+            }
+        }
+        // A move or resize just finished, or the window was maximised: remember the new box.
+        windows_sys::Win32::UI::WindowsAndMessaging::WM_EXITSIZEMOVE => {
+            save_window(hwnd);
             0
         }
         // Never let the frame be redrawn as "inactive": that redraw is the pale
@@ -2614,6 +2701,11 @@ unsafe extern "system" fn procedure(
         }
         WM_SIZE => {
             relayout(hwnd);
+            // Maximising fires no WM_EXITSIZEMOVE (it is not a drag), so catch that one here — the
+            // `save_window` guard skips a write unless the box actually changed, so this stays cheap.
+            if wparam == windows_sys::Win32::UI::WindowsAndMessaging::SIZE_MAXIMIZED as WPARAM {
+                save_window(hwnd);
+            }
             0
         }
         // How small it may be made. Below this the strip's own buttons start
