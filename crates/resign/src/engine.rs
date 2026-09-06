@@ -237,14 +237,13 @@ pub async fn resign_app(
     settings
         .set_entitlements_xml(SettingsScope::Main, &entitlements_xml)
         .map_err(|e| anyhow!("엔티틀먼트 설정: {e:?}"))?;
-    // 이중 CodeDirectory(SHA-1 주 + SHA-256 대체) — zsign/SideStore가 iOS 26에 설치되는 마지막 조각.
-    // apple-codesign은 modern 타깃 메인 exe에 **단일 SHA-256** CD만 낸다(폰 실측 확인). 그런데 폰
-    // 진단으로 신원(app-id·서명자·기기 등록)과 엔티틀먼트(정확히 SideStore 최소 4키)가 모두 맞는데도
-    // 설치가 0xe8008016 ApplicationVerificationFailed로 거부됐다 — 남은 차이는 서명 구조뿐이고, 그게
-    // 이 이중 CD다. zsign 기본값(hashType 1=SHA-1 주, 2=SHA-256 대체)을 그대로 맞춘다: 주를 SHA-1로,
-    // SHA-256을 extra(대체 CD)로. iOS 26은 강한 것(SHA-256)을 쓰되 둘 다 있는 hash agility를 요구한다.
-    settings.set_digest_type(SettingsScope::Main, DigestType::Sha1);
-    settings.add_extra_digest(SettingsScope::Main, DigestType::Sha256);
+    // **SHA-256 단독** 주 CD. (이전엔 SHA-1 주 + SHA-256 대체 이중 CD를 "zsign 기본값"이라 믿고 넣었는데
+    // — 실제 zsign 소스가 정반대였다: zsign.cpp:171 `bSHA256Only=true`가 기본, `-2`는 "이제 기본값
+    // (deprecated)", `-L`로 명시해야만 SHA-1이 붙는다. 즉 zsign/SideStore는 모든 Mach-O를 SHA-256 단독
+    // 주CD로 서명한다.) SHA-1 주 CD는 iOS 26이 메인 exe엔 레거시 경로로 관대하지만 **중첩 프레임워크엔
+    // SHA-256 주CD를 요구**해 OpenSSL.framework가 0xe8008001로 거부됐다(inherit_nested_macho로 이 Main
+    // 설정이 프레임워크까지 전파됨). SHA-256 단독으로 되돌린다 — set_digest_type이 프레임워크에도 상속된다.
+    settings.set_digest_type(SettingsScope::Main, DigestType::Sha256);
     // CMS에 Apple 체인(WWDR 중간 + 루트)을 넣는다. iOS amfid가 리프(개발 인증서)를 Apple 루트까지
     // 검증하려면 **중간 인증서가 서명 안에** 있어야 한다 — 리프만 넣으면 체인을 못 세워
     // ApplicationVerificationFailed(0xe8008016)가 난다. SideStore/Apple codesign이 하는 것.
@@ -299,8 +298,96 @@ pub fn strip_framework_signatures(app_dir: &Path, log: &mut dyn FnMut(&str)) -> 
             Ok(false) => log(&format!("[⑤ 서명] {stem}: 제거할 서명 없음(또는 미지원 형식) — 건너뜀")),
             Err(e) => log(&format!("[⑤ 서명] ⚠ {stem} 서명 제거 실패(무시하고 진행): {e:?}")),
         }
+        // minos<11(iOS)인 프레임워크는 minos를 11.0으로 올린다. 안 그러면 apple-codesign이
+        // import_settings_from_macho에서 "이 바이너리는 SHA-256 미지원"이라 판정해(signing_settings.rs:957)
+        // **우리 SHA-256 단독 설정을 무시하고 SHA-1 주 CD를 강제 주입**한다 — 중첩 프레임워크는 SHA-256
+        // 주 CD라야 iOS 26이 받으므로(0xe8008001) 그걸 막는다. 실측: MobileVLCKit minos=iOS9.0(강제 대상),
+        // OpenSSL=iOS12.0(무관). minos만 4바이트 올릴 뿐 코드 불변 — 앱이 iOS15+ 타깃이라 무해하다.
+        match raise_macho_minos(&bin, 11, 0) {
+            Ok(true) => log(&format!("[⑤ 서명] {stem}: minos<11 → 11.0 상향(강제 SHA-1 회피)")),
+            Ok(false) => {}
+            Err(e) => log(&format!("[⑤ 서명] ⚠ {stem} minos 상향 실패(무시): {e:?}")),
+        }
     }
     Ok(())
+}
+
+/// iOS 타깃 minos가 (major.minor)보다 낮으면 그 값으로 올린다(올렸으면 true). thin·fat 모두.
+///
+/// 왜: apple-codesign은 minos가 SHA-256을 지원 못 하는(iOS<11) 바이너리에 **설정과 무관하게** SHA-1 주
+/// CD를 강제한다(signing_settings.rs:957-983의 need_sha1_sha256). 그 판정은 LC_VERSION_MIN_IPHONEOS/
+/// LC_BUILD_VERSION의 minos를 읽는다. 서명 **전에** minos를 11.0으로 올려두면 need_sha1_sha256=false가 돼
+/// 우리 SHA-256 단독이 유지된다. 버전 필드(4바이트)만 바꿔 크기·오프셋 불변 — 서명 대상 바이트가 일관되게 유지된다.
+pub fn raise_macho_minos(path: &Path, want_major: u32, want_minor: u32) -> Result<bool> {
+    const FAT_MAGIC: u32 = 0xcafe_babe;
+    let be = |b: &[u8]| u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
+    let mut data = fs::read(path)?;
+    if data.len() < 8 {
+        return Ok(false);
+    }
+    let want = (want_major << 16) | (want_minor << 8);
+    let mut changed = false;
+    if be(&data[0..4]) == FAT_MAGIC {
+        let nfat = be(&data[4..8]) as usize;
+        for i in 0..nfat {
+            let e = 8 + i * 20; // fat_arch: cputype,cpusubtype,offset,size,align (각 4바이트)
+            if e + 20 > data.len() {
+                break;
+            }
+            let off = be(&data[e + 8..e + 12]) as usize;
+            let size = be(&data[e + 12..e + 16]) as usize;
+            if off + size <= data.len() {
+                changed |= raise_thin_minos(&mut data[off..off + size], want)?;
+            }
+        }
+    } else {
+        changed = raise_thin_minos(&mut data, want)?;
+    }
+    if changed {
+        fs::write(path, &data)?;
+    }
+    Ok(changed)
+}
+
+/// thin Mach-O(LE)의 iOS minos를 want(=major<<16|minor<<8) 미만이면 want로 올린다.
+fn raise_thin_minos(m: &mut [u8], want: u32) -> Result<bool> {
+    const MH_MAGIC_64: u32 = 0xfeed_facf;
+    const LC_VERSION_MIN_IPHONEOS: u32 = 0x25;
+    const LC_BUILD_VERSION: u32 = 0x32;
+    const PLATFORM_IOS: u32 = 2;
+    let le = |b: &[u8]| u32::from_le_bytes([b[0], b[1], b[2], b[3]]);
+    if m.len() < 32 || le(&m[0..4]) != MH_MAGIC_64 {
+        return Ok(false); // arm64 thin(64비트 LE)만 처리
+    }
+    let ncmds = le(&m[16..20]) as usize;
+    let mut off = 32usize;
+    let mut changed = false;
+    for _ in 0..ncmds {
+        if off + 8 > m.len() {
+            break;
+        }
+        let cmd = le(&m[off..off + 4]);
+        let cmdsize = le(&m[off + 4..off + 8]) as usize;
+        if cmdsize < 8 || off + cmdsize > m.len() {
+            break;
+        }
+        // 버전 필드 위치: VERSION_MIN은 +8, BUILD_VERSION(iOS)은 +12(platform,+8).
+        let ver_pos = if cmd == LC_VERSION_MIN_IPHONEOS {
+            Some(off + 8)
+        } else if cmd == LC_BUILD_VERSION && off + 12 <= m.len() && le(&m[off + 8..off + 12]) == PLATFORM_IOS {
+            Some(off + 12)
+        } else {
+            None
+        };
+        if let Some(p) = ver_pos {
+            if p + 4 <= m.len() && le(&m[p..p + 4]) < want {
+                m[p..p + 4].copy_from_slice(&want.to_le_bytes());
+                changed = true;
+            }
+        }
+        off += cmdsize;
+    }
+    Ok(changed)
 }
 
 /// Mach-O에서 LC_CODE_SIGNATURE와 그 데이터를 떼어낸다(제거하면 true). thin·fat 둘 다 처리.

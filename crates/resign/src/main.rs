@@ -120,6 +120,33 @@ fn main() -> Result<()> {
 
     // ── fat strip 검증: 서명된 thin을 fat(1아치)로 감싸 strip이 서명을 제거하는지 확인 ──
     // (디바이스의 MobileVLCKit이 '서명된 fat'이라, apple-codesign이 thin으로 바꿔버리지 않는 이 경로가 관건)
+    // ── fw-test: 엔진의 프레임워크 처리(strip + minos 상향)를 그대로 재현하고, 우리 설정(SHA-256 단독)으로
+    //    재서명했을 때 CD 주 해시가 실제로 SHA-256이 되는지 확인한다. minos<11이면 apple-codesign이
+    //    SHA-1을 강제하는데, minos 상향이 그걸 막는지가 관건(MobileVLCKit=iOS9.0 함정 검증). ──
+    if args.first().map(String::as_str) == Some("--fw-test") {
+        let bin = PathBuf::from(args.get(1).context("--fw-test <framework mach-o> 필요")?);
+        let work = std::env::temp_dir().join("shard-fw-test");
+        let _ = fs::remove_dir_all(&work);
+        fs::create_dir_all(&work)?;
+        let target = work.join("bin");
+        fs::copy(&bin, &target)?;
+        println!("0) 원본            → {}", digest_report(&target));
+        let stripped = resign::engine::strip_macho_code_signature(&target)?;
+        let raised = resign::engine::raise_macho_minos(&target, 11, 0)?;
+        println!("1) strip={stripped}, minos상향={raised}");
+        let (cert, key) = create_self_signed_code_signing_certificate(
+            KeyAlgorithm::Rsa, CertificateProfile::AppleDevelopment, "SO", "FW Test", "US",
+            chrono::Duration::try_days(365).context("유효기간")?,
+        )?;
+        let mut s = SigningSettings::default();
+        s.set_signing_key(&key, cert);
+        s.set_digest_type(SettingsScope::Main, apple_codesign::cryptography::DigestType::Sha256);
+        let re = work.join("bin2");
+        UnifiedSigner::new(s).sign_path(&target, &re).context("재서명")?;
+        println!("2) SHA-256 설정 재서명 → {}  (주=sha256여야 통과)", digest_report(&re));
+        return Ok(());
+    }
+
     if args.first().map(String::as_str) == Some("--fat-strip-test") {
         let bin = PathBuf::from(args.get(1).context("--fat-strip-test <서명된 thin 바이너리> 필요")?);
         let thin = fs::read(&bin)?;
@@ -386,6 +413,29 @@ fn dump_signature(app: &Path) -> Result<()> {
 }
 
 /// 한 Mach-O의 서명 상태를 한 줄로: 서명 유무·엔티틀먼트 줄 수·CMS 유무.
+/// 각 Mach-O의 CD 주 해시 종류와 대체 CD 수를 보고한다(fat이면 아치별). 주=sha256이어야 iOS 26 중첩검증 통과.
+fn digest_report(path: &Path) -> String {
+    match SignatureReader::from_path(path).and_then(|r| r.entities()) {
+        Ok(entities) => {
+            let mut out = vec![];
+            for e in &entities {
+                if let SignatureEntity::MachO(m) = &e.entity {
+                    match &m.signature {
+                        Some(sig) => out.push(format!(
+                            "CD주={}(+대체{})",
+                            sig.code_directory.as_ref().map(|c| c.digest_type.as_str()).unwrap_or("?"),
+                            sig.alternative_code_directories.len()
+                        )),
+                        None => out.push("서명X".to_string()),
+                    }
+                }
+            }
+            out.join(" | ")
+        }
+        Err(e) => format!("읽기실패: {e:?}"),
+    }
+}
+
 fn macho_state(path: &Path) -> Result<String> {
     let entities = SignatureReader::from_path(path)?.entities()?;
     for e in &entities {
