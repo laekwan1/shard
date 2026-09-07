@@ -1,0 +1,90 @@
+# zsign iOS 크로스컴파일 (Phase 1 — 위험 제거).
+#
+# 왜: apple-codesign이 중첩 프레임워크(구형 minos)에서 소진돼(0xe8008001) zsign 온디바이스 통합으로
+# 전환했다(memory: ios-zsign-ondevice-pivot). 가장 큰 미지수는 "zsign C++(+OpenSSL)가 aarch64-apple-ios로
+# 컴파일되는가"다. Rust FFI/build.rs를 붙이기 전에 이걸 먼저 CI(macOS)로 통과시킨다.
+#
+# 무엇을: zsign src/*.cpp(단 zsign.cpp=CLI main+fork/exec install 제외) + third-party(zlib/minizip) +
+# 우리 C 심(crates/resign/csrc/zsign_shim.cpp)을 iOS SDK로 arm64 컴파일해 정적 라이브러리로 묶는다.
+# OpenSSL 헤더는 앱이 이미 쓰는 OpenSSL.xcframework(krzyzanowskim)에서 가져온다(소스 빌드 불필요).
+# 링크(libcrypto)는 최종 앱에서 하므로 여기선 컴파일만 증명한다.
+name: zsign iOS cross-compile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/zsign-ios-build.yml'
+      - 'crates/resign/csrc/**'
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch OpenSSL.xcframework (zsign이 쓸 iOS OpenSSL 헤더)
+        run: |
+          set -eux
+          mkdir -p build
+          curl -fsSL https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip -o /tmp/ossl.zip
+          (cd build && unzip -oqq /tmp/ossl.zip)
+          # ios-arm64 슬라이스의 Headers 디렉터리를 찾는다(구조가 버전마다 조금 달라 동적으로).
+          OSSL_H="$(find build/OpenSSL.xcframework -type d -path '*ios-arm64*/Headers' ! -path '*simulator*' | head -1)"
+          test -n "$OSSL_H" || { echo "OpenSSL ios-arm64 Headers 못 찾음"; find build/OpenSSL.xcframework -maxdepth 3 -type d; exit 1; }
+          echo "OSSL_H=$PWD/$OSSL_H" >> "$GITHUB_ENV"
+          echo "OpenSSL 헤더: $OSSL_H"; ls "$OSSL_H" | head
+
+      - name: Clone zsign
+        run: git clone --depth 1 https://github.com/zhlynn/zsign zsign-src
+
+      - name: Compile zsign + shim for arm64-apple-ios
+        run: |
+          set -eux
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          CXX="$(xcrun --sdk iphoneos --find clang++)"
+          CC="$(xcrun --sdk iphoneos --find clang)"
+          COMMON="-arch arm64 -isysroot $SDK -miphoneos-version-min=12.0 -O2 -fvisibility=hidden"
+          INC="-Izsign-src/src -Izsign-src/src/common -Izsign-src/src/third-party/zlib -I$OSSL_H"
+          mkdir -p obj
+          fail=0
+
+          # C++: zsign.cpp(=CLI main, fork/exec install)만 빼고 전부. 우리 심이 진입점을 대신한다.
+          for f in $(find zsign-src/src -maxdepth 2 -name '*.cpp' ! -name 'zsign.cpp'); do
+            o="obj/$(echo "$f" | tr '/.' '__').o"
+            if ! "$CXX" $COMMON -std=c++14 $INC -c "$f" -o "$o"; then
+              echo "::error file=$f::C++ iOS 컴파일 실패"; fail=1
+            fi
+          done
+
+          # C: vendored zlib + minizip(ioapi/zip/unzip). SignFolder가 참조할 수 있어 함께 빌드.
+          for f in zsign-src/src/third-party/zlib/*.c \
+                   zsign-src/src/third-party/minizip/ioapi.c \
+                   zsign-src/src/third-party/minizip/zip.c \
+                   zsign-src/src/third-party/minizip/unzip.c; do
+            [ -f "$f" ] || continue
+            o="obj/$(echo "$f" | tr '/.' '__').o"
+            if ! "$CC" $COMMON $INC -c "$f" -o "$o"; then
+              echo "::error file=$f::C iOS 컴파일 실패"; fail=1
+            fi
+          done
+
+          # 우리 C ABI 심.
+          if ! "$CXX" $COMMON -std=c++14 $INC -c crates/resign/csrc/zsign_shim.cpp -o obj/shim.o; then
+            echo "::error::심 iOS 컴파일 실패"; fail=1
+          fi
+
+          test "$fail" = 0 || { echo "일부 소스가 iOS로 컴파일 안 됨 — 위 error 로그로 파일별 원인 확인"; exit 1; }
+
+          ar rcs libzsign.a obj/*.o
+          ls -la libzsign.a
+          echo "✅ zsign + 심이 arm64-apple-ios로 컴파일됨 → libzsign.a ($(ls obj/*.o | wc -l) objs)"
+
+      - name: Upload libzsign.a
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: libzsign-ios
+          path: |
+            libzsign.a
