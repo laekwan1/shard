@@ -12,8 +12,8 @@ echo "== building libshard_mobile for device + simulator =="
 # 이제 벤더된 zsign(C++)이 OpenSSL 심볼을 참조하고 그 심볼은 최종 앱 링크(OpenSSL.xcframework)에서만
 # 풀려서, cdylib 링크가 "Undefined symbols(OpenSSL)"로 실패했다. staticlib은 아카이브라 링크가 없어
 # 미해결 심볼이 정상이고(앱에서 OpenSSL.xcframework로 해소), iOS엔 이 .a만 필요하다.
-cargo rustc -p shard-mobile --release --features resign --target aarch64-apple-ios --crate-type staticlib
-cargo rustc -p shard-mobile --release --features resign --target aarch64-apple-ios-sim --crate-type staticlib
+cargo rustc -p shard-mobile --release --features resign --target aarch64-apple-ios --lib --crate-type staticlib
+cargo rustc -p shard-mobile --release --features resign --target aarch64-apple-ios-sim --lib --crate-type staticlib
 
 HEADERS="ios/build/headers"
 OUT="ios/build/ShardCore.xcframework"
