@@ -363,7 +363,16 @@ final class ResignModel: ObservableObject {
                 if let d2 = json2.data(using: .utf8),
                    let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
                     if (obj2["ok"] as? Bool) == true { self.summary = obj2["path"] as? String }
-                    else { self.errorText = "설치 실패 — \(obj2["error"] as? String ?? json2)" }
+                    else {
+                        let e = obj2["error"] as? String ?? json2
+                        // 터널 연결 실패(대개 LocalDevVPN 꺼짐)는 그것만 콕 집어 안내한다 — "설치 실패"로 뭉개면
+                        // 사용자가 원인을 못 찾는다(요청). 연결 단계 마커/문구로 판별.
+                        if e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과") {
+                            self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘지금 갱신’을 다시 눌러 주세요."
+                        } else {
+                            self.errorText = "설치 실패 — \(e)"
+                        }
+                    }
                 } else { self.errorText = "설치 응답 파싱 실패" }
             }
         }

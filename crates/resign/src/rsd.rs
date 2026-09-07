@@ -226,14 +226,16 @@ pub async fn rsd_install(
     }
 
     log("⑤ AFC 업로드(35MB) + installation_proxy 설치...");
-    // 이전엔 install_package_rsd(콜백·타임아웃 없음)를 써서, 한 번 막히면 UI가 "진행 중"으로 **영원히**
-    // 멈췄다(폰 확인). 어디서 막히는지 볼 수가 없었다. 그래서 (1) 진행 콜백으로 설치 퍼센트를 원자값에
-    // 기록하고, (2) 전체를 240초 타임아웃으로 감싼다. 타임아웃 시 그 원자값으로 **AFC 업로드에서 멈췄나
-    // (콜백이 한 번도 안 옴) vs 설치 진행 루프 몇 %에서 멈췄나**를 가른다 — 무한 대기 대신 진단 가능한 실패로.
-    // options=None이면 helper가 .ipa의 CFBundleIdentifier로 PublicStaging 업로드 후 설치한다.
+    // **자기 자신 덮어쓰기 설치는 installd가 패키지를 받아 비동기로 설치하고 진행/완료 신호를 이 채널로
+    // 안 돌려준다**(폰 실측: 진행 콜백이 0회인데도 홈 화면 아이콘이 "설치 중"을 표시하고, 재실행 시 재서명
+    // 스탬프가 갱신됨 = 실제로 설치 성공). 그래서 완료 신호를 기다리면 영원히 멈춘다. 대응: (1) 진행 콜백으로
+    // 퍼센트를 원자값에 기록, (2) 120초 타임아웃으로 감싼다(35MB 업로드가 끝날 만큼은 준다). **타임아웃은
+    // 실패가 아니라 "installd가 백그라운드에서 설치 중"으로 처리**한다 — 진짜 실패(서명 거부 등)는 아래
+    // Ok(Err)로 즉시 잡히므로 타임아웃 경로로 오지 않는다. options=None이면 helper가 .ipa의
+    // CFBundleIdentifier로 PublicStaging 업로드 후 설치한다.
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    const NO_CB: u64 = u64::MAX; // 콜백 한 번도 안 옴 = AFC 업로드 단계에서 멈춤(설치 진행 시작 못 함)
+    const NO_CB: u64 = u64::MAX; // 콜백 0회 = 진행 신호를 못 받음(자기 덮어쓰기 설치의 정상 동작 — 설치는 됨)
     let last_pct = Arc::new(AtomicU64::new(NO_CB));
     let cb_pct = last_pct.clone();
     let install = install_package_with_callback_rsd(
@@ -247,18 +249,22 @@ pub async fn rsd_install(
         },
         (),
     );
-    match tokio::time::timeout(std::time::Duration::from_secs(240), install).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(120), install).await {
         Ok(Ok(())) => Ok("설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요.".to_string()),
-        // 실패 에러 {e:?}에는 installd의 ErrorDescription(구체 사유)이 담긴다(예: MismatchedApplicationIdentifierEntitlement).
+        // installd가 **거부**하면(서명·엔티틀먼트 문제 등) 여기로 온다 — 진짜 실패. {e:?}에 ErrorDescription 담김.
         Ok(Err(e)) => Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
+        // 타임아웃 = 완료 신호 누락(실패 아님). Ok로 반환해 UI가 빨간 실패 대신 안내로 보이게 한다.
         Err(_) => {
             let p = last_pct.load(Ordering::SeqCst);
-            let msg = if p == NO_CB {
-                "[⑤ 설치] 240초 초과 — AFC 업로드에서 멈춤(설치 진행 콜백 0회). 터널(jktcp userspace)의 대용량 전송 문제로 보임".to_string()
+            let phase = if p == NO_CB {
+                "installd가 백그라운드에서 설치 중".to_string()
             } else {
-                format!("[⑤ 설치] 240초 초과 — installd 설치 진행이 {p}%에서 멈춤(AFC 업로드는 끝남)")
+                format!("installd 설치 {p}% 진행 중")
             };
-            Err(anyhow!(msg))
+            Ok(format!(
+                "설치 명령 전송됨 · {phase}. 자기 덮어쓰기 설치라 완료 신호가 안 옵니다 — 홈 화면 아이콘의 \
+                 설치가 끝나면 앱을 강제종료 후 다시 여세요. 상단 '✓ 자체 재서명됨' 시각이 갱신됐으면 성공입니다."
+            ))
         }
     }
 }
