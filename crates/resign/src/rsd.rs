@@ -24,7 +24,7 @@ use idevice::rsd::RsdHandshake;
 use idevice::tcp::adapter::Adapter;
 use idevice::tcp::handle::AdapterHandle;
 use idevice::services::installation_proxy::InstallationProxyClient;
-use idevice::utils::installation::install_package_rsd;
+use idevice::utils::installation::install_package_with_callback_rsd;
 // connect_rsd는 RsdService 트레이트 메서드라 스코프에 있어야 호출된다.
 use idevice::RsdService;
 
@@ -225,12 +225,40 @@ pub async fn rsd_install(
         Err(e) => log(&format!("[진단] instproxy(RSD) 연결 실패(무시하고 설치 진행): {e:?}")),
     }
 
-    log("⑤ AFC 업로드 + installation_proxy 설치...");
-    // options=None이면 helper가 .ipa에서 CFBundleIdentifier를 읽어 PublicStaging 업로드 후 설치한다.
-    // 실패 에러 {e:?}에는 installd의 ErrorDescription(구체 사유)이 담긴다 — 0xe8008016만이 아니라
-    // 이 문자열 전체를 봐야 한다(예: MismatchedApplicationIdentifierEntitlement).
-    install_package_rsd(&mut adapter, &mut hs, ipa, None)
-        .await
-        .map_err(|e| anyhow!("[⑤ 설치] 실패: {e:?}"))?;
-    Ok("설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요.".to_string())
+    log("⑤ AFC 업로드(35MB) + installation_proxy 설치...");
+    // 이전엔 install_package_rsd(콜백·타임아웃 없음)를 써서, 한 번 막히면 UI가 "진행 중"으로 **영원히**
+    // 멈췄다(폰 확인). 어디서 막히는지 볼 수가 없었다. 그래서 (1) 진행 콜백으로 설치 퍼센트를 원자값에
+    // 기록하고, (2) 전체를 240초 타임아웃으로 감싼다. 타임아웃 시 그 원자값으로 **AFC 업로드에서 멈췄나
+    // (콜백이 한 번도 안 옴) vs 설치 진행 루프 몇 %에서 멈췄나**를 가른다 — 무한 대기 대신 진단 가능한 실패로.
+    // options=None이면 helper가 .ipa의 CFBundleIdentifier로 PublicStaging 업로드 후 설치한다.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    const NO_CB: u64 = u64::MAX; // 콜백 한 번도 안 옴 = AFC 업로드 단계에서 멈춤(설치 진행 시작 못 함)
+    let last_pct = Arc::new(AtomicU64::new(NO_CB));
+    let cb_pct = last_pct.clone();
+    let install = install_package_with_callback_rsd(
+        &mut adapter,
+        &mut hs,
+        ipa,
+        None,
+        move |(pct, ()): (u64, ())| {
+            cb_pct.store(pct, Ordering::SeqCst);
+            async {}
+        },
+        (),
+    );
+    match tokio::time::timeout(std::time::Duration::from_secs(240), install).await {
+        Ok(Ok(())) => Ok("설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요.".to_string()),
+        // 실패 에러 {e:?}에는 installd의 ErrorDescription(구체 사유)이 담긴다(예: MismatchedApplicationIdentifierEntitlement).
+        Ok(Err(e)) => Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
+        Err(_) => {
+            let p = last_pct.load(Ordering::SeqCst);
+            let msg = if p == NO_CB {
+                "[⑤ 설치] 240초 초과 — AFC 업로드에서 멈춤(설치 진행 콜백 0회). 터널(jktcp userspace)의 대용량 전송 문제로 보임".to_string()
+            } else {
+                format!("[⑤ 설치] 240초 초과 — installd 설치 진행이 {p}%에서 멈춤(AFC 업로드는 끝남)")
+            };
+            Err(anyhow!(msg))
+        }
+    }
 }
