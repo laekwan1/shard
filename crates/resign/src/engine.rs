@@ -60,7 +60,7 @@ fn sign_bundle_with_zsign(
 
     let tmp = work.join("zsign-in");
     fs::create_dir_all(&tmp)?;
-    let cert_pem = cert.encode_pem().map_err(|e| anyhow!("cert PEM 인코딩: {e}"))?;
+    let cert_pem = cert.encode_pem(); // CapturedX509Certificate::encode_pem은 String을 직접 반환
     let key_pem = pem::encode(&pem::Pem::new(
         "PRIVATE KEY",
         key.to_pkcs8_one_asymmetric_key_der().to_vec(),
