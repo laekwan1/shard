@@ -34,23 +34,41 @@ jobs:
             target
           key: ios-app-cargo-${{ hashFiles('Cargo.lock') }}
 
+      # OpenSSL.xcframework를 **xcframework 빌드보다 먼저** 가져온다 — build.rs가 iOS 타깃에서 벤더된
+      # zsign(C++)을 cc로 컴파일할 때 OpenSSL 헤더가 필요하기 때문. Xcode 링크에도 쓰이므로 ios/build에
+      # 둔다. <openssl/*.h>로 풀리게 openssl/ 심링크로 감싸고 ZSIGN_OPENSSL_INCLUDE로 넘긴다.
+      - name: Fetch OpenSSL.xcframework (zsign build.rs 헤더 + Xcode 링크)
+        run: |
+          set -eux
+          mkdir -p ios/build
+          curl -fsSL https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip -o /tmp/ossl.zip
+          (cd ios/build && unzip -oqq /tmp/ossl.zip)
+          test -d ios/build/OpenSSL.xcframework || { echo "OpenSSL.xcframework 없음"; exit 1; }
+          SLICE="$(ls -d ios/build/OpenSSL.xcframework/ios-arm64 2>/dev/null || true)"
+          [ -n "$SLICE" ] || SLICE="$(find ios/build/OpenSSL.xcframework -maxdepth 1 -type d -name 'ios-arm64*' ! -name '*simulator*' ! -name '*maccatalyst*' | head -1)"
+          HDR="$(find "$SLICE" -type d -name Headers | head -1)"
+          test -n "$HDR" || { echo "OpenSSL Headers 못 찾음"; exit 1; }
+          mkdir -p ios/build/ossl-inc
+          ln -sfn "$PWD/$HDR" ios/build/ossl-inc/openssl
+          test -f ios/build/ossl-inc/openssl/pem.h || { echo "openssl/pem.h 없음"; exit 1; }
+          echo "ZSIGN_OPENSSL_INCLUDE=$PWD/ios/build/ossl-inc" >> "$GITHUB_ENV"
+
       - name: Build the Rust xcframework
         # ANISETTE_URL: 전용 anisette 서버 주소를 **빌드 때** 앱에 기본값으로 주입(auth.rs option_env!).
         # 값은 저장소가 아니라 GitHub 암호화 시크릿에만 있다(저장소 PUBLIC — 서버 주소를 커밋에 안 남긴다).
+        # ZSIGN_OPENSSL_INCLUDE는 위 단계가 GITHUB_ENV로 넘긴다(build.rs가 zsign 컴파일에 씀).
         env:
           ANISETTE_URL: ${{ secrets.ANISETTE_URL }}
         run: bash ios/scripts/build-xcframework.sh
 
-      # ④ 온디바이스 설치: SideStore가 쓰는 minimuxer(usbmux+하트비트) + 그것이 의존하는
-      # libimobiledevice C 스택 + OpenSSL. 전부 프리빌트 xcframework라 소스 C 빌드가 없다.
-      # Rust 엔진은 발급·서명까지, minimuxer가 폰에 설치한다.
-      - name: Fetch on-device install xcframeworks (minimuxer + libimobiledevice + OpenSSL)
+      # ④ 온디바이스 설치: SideStore가 쓰는 minimuxer(usbmux+하트비트) + libimobiledevice C 스택.
+      # OpenSSL은 위에서 이미 가져왔다. 전부 프리빌트 xcframework라 소스 C 빌드가 없다.
+      - name: Fetch on-device install xcframeworks (minimuxer + libimobiledevice)
         run: |
           mkdir -p ios/build
           dl() { curl -fsSL "$1" -o /tmp/x.zip && (cd ios/build && unzip -oqq /tmp/x.zip) && echo "ok: $2"; }
           dl https://github.com/jkcoxson/minimuxer/releases/download/build/minimuxer.xcframework.zip minimuxer
           dl https://github.com/SideStore/libimobiledevice-xcframework/releases/latest/download/libimobiledevice.xcframework.zip libimobiledevice
-          dl https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip OpenSSL
           for f in minimuxer libimobiledevice OpenSSL; do test -d "ios/build/$f.xcframework" || { echo "$f.xcframework 없음"; exit 1; }; done
           ls -d ios/build/*.xcframework
 

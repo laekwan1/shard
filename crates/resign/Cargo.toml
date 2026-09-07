@@ -52,3 +52,13 @@ tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 # 요구한다. 둘 다 apple-codesign이 이미 끌어오는 것 — 서명 원시함수라 예외적으로 직접 의존.
 chrono = "0.4"
 x509-certificate = "0.24"
+# 서명 키(PKCS8 DER)를 zsign이 확실히 읽는 PEM으로 감싸는 용도(zsign은 PEM_read_bio_PrivateKey를 먼저
+# 시도, DER 폴백은 PKCS8을 못 읽을 수 있음). cert는 x509-certificate의 encode_pem을 쓴다. PEM 인코딩
+# 원시함수라 예외 허용, 이미 의존 트리에 있음.
+pem = "3"
+
+# iOS 전용: 벤더된 zsign(C++) + 우리 C 심을 aarch64-apple-ios로 컴파일한다(build.rs). apple-codesign이
+# 중첩 프레임워크(구형 minos)에서 SHA-1을 강제해 iOS 26이 0xe8008001로 거부하는 한계를, SideStore가
+# 쓰는 zsign(SHA-256 단독 + 인플레이스 프레임워크 재서명)으로 우회. PC 타깃은 cc를 안 쓴다(build.rs cfg).
+[build-dependencies]
+cc = "1"

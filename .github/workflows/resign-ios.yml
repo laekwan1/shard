@@ -32,7 +32,26 @@ jobs:
             target
           key: resign-ios-cargo-${{ hashFiles('Cargo.lock') }}
 
+      # build.rs가 iOS 타깃에서 벤더된 zsign(C++)을 cc로 컴파일한다 — OpenSSL 헤더가 필요하다.
+      # 앱이 쓰는 OpenSSL.xcframework(krzyzanowskim) 헤더를 가져와 <openssl/*.h>로 풀리게 openssl/ 심링크로
+      # 감싸고, 그 경로를 ZSIGN_OPENSSL_INCLUDE로 넘긴다(헤더는 슬라이스 무관 동일 — 컴파일용).
+      - name: Fetch OpenSSL headers for zsign (build.rs)
+        run: |
+          set -eux
+          mkdir -p build
+          curl -fsSL https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip -o /tmp/ossl.zip
+          (cd build && unzip -oqq /tmp/ossl.zip)
+          SLICE="$(ls -d build/OpenSSL.xcframework/ios-arm64 2>/dev/null || true)"
+          [ -n "$SLICE" ] || SLICE="$(find build/OpenSSL.xcframework -maxdepth 1 -type d -name 'ios-arm64*' ! -name '*simulator*' ! -name '*maccatalyst*' | head -1)"
+          HDR="$(find "$SLICE" -type d -name Headers | head -1)"
+          test -n "$HDR" || { echo "OpenSSL Headers 못 찾음"; exit 1; }
+          mkdir -p build/ossl-inc
+          ln -sfn "$PWD/$HDR" build/ossl-inc/openssl
+          test -f build/ossl-inc/openssl/pem.h || { echo "openssl/pem.h 없음"; exit 1; }
+          echo "ZSIGN_OPENSSL_INCLUDE=$PWD/build/ossl-inc" >> "$GITHUB_ENV"
+
       # 라이브러리만(--lib): iOS 앱이 링크하는 건 lib이다. bin(main.rs)은 PC PoC 전용.
+      # 이 빌드가 통과하면 build.rs의 zsign 컴파일 + 심 + engine.rs FFI 선언이 iOS로 성립함을 뜻한다.
       - name: Cross-compile resign for a device (aarch64-apple-ios)
         run: cargo build -p resign --lib --release --target aarch64-apple-ios
 

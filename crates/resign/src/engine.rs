@@ -24,6 +24,85 @@ use x509_certificate::{
     CapturedX509Certificate, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
 };
 
+// ── zsign(C++) FFI — iOS 온디바이스 서명 전용 ──────────────────────────────────────────────
+// 왜 apple-codesign이 아니라 zsign: apple-codesign은 중첩 프레임워크(구형 minos)에 SHA-1 주 CD를
+// 강제 주입해 iOS 26이 0xe8008001로 거부하는데 설정으로 못 끈다. zsign은 번들 전체를 SHA-256 단독으로
+// 한 패스 재서명(SideStore가 iOS 26에 쓰는 방식)이라 그 한계를 없앤다. 심 구현: crates/resign/csrc/
+// zsign_shim.cpp, 컴파일: build.rs(cc, iOS 타깃만). PC 타깃은 이 심 대신 apple-codesign 경로를 쓴다.
+#[cfg(target_os = "ios")]
+extern "C" {
+    /// 이미 추출된 .app **폴더**를 in-place 서명(메인 exe + 중첩 프레임워크). 0=성공.
+    fn zsign_sign_folder(
+        app_folder: *const std::os::raw::c_char,
+        cert_file: *const std::os::raw::c_char,
+        key_file: *const std::os::raw::c_char,
+        prov_file: *const std::os::raw::c_char,
+        entitle_file: *const std::os::raw::c_char,
+        bundle_id: *const std::os::raw::c_char,
+    ) -> std::os::raw::c_int;
+}
+
+/// 엔진이 가진 신원(cert/key)·프로파일·엔티틀먼트를 zsign이 읽는 파일로 써서 번들을 재서명한다.
+/// cert는 PEM(encode_pem), key는 PKCS8을 PEM으로 감싼다(zsign은 PEM_read_bio_PrivateKey 우선, DER
+/// 폴백은 PKCS8을 못 읽을 수 있음). prov/entitlements는 그대로. zsign이 app_dir을 in-place 서명한다.
+#[cfg(target_os = "ios")]
+fn sign_bundle_with_zsign(
+    app_dir: &Path,
+    cert: &CapturedX509Certificate,
+    key: &InMemorySigningKeyPair,
+    profile: &[u8],
+    entitlements_xml: &str,
+    bundle_id: &str,
+    work: &Path,
+    log: &mut dyn FnMut(&str),
+) -> Result<()> {
+    use std::ffi::CString;
+
+    let tmp = work.join("zsign-in");
+    fs::create_dir_all(&tmp)?;
+    let cert_pem = cert.encode_pem().map_err(|e| anyhow!("cert PEM 인코딩: {e}"))?;
+    let key_pem = pem::encode(&pem::Pem::new(
+        "PRIVATE KEY",
+        key.to_pkcs8_one_asymmetric_key_der().to_vec(),
+    ));
+    let cert_path = tmp.join("cert.pem");
+    let key_path = tmp.join("key.pem");
+    let prov_path = tmp.join("prov.mobileprovision");
+    let ent_path = tmp.join("ent.plist");
+    fs::write(&cert_path, cert_pem)?;
+    fs::write(&key_path, key_pem)?;
+    fs::write(&prov_path, profile)?;
+    fs::write(&ent_path, entitlements_xml)?;
+
+    let cstr = |p: &Path| -> Result<CString> {
+        CString::new(p.to_str().ok_or_else(|| anyhow!("경로 utf8 아님: {p:?}"))?)
+            .map_err(|e| anyhow!("경로에 NUL: {e}"))
+    };
+    let c_app = cstr(app_dir)?;
+    let c_cert = cstr(&cert_path)?;
+    let c_key = cstr(&key_path)?;
+    let c_prov = cstr(&prov_path)?;
+    let c_ent = cstr(&ent_path)?;
+    let c_bid = CString::new(bundle_id).map_err(|e| anyhow!("번들ID에 NUL: {e}"))?;
+
+    log("[⑤ 서명] zsign으로 번들 재서명(메인+프레임워크 한 패스, SHA-256 단독)...");
+    let rc = unsafe {
+        zsign_sign_folder(
+            c_app.as_ptr(),
+            c_cert.as_ptr(),
+            c_key.as_ptr(),
+            c_prov.as_ptr(),
+            c_ent.as_ptr(),
+            c_bid.as_ptr(),
+        )
+    };
+    if rc != 0 {
+        bail!("[⑤ 서명] zsign 실패(rc={rc}) — cert/key/프로파일/엔티틀먼트 확인");
+    }
+    log("[⑤ 서명] zsign 완료.");
+    Ok(())
+}
+
 use crate::auth::AppleSession;
 use crate::dev_api::{AppId, DeveloperApi, DeveloperTeam};
 
@@ -184,7 +263,33 @@ pub async fn resign_app(
         }
     }
 
-    let signed = work.join("signed").join(app_dir.file_name().unwrap());
+    // 서명본 .app 디렉터리. iOS는 zsign이 app_dir을 in-place 서명(signed=app_dir), PC는 apple-codesign이
+    // 별도 위치로 서명한다. 아래 repackage가 이 signed를 쓴다.
+    let signed;
+
+    #[cfg(target_os = "ios")]
+    {
+        // zsign으로 번들 전체(메인+프레임워크)를 한 패스 재서명 — SHA-256 단독, 인플레이스. apple-codesign이
+        // 중첩 프레임워크(구형 minos)에 SHA-1을 강제해 iOS 26이 0xe8008001로 거부하던 한계를 근본 회피
+        // (memory: ios-zsign-ondevice-pivot). 수동 strip/minos/DR/teamID 불필요 — zsign이 SideStore처럼 다 한다.
+        sign_bundle_with_zsign(
+            &app_dir,
+            &apple_cert,
+            &key,
+            &profile.encoded_profile,
+            &entitlements_xml,
+            &req.bundle_id,
+            work,
+            log,
+        )?;
+        signed = app_dir.clone();
+        // 진단: zsign 서명 결과를 우리 리더로 다시 읽어 CD/teamID/DR/CMS를 찍는다.
+        dump_signed_bundle(&signed, log);
+    }
+
+    #[cfg(not(target_os = "ios"))]
+    {
+    signed = work.join("signed").join(app_dir.file_name().unwrap());
     fs::create_dir_all(signed.parent().unwrap())?;
 
     // 프레임워크 서명 제거 — 번들 서명 **전에** 각 프레임워크의 기존 코드 서명을 떼어낸다. apple-codesign
@@ -261,6 +366,7 @@ pub async fn resign_app(
     // 진단: 서명 결과를 다시 읽어 iOS가 무엇을 거부하는지 구조로 찍는다 — CMS 인증서 수(체인 유무),
     // CD 해시타입/대체 CD, DER 엔티틀먼트. 여러 번 서명기 가설이 빗나갔으니 실물을 본다.
     dump_signed_bundle(&signed, log);
+    }
 
     // 7) 설치용 .ipa로 재포장(Payload/<app>).
     let out_ipa = work.join("Shard-signed.ipa");
