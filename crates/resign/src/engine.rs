@@ -1088,6 +1088,15 @@ fn rewrite_bundle_identifier(app_dir: &Path, bundle_id: &str) -> Result<()> {
         .into_dictionary()
         .ok_or_else(|| anyhow!("Info.plist가 딕셔너리가 아님"))?;
     dict.insert("CFBundleIdentifier".into(), bundle_id.into());
+    // 재서명 스탬프 — 이 앱이 **우리 엔진으로 재서명·재설치됐음**을 앱이 화면에 표시하게 현재 시각(unix 초)을
+    // 박는다. 원본(Sideloadly로 깐 CI 빌드)엔 이 키가 없다. 그래서 설치 후 이 값이 보이면 재설치가 실제로
+    // 된 것 — installd의 "완료" 신호를 못 받아도 성공을 눈으로 확인할 수 있다(자기 자신 덮어쓰기 설치는
+    // 완료 신호가 안 오기도 함). Info.plist에 넣으므로 서명(zsign) 봉인에 포함된다.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    dict.insert("ShardResignStamp".into(), stamp.to_string().into());
     let mut buf = Vec::new();
     plist::to_writer_binary(&mut buf, &Value::Dictionary(dict))
         .map_err(|e| anyhow!("Info.plist 직렬화: {e:?}"))?;

@@ -32,6 +32,16 @@ enum SigningInfo {
         return CGFloat(min(max(exp.timeIntervalSinceNow / full, 0), 1))
     }
 
+    /// 재서명 스탬프 — 우리 엔진이 재서명 시 Info.plist에 박는 unix 초(engine.rs rewrite_bundle_identifier).
+    /// 값이 있으면 이 앱은 **우리 엔진으로 재서명·재설치된 복제본**(설치 성공의 증거). 없으면 원본(Sideloadly로
+    /// 깐 CI 빌드 — 아직 자체 갱신 전). installd '완료' 신호를 못 받아도 이 값으로 재설치 성공을 눈으로 확인한다.
+    static func resignStamp() -> Date? {
+        guard let v = Bundle.main.object(forInfoDictionaryKey: "ShardResignStamp") else { return nil }
+        if let s = v as? String, let t = TimeInterval(s) { return Date(timeIntervalSince1970: t) }
+        if let n = v as? NSNumber { return Date(timeIntervalSince1970: n.doubleValue) }
+        return nil
+    }
+
     // mobileprovision은 CMS로 감싼 XML plist다. engine.rs의 plist_from_mobileprovision과 같은 방식으로
     // <?xml … </plist> 구간을 스캔해 파싱한다(전체 CMS 파싱 대신).
     private static func plistFromMobileprovision(_ data: Data) -> [String: Any]? {
@@ -475,6 +485,10 @@ struct ResignView: View {
     // 없으면 펴진 채로 시작한다(accountKnown).
     @State private var editingAccount = false
     @State private var editingTunnel = false
+    // 남은 유효기간을 **실시간**(일·시·분·초)으로 보이려고 1초마다 now를 갱신한다 — 만료일은 고정이고
+    // now가 흐르면서 남은 시간이 매초 줄어드는 걸 화면이 그린다.
+    @State private var now = Date()
+    private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -685,22 +699,39 @@ struct ResignView: View {
 
     // 현재 서명의 정확한 남은 일수(모래시계는 '양'으로, 여기선 숫자로). 없으면 정보 없음.
     private var signatureStatus: some View {
-        let days = SigningInfo.daysLeft()
-        let low = (days ?? 99) <= 3
+        let exp = SigningInfo.expirationDate()
+        // now(1초마다 갱신)로 **실시간** 계산 — 만료일은 고정, now가 흐르며 남은 시간이 매초 줄어든다.
+        let secs: TimeInterval? = exp.map { max($0.timeIntervalSince(now), 0) }
+        let low = (secs ?? .greatestFiniteMagnitude) <= 3 * 86400.0
+        let frac = exp.map { CGFloat(min(max($0.timeIntervalSince(now) / (7 * 86400.0), 0), 1)) } ?? 0
+        let stamp = SigningInfo.resignStamp()
         return HStack(spacing: 12) {
-            // SF Symbol hourglass 아이콘 그대로 + 모래 양(주소창과 동일). 옆에 정확한 일수 텍스트.
-            HourglassSand(fraction: SigningInfo.fraction(),
-                          sand: days == nil ? .muted : (low ? .accent : .onSurface),
+            // SF Symbol hourglass 아이콘 + 모래 양(주소창과 동일). 옆에 실시간 남은 시간.
+            HourglassSand(fraction: frac,
+                          sand: exp == nil ? .muted : (low ? .accent : .onSurface),
                           frameColor: .muted)
                 .frame(width: 22, height: 26)
             VStack(alignment: .leading, spacing: 2) {
                 Text("현재 서명").font(.caption).foregroundColor(.muted)
-                if let d = days {
-                    Text(d > 0 ? "남은 유효기간 \(d)일" : "만료됨")
-                        .font(.body.weight(.semibold))
-                        .foregroundColor(d > 0 ? (low ? .accent : .onSurface) : .red)
+                if let s = secs {
+                    if s > 0 {
+                        let t = Int(s)
+                        let d = t / 86400, h = (t % 86400) / 3600, m = (t % 3600) / 60, sec = t % 60
+                        Text("남은 유효기간 \(d)일 \(h)시간 \(m)분 \(sec)초")
+                            .font(.body.weight(.semibold))
+                            .foregroundColor(low ? .accent : .onSurface)
+                            .monospacedDigit()
+                    } else {
+                        Text("만료됨").font(.body.weight(.semibold)).foregroundColor(.red)
+                    }
                 } else {
                     Text("서명 정보 없음").font(.body.weight(.semibold)).foregroundColor(.muted)
+                }
+                // 재서명 스탬프 — 자체 갱신(재설치)이 실제로 됐는지 눈으로 확인(installd '완료' 신호 없이도).
+                if let st = stamp {
+                    Text("✓ 자체 재서명됨 · \(stampFmt(st))").font(.caption2).foregroundColor(.accent)
+                } else {
+                    Text("원본 서명(아직 자체 갱신 전)").font(.caption2).foregroundColor(.muted)
                 }
             }
             Spacer()
@@ -708,6 +739,14 @@ struct ResignView: View {
         .padding(12)
         .background(Color.chrome)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .onReceive(tick) { now = $0 }
+    }
+
+    /// 재서명 스탬프 시각 표시(월/일 시:분).
+    private func stampFmt(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "MM/dd HH:mm"
+        return f.string(from: d)
     }
 
     // 발급받은 계정 — 이메일 + 체크 표시로 관리. ✕로 기록 삭제.
