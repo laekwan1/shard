@@ -30,11 +30,22 @@ jobs:
           mkdir -p build
           curl -fsSL https://github.com/krzyzanowskim/OpenSSL/releases/latest/download/OpenSSL.xcframework.zip -o /tmp/ossl.zip
           (cd build && unzip -oqq /tmp/ossl.zip)
-          # ios-arm64 슬라이스의 Headers 디렉터리를 찾는다(구조가 버전마다 조금 달라 동적으로).
-          OSSL_H="$(find build/OpenSSL.xcframework -type d -path '*ios-arm64*/Headers' ! -path '*simulator*' | head -1)"
-          test -n "$OSSL_H" || { echo "OpenSSL ios-arm64 Headers 못 찾음"; find build/OpenSSL.xcframework -maxdepth 3 -type d; exit 1; }
-          echo "OSSL_H=$PWD/$OSSL_H" >> "$GITHUB_ENV"
-          echo "OpenSSL 헤더: $OSSL_H"; ls "$OSSL_H" | head
+          echo "=== xcframework 슬라이스 목록 ==="
+          ls build/OpenSSL.xcframework
+          # **device** 슬라이스(순수 ios-arm64) 우선 — simulator/maccatalyst 제외. (컴파일엔 헤더만 있으면
+          # 어느 슬라이스든 동일하지만, 뒤에서 링크할 lib과 맞추려 device를 고른다.)
+          SLICE="$(ls -d build/OpenSSL.xcframework/ios-arm64 2>/dev/null || true)"
+          [ -n "$SLICE" ] || SLICE="$(find build/OpenSSL.xcframework -maxdepth 1 -type d -name 'ios-arm64*' ! -name '*simulator*' ! -name '*maccatalyst*' | head -1)"
+          test -n "$SLICE" || { echo "device 슬라이스 못 찾음"; exit 1; }
+          HDR="$(find "$SLICE" -type d -name Headers | head -1)"
+          test -n "$HDR" || { echo "$SLICE 에서 Headers 못 찾음"; find "$SLICE" -maxdepth 4 -type d; exit 1; }
+          # 헤더가 Headers/pem.h 처럼 **평면 배치**라 <openssl/pem.h>가 안 풀린다. openssl/ 심링크로 감싼다.
+          mkdir -p build/ossl-inc
+          ln -sfn "$PWD/$HDR" build/ossl-inc/openssl
+          echo "OSSL_INC=$PWD/build/ossl-inc" >> "$GITHUB_ENV"
+          echo "device 슬라이스: $SLICE"
+          echo "헤더 include 루트: $PWD/build/ossl-inc (openssl→$HDR)"
+          test -f "build/ossl-inc/openssl/pem.h" && test -f "build/ossl-inc/openssl/sha.h" && echo "pem.h/sha.h 확인 OK"
 
       - name: Clone zsign
         run: git clone --depth 1 https://github.com/zhlynn/zsign zsign-src
@@ -46,7 +57,7 @@ jobs:
           CXX="$(xcrun --sdk iphoneos --find clang++)"
           CC="$(xcrun --sdk iphoneos --find clang)"
           COMMON="-arch arm64 -isysroot $SDK -miphoneos-version-min=12.0 -O2 -fvisibility=hidden"
-          INC="-Izsign-src/src -Izsign-src/src/common -Izsign-src/src/third-party/zlib -I$OSSL_H"
+          INC="-Izsign-src/src -Izsign-src/src/common -Izsign-src/src/third-party/zlib -I$OSSL_INC"
           mkdir -p obj
           fail=0
 
