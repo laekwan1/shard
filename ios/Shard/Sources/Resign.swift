@@ -551,11 +551,17 @@ struct ResignView: View {
                         }
                         Text("전용 서버(고정 기기 정체성)를 쓰면 계정 잠금·재로그인이 근본적으로 준다. 도커 anisette-v3-server를 홈서버에 올리고 폰에서 닿게(LAN 또는 DuckDNS:6969).")
                             .font(.caption2).foregroundColor(.muted)
-                    }
-                    // 비밀번호는 보안상 기억하지 않으므로 늘 보인다 — 세션 만료 시 로그인에 필요하고, 발급·
-                    // 갱신 버튼(canSelfUpdate)도 이 값을 요구한다.
-                    labeled("비밀번호 (앱 암호 권장)") {
-                        SecureField("••••••••", text: $password)
+                        // 비밀번호도 계정 편집 안에 둔다 — 접으면 함께 숨는다(요청). 저장된 값(PasswordStore)은
+                        // 자동으로 쓰이므로 접힌 상태에서도 '지금 갱신'이 된다.
+                        labeled("비밀번호 (앱 암호 권장)") {
+                            SecureField("••••••••", text: $password)
+                        }
+                        // 확장 상태를 요약 뷰로 되돌리는 '접기'(요청). 계정 기록이 있을 때만 의미 있다.
+                        if accountKnown {
+                            Button("접기") { editingAccount = false }
+                                .font(.footnote.weight(.semibold)).foregroundColor(.accent)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                        }
                     }
 
                     // "인증서 발급"은 계정 설정·변경용이다 — 이미 발급받은 계정이 있고 변경 중이 아니면
@@ -608,56 +614,19 @@ struct ResignView: View {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
                     }
 
-                    // ④ 설치 연결 테스트 — RP 페어링 + LocalDevVPN으로 rppairing 터널을 세워 터널 안
-                    // RSD(설치 서비스)에 붙는지 확인(설치의 전제). idevice_pair로 RP 페어링을 1회 발급.
+                    // 설치엔 RP 페어링과 LocalDevVPN(별도 앱, 루프백 VPN)이 필요하다. 연결 테스트 UI는 제거하고
+                    // (요청), 페어링이 **없을 때만** 가져오기를 보인다. 터널 주소는 기본 10.7.0.1(probeAddr) 사용.
                     Divider().background(Color.toolbar)
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("④ 설치 연결 테스트 (실험)").font(.caption).foregroundColor(.muted)
-                        HStack(spacing: 8) {
-                            Image(systemName: model.hasPairing ? "checkmark.seal.fill" : "doc.badge.plus")
-                                .foregroundColor(model.hasPairing ? .accent : .muted)
-                            Text(model.hasPairing ? "RP 페어링 있음" : "RP 페어링 없음 (idevice_pair 발급)")
-                                .font(.footnote).foregroundColor(.onSurface)
-                            Spacer()
-                            Button(model.hasPairing ? "교체" : "가져오기") { showPairingPicker = true }
-                                .font(.footnote.weight(.semibold)).foregroundColor(.accent)
-                        }
-                        // 터널 주소도 기억되므로 접어 두고 "변경"으로만 편다.
-                        if !editingTunnel {
-                            HStack {
-                                Text("터널 주소: \(probeAddr)")
-                                    .font(.footnote).foregroundColor(.onSurface)
+                    VStack(alignment: .leading, spacing: 10) {
+                        if !model.hasPairing {
+                            HStack(spacing: 8) {
+                                Image(systemName: "doc.badge.plus").foregroundColor(.muted)
+                                Text("설치용 RP 페어링 파일 필요").font(.footnote).foregroundColor(.onSurface)
                                 Spacer()
-                                Button("변경") { editingTunnel = true }
+                                Button("가져오기") { showPairingPicker = true }
                                     .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                             }
-                        } else {
-                            labeled("터널 주소 (LocalDevVPN 기본 10.7.0.1)") {
-                                TextField("10.7.0.1", text: $probeAddr)
-                                    .keyboardType(.numbersAndPunctuation)
-                                    .disableAutocorrection(true)
-                            }
                         }
-                        // RSD(iOS 17+) 연결 테스트 — iOS 26의 진짜 경로. rppairing 터널(TCP→RemotePairing
-                        // →TLS-PSK→jktcp 어댑터)을 세우고 터널 안 RSD 서비스 목록을 확인. RP 페어링 필요.
-                        // 한 번 통과하면 끝이므로, 페어링이 있고 터널을 바꾸는 중이 아니면 숨긴다(사용자
-                        // 지적: 연결 테스트는 끝난 것). 터널 변경(editingTunnel) 때나 페어링 전에만 보인다.
-                        if editingTunnel || !model.hasPairing {
-                            Button {
-                                model.rsdProbe(addr: probeAddr)
-                            } label: {
-                                Text(model.running ? "확인 중..." : "연결 테스트 (RSD)")
-                                    .font(.body.weight(.semibold))
-                                    .frame(maxWidth: .infinity).padding(.vertical, 10)
-                                    .background(model.hasPairing && !model.running ? Color.accent : Color.toolbar)
-                                    .foregroundColor(model.hasPairing && !model.running ? .onAccent : .muted)
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                            }
-                            .disabled(!model.hasPairing || model.running)
-                            Text("LocalDevVPN 켜고 누르세요. 로그의 ‘터널 안 서비스’에 installation_proxy가 보이면 설치 준비 완료. 페어링은 idevice_pair로 만든 RP 페어링이어야 합니다(classic .mobiledevicepairing은 안 됨).")
-                                .font(.caption2).foregroundColor(.muted)
-                        }
-
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
                             PasswordStore.save(password, for: email)
@@ -665,13 +634,13 @@ struct ResignView: View {
                         } label: {
                             Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
                                 .font(.body.weight(.semibold))
-                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                                .frame(maxWidth: .infinity).padding(.vertical, 12)
                                 .background(canSelfUpdate ? Color.accent : Color.toolbar)
                                 .foregroundColor(canSelfUpdate ? .onAccent : .muted)
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .disabled(!canSelfUpdate)
-                        Text("위 Apple ID로 발급 → 자기 자신 재서명 → 설치까지. LocalDevVPN 켜고 페어링·비밀번호 필요. 끝나면 앱을 다시 여세요.")
+                        Text("LocalDevVPN을 켜고 눌러 주세요 — 발급 → 자기 재서명 → 설치까지 자동. 끝나면 앱을 다시 여세요.")
                             .font(.caption2).foregroundColor(.muted)
                     }
                     .fileImporter(isPresented: $showPairingPicker, allowedContentTypes: [.item]) { result in
