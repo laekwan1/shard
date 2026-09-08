@@ -17,6 +17,8 @@ on:
 jobs:
   build:
     runs-on: macos-latest
+    permissions:
+      contents: write   # 자체 업데이트 채널: 미서명 ipa+마커를 GitHub Release에 올리려면 필요
     steps:
       - uses: actions/checkout@v4
 
@@ -131,32 +133,25 @@ jobs:
           name: Shard-unsigned-ipa
           path: ios/build/Shard-unsigned.ipa
 
-      # 자체 업데이트(2단계) 발행: 미서명 ipa를 Veil 박스에 올리고 마커(<버전>\n<ipa URL>)를 갱신한다.
-      # 폰의 checkForUpdate가 이 마커를 보고 새 버전이면 받아 재서명·설치한다.
-      # ⚠️ 저장소가 PUBLIC이라 SSH 키·서버 주소는 **절대 커밋하지 않는다** — GitHub Actions 시크릿으로만
-      #    넣는다(ANISETTE_URL과 같은 방식). 시크릿이 없으면 이 스텝은 조용히 건너뛴다(아티팩트는 이미 올림).
-      #    등록할 시크릿: VEIL_SSH_KEY(개인키 PEM 전체), VEIL_HOST(user@host), VEIL_DIR(원격 서빙 폴더),
-      #    VEIL_IPA_URL(폰이 받는 공개 베이스 URL), 선택 VEIL_PORT(기본 22).
-      - name: Publish to Veil (self-update channel)
+      # 자체 업데이트(2단계) 발행: 미서명 ipa + 마커를 **고정 태그 GitHub Release(selfupdate)**에 올린다.
+      # 폰의 checkForUpdate가 마커(<버전>\n<ipa URL>)를 보고 새 버전이면 받아 사용자 인증서로 재서명·설치한다.
+      # 시크릿·서버 설정 불필요(내장 토큰). 마커·ipa URL이 공개·고정이라 앱에 하드코딩돼 폰 설정도 없다.
+      # ⚠️ 저장소를 PRIVATE으로 바꾸면 릴리스 다운로드에 인증이 필요해진다 — 그땐 앱에 읽기 토큰을 심고
+      #    checkForUpdate를 GitHub API+토큰으로 바꿔야 한다(지금은 PUBLIC 전제).
+      - name: Publish to GitHub Release (self-update channel)
         env:
-          VEIL_SSH_KEY: ${{ secrets.VEIL_SSH_KEY }}
-          VEIL_HOST: ${{ secrets.VEIL_HOST }}
-          VEIL_DIR: ${{ secrets.VEIL_DIR }}
-          VEIL_IPA_URL: ${{ secrets.VEIL_IPA_URL }}
-          VEIL_PORT: ${{ secrets.VEIL_PORT }}
+          GH_TOKEN: ${{ github.token }}
           VER: ${{ github.run_number }}
+          REPO: ${{ github.repository }}
         run: |
-          if [ -z "$VEIL_SSH_KEY" ] || [ -z "$VEIL_HOST" ] || [ -z "$VEIL_DIR" ] || [ -z "$VEIL_IPA_URL" ]; then
-            echo "VEIL_* 시크릿 미설정 — 자체 업데이트 발행 건너뜀(아티팩트는 이미 업로드됨)."
-            exit 0
-          fi
-          printf '%s\n' "$VEIL_SSH_KEY" > "$HOME/veil_key" && chmod 600 "$HOME/veil_key"
-          PORT="${VEIL_PORT:-22}"
-          OPTS="-i $HOME/veil_key -P $PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
-          REMOTE_IPA="shard-$VER.ipa"
-          scp $OPTS ios/build/Shard-unsigned.ipa "$VEIL_HOST:$VEIL_DIR/$REMOTE_IPA"
-          printf '%s\n%s\n' "$VER" "$VEIL_IPA_URL/$REMOTE_IPA" > marker.txt
-          scp $OPTS marker.txt "$VEIL_HOST:$VEIL_DIR/shard-latest.txt"
-          rm -f "$HOME/veil_key"
-          echo "자체 업데이트 발행 완료: v$VER → $VEIL_IPA_URL/$REMOTE_IPA"
+          TAG=selfupdate
+          IPA=ios/build/Shard-unsigned.ipa
+          IPA_URL="https://github.com/$REPO/releases/download/$TAG/Shard-unsigned.ipa"
+          printf '%s\n%s\n' "$VER" "$IPA_URL" > marker.txt
+          # 고정 태그 릴리스를 만들거나(최초) 자산을 교체(clobber). prerelease라 "latest"를 안 가린다.
+          gh release view "$TAG" >/dev/null 2>&1 \
+            || gh release create "$TAG" --title "Self-update channel" --prerelease \
+                 --notes "자동 자체 업데이트 — 미서명 ipa. 폰이 사용자 인증서로 재서명·설치."
+          gh release upload "$TAG" "$IPA" marker.txt --clobber
+          echo "자체 업데이트 발행: v$VER → $IPA_URL"
           if-no-files-found: error

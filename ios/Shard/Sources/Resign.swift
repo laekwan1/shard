@@ -174,6 +174,9 @@ final class ResignModel: ObservableObject {
     // 이번 실행에서 자동 갱신을 이미 시작했으면 true — scenePhase가 .active로 여러 번 와도 반복 안 되게.
     // (실행 중인 앱은 새 서명이 적용되기 전까지 옛 만료일을 계속 읽으므로 안 그러면 매번 재시도한다.)
     private var autoRenewStarted = false
+    // 자체 업데이트도 마찬가지 — 설치 후 콜드런치 전까지 실행 중 앱은 옛 CFBundleVersion을 계속 읽어
+    // 마커 버전이 계속 커 보이므로, 한 번 시작하면 이번 실행에선 다시 안 하게 막는다.
+    private var selfUpdateStarted = false
 
     private let tfaSem = DispatchSemaphore(value: 0)
     private var tfaCode = ""
@@ -513,11 +516,17 @@ final class ResignModel: ObservableObject {
     /// 보다 크면 받아 적용(코드까지 갱신, in-place라 데이터 보존). **update_url.txt가 없으면(인프라 미설정)
     /// 조용히 넘어간다** — 켜기 전엔 아무 일도 안 한다. 서명·설치는 무인 계정으로, 완료 시 재시작 팝업.
     func checkForUpdate() async {
-        guard !running, hasPairing, savedRenewInputs() != nil else { return }
-        let urlFile = URL(fileURLWithPath: stateDir).appendingPathComponent("update_url.txt")
-        guard let markerStr = (try? String(contentsOf: urlFile))?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-              markerStr.hasPrefix("http"), let markerURL = URL(string: markerStr),
+        guard !selfUpdateStarted, !running, hasPairing, savedRenewInputs() != nil else { return }
+        // 마커 URL은 **앱에 내장**된 GitHub Release 고정 URL — 폰에 아무것도 입력할 필요 없다(사용자 요청).
+        // state_dir/update_url.txt가 있으면 그걸로 덮는다(다른 채널로 바꿀 때만). 저장소가 PUBLIC이라 인증
+        // 없이 받아진다(PRIVATE 전환 시엔 이 URL을 API+내장 토큰 방식으로 바꿔야 함).
+        let overrideFile = URL(fileURLWithPath: stateDir).appendingPathComponent("update_url.txt")
+        let override = (try? String(contentsOf: overrideFile))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let markerStr = (override?.hasPrefix("http") == true)
+            ? override!
+            : "https://github.com/laekwan1/shard/releases/download/selfupdate/marker.txt"
+        guard let markerURL = URL(string: markerStr),
               let (data, resp) = try? await URLSession.shared.data(from: markerURL),
               (resp as? HTTPURLResponse)?.statusCode == 200,
               let text = String(data: data, encoding: .utf8) else { return }
@@ -535,7 +544,11 @@ final class ResignModel: ObservableObject {
                                                  withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: dest)
         guard (try? FileManager.default.moveItem(at: tmp, to: dest)) != nil else { return }
-        await MainActor.run { self.selfUpdateFromDownloaded(ipaPath: dest.path) }
+        await MainActor.run {
+            guard !self.selfUpdateStarted, !self.running else { return }
+            self.selfUpdateStarted = true   // 이번 실행에선 더 안 함(콜드런치 전 옛 버전 반복 방지)
+            self.selfUpdateFromDownloaded(ipaPath: dest.path)
+        }
     }
 
     /// 만료 하루 전으로 로컬 알림을 예약한다(요청: 1일 남으면 알림). 앱이 닫혀 있어도 떠서 열어 재서명하게
