@@ -148,6 +148,9 @@ final class ResignModel: ObservableObject {
     @Published var summary: String?
     @Published var errorText: String?
     @Published var needs2FA = false
+    // '지금 갱신'으로 설치 명령을 보낸 뒤 재시작 안내 팝업을 띄우는 신호(요청). selfUpdate가 모델
+    // 메서드라 여기(모델)에 둔다 — View의 @State면 모델에서 못 건드린다.
+    @Published var showRestartAlert = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
     @Published var accounts: [SignedAccount] = SignedAccountStore.load()
 
@@ -504,8 +507,6 @@ struct ResignView: View {
     // now가 흐르면서 남은 시간이 매초 줄어드는 걸 화면이 그린다.
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-    // '지금 갱신'으로 설치 명령을 보낸 뒤 재시작 안내 팝업(요청) — 확인 시 exit(0).
-    @State private var showRestartAlert = false
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -683,7 +684,7 @@ struct ResignView: View {
         .onTapGesture { hideKeyboard() }
         // 재시작 안내(요청): '지금 갱신'으로 설치 명령을 보낸 뒤 뜬다. 확인 → 앱 종료(다음 실행 때 새 번들
         // 적용). iOS는 앱이 스스로 다시 실행하는 걸 막으므로 종료까지만 하고 재실행은 사용자가 한다.
-        .alert("앱을 다시 시작해 주세요", isPresented: $showRestartAlert) {
+        .alert("앱을 다시 시작해 주세요", isPresented: $model.showRestartAlert) {
             Button("종료하고 다시 열기") { exit(0) }
             Button("나중에", role: .cancel) { }
         } message: {
