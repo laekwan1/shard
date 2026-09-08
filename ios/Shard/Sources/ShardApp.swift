@@ -71,6 +71,22 @@ struct RootView: View {
                 }
                 .offset(x: showLibrary ? 0 : geo.size.width + geo.safeAreaInsets.trailing)
                 .zIndex(1)
+
+                // 자동(포그라운드) 재서명이 도는 동안 스피너 — '재서명 필요' 확인 ~ '앱을 다시 시작해 주세요'
+                // 사이(요청). 진행 중임을 알려 그 사이 백그라운드로 가지 않게 한다(가면 재서명이 끊길 수 있음).
+                // 수동(시트)은 자체 버튼 표시가 있으니 여기선 자동(shared.running)만 덮는다.
+                if autoResign.running {
+                    ZStack {
+                        Color.black.opacity(0.45).ignoresSafeArea()
+                        VStack(spacing: 12) {
+                            ProgressView().scaleEffect(1.4).tint(.white)
+                            Text("재서명 중…").font(.callout).foregroundColor(.white)
+                        }
+                        .padding(24)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .zIndex(20)
+                }
             }
         }
         .tint(.accent)

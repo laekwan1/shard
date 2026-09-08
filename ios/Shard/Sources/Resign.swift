@@ -356,7 +356,12 @@ final class ResignModel: ObservableObject {
         let sd = stateDir
         let work = URL(fileURLWithPath: sd).appendingPathComponent("work").path
         let pairingPath = pairingURL.path
+        // 재서명 도중 사용자가 백그라운드로 내려도 iOS가 앱을 바로 재우지 않게 background task 시간을 얻는다
+        // (요청: 확인하고 내리면 백그라운드로 이어서 재서명). ~30초 — 로그인·서명·설치가 그 안에 끝나면 백그라운드
+        // 로 가도 스테이징까지 완료된다. main에서 얻고, async가 끝나거나 시간이 다하면 놓아준다.
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "resign")
         DispatchQueue.global(qos: .userInitiated).async {
+            defer { if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } } }
             // 0) VPN 선확인(요청): 꺼져 있으면 아래 rppairing ①이 10초를 매달렸다 실패하니, 그 전에 짧게 찔러
             //    보고 "LocalDevVPN을 켜주세요"만 버튼 아래 띄우고 조용히 멈춘다. 켜져 있으면 바로 진행.
             if !self.vpnReachable(addr, port: 49152) {
