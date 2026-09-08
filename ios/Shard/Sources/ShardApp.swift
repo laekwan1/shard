@@ -19,6 +19,9 @@ struct RootView: View {
     // One player for the whole app, owned here — so it is never duplicated when
     // the library view comes and goes, which was stacking playback.
     @StateObject private var player = VLCController()
+    // 자동 재서명 공유 인스턴스를 **관찰**한다 — 포그라운드 '재서명 필요' 알림창과 자동 재서명 완료 후
+    // '재시작' 팝업을 시트가 닫힌 상태에서도 루트에서 띄우려면 여기서 바인딩해야 한다.
+    @ObservedObject private var autoResign = ResignModel.shared
     @State private var showLibrary = false
     // 앱이 실제로 OS 백그라운드(홈 버튼·잠금)로 들어가는 순간을 잡으려는 것. 오디오 세션이 .playback +
     // audio 백그라운드 모드라, 아무 처리도 안 하면 '백그라운드 재생'이 꺼져 있어도 계속 재생된다(사용자 지적).
@@ -80,12 +83,25 @@ struct RootView: View {
             if phase == .background && !prefs.background {
                 player.stop()
             }
-            // 활성화(콜드런치·포그라운드 복귀) 때: 만료 임박 + 새벽 4-6시(또는 ≤1일 급함)면 조용히 자동
-            // 재서명(팝업 없이 · 다음 콜드런치에 적용 · VPN 켜짐/재생 안 함/하루 1회). 새벽 시간대에 앱을
-            // 여는 경우를 잡고, 앱을 안 여는 경우는 AppDelegate의 BGProcessingTask가 새벽에 시도한다.
+            // 활성화(콜드런치·포그라운드 복귀) 때: 포그라운드는 만료 급할 때(≤1일) '재서명 필요' 알림창을
+            // 띄우고, 정기 갱신은 새벽 BGTask가 조용히 한다. 그리고 만료 하루 전 로컬 알림을 (재)예약해
+            // 앱을 안 열어도 알림이 오게 한다.
             if phase == .active {
-                ResignModel.shared.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)
+                autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)
+                autoResign.scheduleExpiryReminder()
             }
+        }
+        // 포그라운드 만료 임박 '재서명 필요' 알림창(요청): 확인만, 누르면 저장된 계정으로 재서명 시작 →
+        // 완료 시 아래 '재시작' 팝업이 뜬다. 자동 재서명은 시트가 닫혀 있어도 떠야 하므로 루트에 둔다.
+        .alert("재서명이 필요합니다", isPresented: $autoResign.showRenewPrompt) {
+            Button("확인") { autoResign.confirmRenew() }
+        } message: {
+            Text("서명 만료가 임박했습니다. LocalDevVPN을 켠 뒤 확인을 누르면 지금 재서명합니다.")
+        }
+        // 자동(포그라운드) 재서명이 스테이징을 마치면 뜨는 재시작 팝업 — 수동 재서명의 것(시트)과 별개로,
+        // 자동은 공유 인스턴스라 여기 루트에 바인딩해야 뜬다. 확인 → 종료(다음 실행 때 새 서명 적용).
+        .alert("앱을 다시 시작해 주세요", isPresented: $autoResign.showRestartAlert) {
+            Button("확인") { exit(0) }
         }
     }
 }

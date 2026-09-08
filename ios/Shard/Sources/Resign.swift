@@ -148,6 +148,10 @@ final class ResignModel: ObservableObject {
     // 앱 수준 자동 재서명 전용 공유 인스턴스 — ShardApp(포그라운드)과 AppDelegate(BGProcessingTask, 새벽)이
     // 같은 걸 쓴다(시트의 인스턴스와는 별개). 하나만 두어야 running 플래그로 동시 서명이 안 겹친다.
     static let shared = ResignModel()
+    // ⚠️ 테스트 모드(사용자 요청): 갱신 임박 판정을 3일 → 6일23시간50분으로 낮추고(갓 서명 ~10분 뒤 발동),
+    // 포그라운드를 임박 즉시 발동, 쿨다운 2분, BGTask도 곧 예약. **확인되면 false로 되돌린다(운영: 3일·
+    // 포그라운드 ≤1일·BGTask 새벽4시).** AppDelegate도 이 값으로 BGTask 시각을 정하므로 static.
+    static let testRenew = true
     @Published var logLines: [String] = []
     @Published var running = false
     @Published var summary: String?
@@ -159,6 +163,9 @@ final class ResignModel: ObservableObject {
     // '재서명'으로 설치 명령을 보낸 뒤 재시작 안내 팝업을 띄우는 신호(요청). selfUpdate가 모델
     // 메서드라 여기(모델)에 둔다 — View의 @State면 모델에서 못 건드린다.
     @Published var showRestartAlert = false
+    // 포그라운드에서 만료 임박(≤1일) 시 "재서명 필요" 알림창을 띄우는 신호(요청). 확인 → confirmRenew().
+    // 자동 재서명은 시트가 닫힌 상태에서도 떠야 하므로 이 신호로 루트 뷰가 알림창을 띄운다.
+    @Published var showRenewPrompt = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
     @Published var accounts: [SignedAccount] = SignedAccountStore.load()
     // 자동(백그라운드) 갱신이 도는 동안 true — appendLog가 @@RESTART@@ 재시작 sentinel을 무시하게 해서
@@ -426,47 +433,74 @@ final class ResignModel: ObservableObject {
     func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false) {
         guard !autoRenewStarted, !running, hasPairing, nothingPlaying else { return }
         guard let exp = SigningInfo.expirationDate() else { return }
-        // ⚠️ 테스트 모드(사용자 요청): 갱신 임박 판정을 3일 → 6일23시간50분(604200s)으로 낮추고, 낮에도
-        // (새벽 4-6시 밖) 포그라운드에서 바로 발동하도록 시간 게이트를 끄고, 재테스트용으로 쿨다운을 2분으로
-        // 줄인다. 갓 서명(~7일)에서 ~10분 뒤 앱을 열면 자동 갱신이 도는지 확인용. **확인되면 false로 되돌린다.**
-        let TEST_RENEW = true
-        let threshold: TimeInterval = TEST_RENEW ? (6 * 86400 + 23 * 3600 + 50 * 60) : (3 * 86400)
-        let cooldown: TimeInterval = TEST_RENEW ? 120 : 24 * 3600
+        let test = Self.testRenew   // 테스트: 3일 → 6일23시간50분(갓 서명 ~10분 뒤 발동)
+        let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 50 * 60) : (3 * 86400)
         guard exp.timeIntervalSinceNow <= threshold else { return }   // 만료 임박 아님
-        // 선호 시간대: 새벽 4-6시(사용자 요청). 포그라운드 경로는 그 시간이 아니면 미루되, 만료가 급하면
-        // (≤1일) 시간과 무관하게 갱신한다(만료 방지). BGProcessingTask 경로(preferredWindowOnly=false)는
-        // 이미 새벽으로 예약돼 오므로 게이트를 안 건다. 테스트 모드는 언제든 발동.
-        if preferredWindowOnly && !TEST_RENEW {
-            let daysLeft = exp.timeIntervalSinceNow / 86400.0
-            let hour = Calendar.current.component(.hour, from: Date())
-            guard (4..<6).contains(hour) || daysLeft <= 1 else { return }
+
+        if !fromBackground {
+            // 포그라운드: 자동으로 서명하지 않고 **알림창으로 물어본다**(사용자: 1일 남으면 "재서명 필요" 알림 ·
+            // 확인 누르면 재서명/재설치). 정기 갱신은 새벽 BGTask가 조용히 하므로, 포그라운드는 그게 안 됐을
+            // 때의 안전망 — 급할 때(≤1일, 테스트는 즉시)만 뜬다. 무인 재서명할 계정+비번이 있어야 물어본다.
+            let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
+            guard urgent, savedRenewInputs() != nil else { return }
+            autoRenewStarted = true
+            showRenewPrompt = true
+            return
         }
+
+        // 백그라운드(BGTask): 팝업 없이 조용히 재서명한다. 하루 1회(테스트 2분), LocalDevVPN 켜짐일 때만.
         let key = "resign.lastAutoRenew"
         let last = UserDefaults.standard.double(forKey: key)
+        let cooldown: TimeInterval = test ? 120 : 24 * 3600
         if last > 0, Date().timeIntervalSince1970 - last < cooldown { return }
-        // 무인 서명엔 저장된 계정+비밀번호가 필요(silent 경로엔 2FA UI가 없다).
-        let email = !lastEmail.isEmpty ? lastEmail : (accounts.first?.email ?? "")
-        guard !email.isEmpty else { return }
-        let password = PasswordStore.load(for: email)
-        guard !password.isEmpty else { return }
-        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
-        // VPN 확인은 오프메인(1.5s). 켜져 있을 때만 진행하고 그때만 예산을 쓴다.
+        guard let inputs = savedRenewInputs() else { return }
+        let (email, password, addr) = inputs
         DispatchQueue.global(qos: .utility).async {
             guard self.vpnReachable(addr, port: 49152) else {
-                // 백그라운드(BGTask)에서 VPN이 꺼져 있으면 로컬 알림으로 알린다(요청). 포그라운드는 화면의
-                // 모래시계 앰버가 신호라 알림을 안 띄운다. 스탬프를 안 찍으므로 VPN 켜면 다음 시도에 갱신.
-                if fromBackground { self.notifyVpnOff() }
+                self.notifyVpnOff()   // 새벽에 VPN 꺼짐 → 로컬 알림(요청). 켜면 다음 시도에 갱신.
                 return
             }
             DispatchQueue.main.async {
                 guard !self.autoRenewStarted, !self.running else { return }
                 self.autoRenewStarted = true
                 UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
-                // 테스트 모드에선 silent=false로 — 재서명 완료 시 "앱을 다시 시작해 주세요" 팝업이 떠서
-                // 자동 갱신이 실제로 발동·완료됐는지 눈으로 확인된다. 운영(TEST_RENEW=false)은 조용히(silent).
-                self.selfUpdate(email: email, password: password, addr: addr, silent: !TEST_RENEW)
+                self.selfUpdate(email: email, password: password, addr: addr, silent: true)
             }
         }
+    }
+
+    /// 저장된 계정+비번+터널주소(무인 재서명 입력). 없으면 nil — 그러면 자동 재서명을 안 한다.
+    private func savedRenewInputs() -> (String, String, String)? {
+        let email = !lastEmail.isEmpty ? lastEmail : (accounts.first?.email ?? "")
+        guard !email.isEmpty else { return nil }
+        let password = PasswordStore.load(for: email)
+        guard !password.isEmpty else { return nil }
+        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
+        return (email, password, addr)
+    }
+
+    /// 포그라운드 '재서명 필요' 알림창의 '확인' — 저장된 계정으로 재서명을 시작한다. silent=false라 완료 시
+    /// '앱을 다시 시작해 주세요' 팝업이 떠(루트에 바인딩) 확인하면 종료·재설치된다.
+    func confirmRenew() {
+        showRenewPrompt = false
+        guard let (email, password, addr) = savedRenewInputs() else { return }
+        selfUpdate(email: email, password: password, addr: addr)
+    }
+
+    /// 만료 하루 전으로 로컬 알림을 예약한다(요청: 1일 남으면 알림). 앱이 닫혀 있어도 떠서 열어 재서명하게
+    /// 한다. 매 실행 때 고정 id로 다시 잡아 최신 만료일에 맞춘다. 권한이 없으면 iOS가 무시한다.
+    func scheduleExpiryReminder() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: ["shard.expiry"])
+        guard let exp = SigningInfo.expirationDate() else { return }
+        let fire = exp.addingTimeInterval(-86400)   // 만료 하루 전
+        guard fire > Date() else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "서명 갱신 필요"
+        content.body = "서명 만료가 하루 남았습니다. 앱을 열어 재서명해 주세요."
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        center.add(UNNotificationRequest(identifier: "shard.expiry", content: content, trigger: trigger))
     }
 
     /// 백그라운드 자동 갱신 시점에 LocalDevVPN이 꺼져 있으면 로컬 알림으로 알린다(요청). 소리는 안 넣어

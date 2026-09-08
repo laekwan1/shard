@@ -74,7 +74,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         let req = BGProcessingTaskRequest(identifier: Self.renewTaskID)
         req.requiresNetworkConnectivity = true
         req.requiresExternalPower = false
-        req.earliestBeginDate = Self.next4am()
+        // 테스트 모드: 다음 새벽 대신 곧(20초 뒤)로 잡아 백그라운드 자동 재서명을 바로 시험 가능하게 한다.
+        // 실제 실행 시각은 iOS가 정하므로 즉시는 아니고 대개 앱 백그라운드 후 몇 분 안. 운영: 다음 새벽 4시.
+        req.earliestBeginDate = ResignModel.testRenew ? Date(timeIntervalSinceNow: 20) : Self.next4am()
         try? BGTaskScheduler.shared.submit(req)
     }
 
