@@ -904,7 +904,9 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let mut offer = Offer::parse(offer_json)?;
     // InnerTube의 상위 화질(최대 2160p)을 목록에 합친다 — MWEB은 ≤720p만 나열하므로, 안 하면 4K가
     // 메뉴에 아예 안 뜬다. 실패하면 offer는 그대로라 ≤720p만 보인다(퇴행 없음).
-    let diag = enrich_with_innertube(&mut offer);
+    // InnerTube 확장 결과는 로그로만 남긴다(기기 확인 끝나 UI 진단은 뗌 — "IT+1/35"처럼 MWEB이 이미
+    // 대부분 갖고 있고 60fps 묶음 수정이 진짜 해결이었음).
+    tracing::info!("youtube_qualities: {}", enrich_with_innertube(&mut offer));
     // portable=true so the "음악만 저장" row shows the AAC (.m4a) track that
     // run_youtube will actually take — iOS plays .m4a through AVPlayer (clean over
     // Bluetooth), unlike Opus/libVLC. The label's codec/bitrate then match the file.
@@ -913,9 +915,7 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     if let Some(audio) = offer.best_audio(&wish) {
         rows.push((
             MUSIC_ITAG,
-            // 진단(임시): InnerTube가 기기에서 실제로 돌았는지 보이게 음악 행에 붙인다. 2160p가
-            // 확인되면 뗀다. 예: "음악 (IT+7/39)" = 받은 39개 중 새로 7개 추가, "IT:novid"·"IT:err".
-            format!("음악 ({diag})"),
+            "음악".to_string(),
             format!("{} · {} {}k", human(audio.size()), audio.codec(), audio.bitrate / 1000),
         ));
     }
@@ -953,20 +953,24 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
         if h == 0 { continue; }
         let is60 = video.quality.ends_with("60");
         let codec = video.codec();
-        let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
+        // 라벨은 해상도만("1080p"/"2160p60"). 코덱은 음악 행처럼 아래 용량 줄에 붙인다(사용자 요청):
+        // "45.2 MB · AV1". 코덱이 비면 용량만.
+        let label = video.quality.clone();
+        let size = size_of(video, audio_for(codec));
+        let detail = if codec.is_empty() { size } else { format!("{size} · {codec}") };
         if !order.contains(&h) { order.push(h); }
         let better = match best.get(&h) {
             None => true,
             Some((b_is60, b_cr, ..)) => if *b_is60 != is60 { !is60 } else { codec_rank(codec) < *b_cr },
         };
         if better {
-            best.insert(h, (is60, codec_rank(codec), video.itag, label, size_of(video, audio_for(codec))));
+            best.insert(h, (is60, codec_rank(codec), video.itag, label, detail));
         }
     }
     order.sort_by(|a, b| b.cmp(a)); // highest resolution first
     for h in &order {
-        if let Some((_, _, itag, label, size)) = best.get(h) {
-            rows.push((*itag, label.clone(), size.clone()));
+        if let Some((_, _, itag, label, detail)) = best.get(h) {
+            rows.push((*itag, label.clone(), detail.clone()));
         }
     }
     Ok(rows)
