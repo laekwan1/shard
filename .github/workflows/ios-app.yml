@@ -102,6 +102,8 @@ jobs:
       # than embedding any certificate here.
       - name: Build the app for a device (unsigned)
         run: |
+          # 자체 업데이트(2단계)용 단조증가 버전 — CFBundleVersion=$(CURRENT_PROJECT_VERSION)이라 빌드번호를
+          # 넣으면 앱이 마커의 버전과 비교할 수 있다. project.yml의 "1"을 여기서 덮는다.
           xcodebuild \
             -workspace ios/Shard.xcworkspace \
             -scheme Shard \
@@ -109,6 +111,7 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath ios/build/dd \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
@@ -127,4 +130,33 @@ jobs:
         with:
           name: Shard-unsigned-ipa
           path: ios/build/Shard-unsigned.ipa
+
+      # 자체 업데이트(2단계) 발행: 미서명 ipa를 Veil 박스에 올리고 마커(<버전>\n<ipa URL>)를 갱신한다.
+      # 폰의 checkForUpdate가 이 마커를 보고 새 버전이면 받아 재서명·설치한다.
+      # ⚠️ 저장소가 PUBLIC이라 SSH 키·서버 주소는 **절대 커밋하지 않는다** — GitHub Actions 시크릿으로만
+      #    넣는다(ANISETTE_URL과 같은 방식). 시크릿이 없으면 이 스텝은 조용히 건너뛴다(아티팩트는 이미 올림).
+      #    등록할 시크릿: VEIL_SSH_KEY(개인키 PEM 전체), VEIL_HOST(user@host), VEIL_DIR(원격 서빙 폴더),
+      #    VEIL_IPA_URL(폰이 받는 공개 베이스 URL), 선택 VEIL_PORT(기본 22).
+      - name: Publish to Veil (self-update channel)
+        env:
+          VEIL_SSH_KEY: ${{ secrets.VEIL_SSH_KEY }}
+          VEIL_HOST: ${{ secrets.VEIL_HOST }}
+          VEIL_DIR: ${{ secrets.VEIL_DIR }}
+          VEIL_IPA_URL: ${{ secrets.VEIL_IPA_URL }}
+          VEIL_PORT: ${{ secrets.VEIL_PORT }}
+          VER: ${{ github.run_number }}
+        run: |
+          if [ -z "$VEIL_SSH_KEY" ] || [ -z "$VEIL_HOST" ] || [ -z "$VEIL_DIR" ] || [ -z "$VEIL_IPA_URL" ]; then
+            echo "VEIL_* 시크릿 미설정 — 자체 업데이트 발행 건너뜀(아티팩트는 이미 업로드됨)."
+            exit 0
+          fi
+          printf '%s\n' "$VEIL_SSH_KEY" > "$HOME/veil_key" && chmod 600 "$HOME/veil_key"
+          PORT="${VEIL_PORT:-22}"
+          OPTS="-i $HOME/veil_key -P $PORT -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          REMOTE_IPA="shard-$VER.ipa"
+          scp $OPTS ios/build/Shard-unsigned.ipa "$VEIL_HOST:$VEIL_DIR/$REMOTE_IPA"
+          printf '%s\n%s\n' "$VER" "$VEIL_IPA_URL/$REMOTE_IPA" > marker.txt
+          scp $OPTS marker.txt "$VEIL_HOST:$VEIL_DIR/shard-latest.txt"
+          rm -f "$HOME/veil_key"
+          echo "자체 업데이트 발행 완료: v$VER → $VEIL_IPA_URL/$REMOTE_IPA"
           if-no-files-found: error
