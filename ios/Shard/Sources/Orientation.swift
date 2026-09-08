@@ -1,5 +1,6 @@
 import SwiftUI
 import BackgroundTasks  // 새벽 자동 재서명(BGProcessingTask) 등록·예약
+import UserNotifications  // 백그라운드 갱신 때 VPN 꺼짐 알림 권한 요청
 
 /// The one place the app's allowed orientations live. The rotate button and the
 /// full-screen player set this; the app delegate reports it to the system.
@@ -61,6 +62,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             self.handleRenew(task as! BGProcessingTask)
         }
         scheduleRenew()
+        // 백그라운드 갱신 때 VPN 꺼짐을 알리려면 알림 권한이 필요하다(요청). 소리는 안 쓰므로 .alert만.
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
         return true
     }
 
@@ -91,7 +94,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         task.expirationHandler = { }   // iOS가 회수하면 그대로 둔다(스테이징까지 갔으면 다음 콜드런치에 적용)
         // 새벽으로 예약돼 오므로 시간 게이트 없이 시도(preferredWindowOnly=false). 백그라운드라 재생 없음으로 본다.
         DispatchQueue.main.async {
-            ResignModel.shared.autoRenewIfNeeded(nothingPlaying: true, preferredWindowOnly: false)
+            ResignModel.shared.autoRenewIfNeeded(nothingPlaying: true, preferredWindowOnly: false, fromBackground: true)
         }
         // 재서명(터널·서명·설치명령)이 끝날 때까지 작업을 잡아 둔다 — 안 그러면 완료 처리 뒤 iOS가 앱을
         // 재우며 진행 중인 서명을 죽인다. running이 내려가거나 최대 150초까지. (VPN 꺼짐이면 running이
