@@ -2,8 +2,10 @@ import SwiftUI
 import UIKit  // UIApplication/UIResponder — 키보드 내리기(hideKeyboard). SwiftUI가 늘 재노출하진 않음.
 import UniformTypeIdentifiers
 import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
-import Network  // NWConnection — '재서명' 누를 때 LocalDevVPN(루프백) 살았는지 빠르게 선확인
 import UserNotifications  // 백그라운드 자동 갱신 때 VPN 꺼짐 로컬 알림
+// VPN 선확인은 Darwin 원시 소켓(socket/connect/poll)으로 한다 — 실제 설치 ①(TcpStream::connect)과 같은
+// 커널 경로라 "install이 붙는 상황"과 정확히 일치. 예전 NWConnection(Network 프레임워크)은 로컬 터널에
+// 불안정해(1.5초 .ready 못 받음) 켜져 있어도 "꺼짐"으로 오판했다 — 그래서 Network import를 뺐다.
 
 // 현재 앱 서명의 남은 유효기간. 앱 번들의 `embedded.mobileprovision`(현재 서명한 도구가 넣은 것 —
 // 지금은 SideStore/Sideloadly, 나중엔 우리 엔진)의 ExpirationDate를 읽는다. 모래시계가 이 값을 담는다.
@@ -651,58 +653,42 @@ final class ResignModel: ObservableObject {
         DispatchQueue.main.async { self.logLines.append(line) }
     }
 
-    /// LocalDevVPN(루프백 10.7.0.x)이 살아 있는지 확인한다. **먼저 네트워크 인터페이스를 본다**: StosVPN이
-    /// 켜지면 utun 인터페이스에 10.7.0.x 주소를 얹으므로 getifaddrs로 그 주소가 있으면 VPN이 켜진 것이다
-    /// (즉시·확실). 예전엔 10.7.0.1:49152에 NWConnection을 1.5초 안에 .ready 못 받아 **VPN이 켜져 있는데도
-    /// "꺼짐"으로 오판**했다(사용자 지적: "vpn 연결되어있는데도 켜달라고 뜬다") — RemotePairing 엔드포인트가
-    /// bare TCP 핸드셰이크를 곧바로 안 받아 주는 탓. 인터페이스에 없으면(라우트만 있는 드문 경우) TCP로 폴백.
-    func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 1.5) -> Bool {
-        if hasTunnelInterface(forAddr: addr) { return true }
-        return tcpReachable(addr, port: port, timeout: timeout)
-    }
-
-    /// addr과 같은 /24(앞 세 옥텟) 대역의 IPv4 주소를 얹은 **활성** 인터페이스가 있으면 true. StosVPN이
-    /// 켜지면 utun에 그 대역을 얹으므로 이걸로 "VPN 켜짐"을 즉시 판별한다(오판 없음).
-    private func hasTunnelInterface(forAddr addr: String) -> Bool {
-        let octets = addr.split(separator: ".")
-        guard octets.count >= 3 else { return false }
-        let prefix = octets[0...2].joined(separator: ".") + "."   // "10.7.0."
-        var ifaddr: UnsafeMutablePointer<ifaddrs>?
-        guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return false }
-        defer { freeifaddrs(ifaddr) }
-        var cur: UnsafeMutablePointer<ifaddrs>? = first
-        while let c = cur {
-            defer { cur = c.pointee.ifa_next }
-            guard (c.pointee.ifa_flags & UInt32(IFF_UP)) != 0,
-                  let sa = c.pointee.ifa_addr,
-                  sa.pointee.sa_family == UInt8(AF_INET) else { continue }
-            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count),
-                           nil, 0, NI_NUMERICHOST) == 0,
-               String(cString: host).hasPrefix(prefix) {
-                return true
+    /// LocalDevVPN(루프백 10.7.0.1 → 기기 RemotePairing 49152)이 실제로 닿는지 **원시 BSD 소켓 connect**로
+    /// 확인한다. 두 번 헛짚었다: ⓐ NWConnection으로 1.5초 안에 .ready를 못 받아 켜져 있어도 "꺼짐"으로
+    /// 오판(경로 평가·happy-eyeballs 오버헤드로 로컬 터널에도 느리게 붙음), ⓑ getifaddrs로 utun에 10.7.0.x
+    /// 주소가 있나 봤더니 LocalDevVPN은 **라우트로만** 넘겨 인터페이스엔 그 주소가 없어 늘 false → 또 오판(사용자:
+    /// "vpn 켜주세요 계속 뜬다"). 결국 **실제 설치가 쓰는 것과 같은 원시 소켓 connect**가 정답이다 — 논블로킹
+    /// connect + poll(POLLOUT)로, 터널이 살아 있으면 SYN-ACK가 즉시 와 붙고(true), 꺼져 있으면 라우트가 없어
+    /// connect가 곧바로 실패한다(EINPROGRESS 아님 → false). 양방향 다 빠르고, Rust ①(TcpStream::connect)과
+    /// 같은 커널 경로라 install이 붙는 상황과 정확히 일치한다.
+    func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 3.0) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        // 논블로킹으로 두어야 timeout을 poll로 제어한다(블로킹 connect는 커널 기본 타임아웃까지 매달림).
+        let fl = fcntl(fd, F_GETFL, 0)
+        _ = fcntl(fd, F_SETFL, fl | O_NONBLOCK)
+        var sin = sockaddr_in()
+        sin.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        sin.sin_family = sa_family_t(AF_INET)
+        sin.sin_port = port.bigEndian
+        guard addr.withCString({ inet_pton(AF_INET, $0, &sin.sin_addr) }) == 1 else { return false }
+        let cres = withUnsafePointer(to: &sin) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        return false
-    }
-
-    /// 폴백 — addr:port로 TCP를 짧게 찔러 .ready면 켜짐으로 본다(인터페이스에서 못 잡은 드문 경우).
-    private func tcpReachable(_ addr: String, port: UInt16, timeout: TimeInterval) -> Bool {
-        guard let p = NWEndpoint.Port(rawValue: port) else { return false }
-        let conn = NWConnection(host: NWEndpoint.Host(addr), port: p, using: .tcp)
-        let sem = DispatchSemaphore(value: 0)
-        var ok = false
-        conn.stateUpdateHandler = { st in
-            switch st {
-            case .ready: ok = true; sem.signal()
-            case .failed, .cancelled: sem.signal()
-            default: break
-            }
+        if cres == 0 { return true } // 즉시 연결됨(드묾)
+        if errno != EINPROGRESS { return false } // 라우트 없음 등 → 즉시 실패 = VPN 꺼짐
+        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        guard poll(&pfd, 1, Int32(timeout * 1000)) > 0, (pfd.revents & Int16(POLLOUT)) != 0 else {
+            return false // 타임아웃/에러
         }
-        conn.start(queue: DispatchQueue.global(qos: .userInitiated))
-        _ = sem.wait(timeout: .now() + timeout)
-        conn.cancel()
-        return ok
+        // 쓰기 가능 = connect 종료. SO_ERROR가 0이어야 진짜 연결(0 아니면 RST 등 실패).
+        var serr: Int32 = 0
+        var slen = socklen_t(MemoryLayout<Int32>.size)
+        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &serr, &slen) == 0 else { return false }
+        return serr == 0
     }
 
     private func finish(_ json: String) {
