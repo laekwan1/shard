@@ -810,17 +810,28 @@ pub fn resign_selfupdate_blocking(
     tfa: &dyn Fn() -> String,
     log: &mut dyn FnMut(&str),
 ) -> Result<PathBuf> {
-    // 실행 중 번들을 미서명 .ipa(Payload/<app>)로 포장한다. 앱은 자기 번들을 읽을 수 있다.
-    log("자기 번들 포장 중(미서명 .ipa)...");
+    // 서명할 미서명 .ipa를 준비한다. 두 경로:
+    //  · **자기 재서명**(app_bundle = 실행 중 .app 폴더): 자기 번들을 Payload/<app> .ipa로 재포장.
+    //  · **자체 업데이트(2단계)**(app_bundle = Veil에서 받은 미서명 .ipa): 이미 ipa이므로 재포장을 건너뛰고
+    //    그대로 쓴다. 아래 발급→재서명(rewrite_bundle_identifier가 req.bundle_id로 맞춤)→설치는 동일 —
+    //    같은 번들ID면 in-place 업그레이드라 **코드는 새것, 데이터(다운로드 파일 등)는 보존**된다.
     fs::create_dir_all(&work_dir).context("작업 폴더 생성")?;
-    let unsigned_ipa = work_dir.join("self-unsigned.ipa");
-    let _ = fs::remove_file(&unsigned_ipa);
-    repackage_ipa(&app_bundle, &unsigned_ipa)
-        .map_err(|e| anyhow!("[포장] 자기 번들 .ipa 실패: {e:#}"))?;
-    log(&format!(
-        "포장 완료({} bytes). 발급→재서명→설치 진행...",
-        fs::metadata(&unsigned_ipa).map(|m| m.len()).unwrap_or(0)
-    ));
+    let unsigned_ipa = if app_bundle.extension().and_then(|e| e.to_str()) == Some("ipa") {
+        log("다운받은 미서명 .ipa 사용(재포장 생략) — 자체 업데이트.");
+        app_bundle
+    } else {
+        log("자기 번들 포장 중(미서명 .ipa)...");
+        let ipa = work_dir.join("self-unsigned.ipa");
+        let _ = fs::remove_file(&ipa);
+        repackage_ipa(&app_bundle, &ipa)
+            .map_err(|e| anyhow!("[포장] 자기 번들 .ipa 실패: {e:#}"))?;
+        log(&format!(
+            "포장 완료({} bytes).",
+            fs::metadata(&ipa).map(|m| m.len()).unwrap_or(0)
+        ));
+        ipa
+    };
+    log("발급→재서명→설치 진행...");
 
     let params = ResignAndInstall {
         req,

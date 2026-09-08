@@ -344,14 +344,18 @@ final class ResignModel: ObservableObject {
 
     /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, RSD(rppairing 터널)로
     /// 폰에 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
-    func selfUpdate(email: String, password: String, addr: String, silent: Bool = false) {
+    func selfUpdate(email: String, password: String, addr: String, silent: Bool = false,
+                    bundlePathOverride: String? = nil) {
         guard !running, hasPairing else { return }
         running = true
         silentRenew = silent   // appendLog가 이 값으로 재시작 팝업을 띄울지 결정
         logLines = []; summary = nil; errorText = nil; notice = nil
         lastEmail = email
         let ctx = Unmanaged.passUnretained(self).toOpaque()
-        let bundlePath = Bundle.main.bundlePath
+        // 기본은 실행 중 번들(자기 재서명). **자체 업데이트(2단계)**면 Veil에서 받은 미서명 .ipa 경로를 넘긴다 —
+        // Rust resign_selfupdate_blocking이 .ipa면 재포장을 건너뛰고, 같은 번들ID로 서명해 in-place 업그레이드
+        // (코드 새것·데이터 보존)한다.
+        let bundlePath = bundlePathOverride ?? Bundle.main.bundlePath
         let bundleId = Bundle.main.bundleIdentifier ?? "net.sw.shard"
         let sd = stateDir
         let work = URL(fileURLWithPath: sd).appendingPathComponent("work").path
@@ -494,6 +498,44 @@ final class ResignModel: ObservableObject {
         showRenewPrompt = false
         guard let (email, password, addr) = savedRenewInputs() else { return }
         selfUpdate(email: email, password: password, addr: addr)
+    }
+
+    /// 2단계 자체 업데이트: SelfUpdate가 Veil에서 받은 **미서명 ipa**를 사용자 인증서로 재서명·설치한다.
+    /// 실행 중 번들 대신 이 ipa를 넘겨(bundlePathOverride) 코드까지 갱신하고, 같은 번들ID라 in-place
+    /// 업그레이드(데이터 보존). 저장된 계정으로 무인 진행, silent=false라 완료 시 재시작 팝업.
+    func selfUpdateFromDownloaded(ipaPath: String) {
+        guard let (email, password, addr) = savedRenewInputs() else { return }
+        selfUpdate(email: email, password: password, addr: addr, bundlePathOverride: ipaPath)
+    }
+
+    /// 2단계 자체 업데이트 확인 — Veil의 마커를 보고 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
+    /// 마커: `state_dir/update_url.txt`의 URL을 GET → 두 줄(`<정수 버전>` / `<ipa URL>`). 앱의 CFBundleVersion
+    /// 보다 크면 받아 적용(코드까지 갱신, in-place라 데이터 보존). **update_url.txt가 없으면(인프라 미설정)
+    /// 조용히 넘어간다** — 켜기 전엔 아무 일도 안 한다. 서명·설치는 무인 계정으로, 완료 시 재시작 팝업.
+    func checkForUpdate() async {
+        guard !running, hasPairing, savedRenewInputs() != nil else { return }
+        let urlFile = URL(fileURLWithPath: stateDir).appendingPathComponent("update_url.txt")
+        guard let markerStr = (try? String(contentsOf: urlFile))?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              markerStr.hasPrefix("http"), let markerURL = URL(string: markerStr),
+              let (data, resp) = try? await URLSession.shared.data(from: markerURL),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let text = String(data: data, encoding: .utf8) else { return }
+        let lines = text.split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        guard lines.count >= 2, let remoteVer = Int(lines[0]),
+              let ipaURL = URL(string: lines[1]),
+              ipaURL.scheme == "http" || ipaURL.scheme == "https" else { return }
+        let localVer = Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "0") ?? 0
+        guard remoteVer > localVer else { return }   // 새 버전 아님
+        guard let (tmp, dResp) = try? await URLSession.shared.download(from: ipaURL),
+              (dResp as? HTTPURLResponse)?.statusCode == 200 else { return }
+        let dest = URL(fileURLWithPath: stateDir).appendingPathComponent("work/update.ipa")
+        try? FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
+                                                 withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: dest)
+        guard (try? FileManager.default.moveItem(at: tmp, to: dest)) != nil else { return }
+        await MainActor.run { self.selfUpdateFromDownloaded(ipaPath: dest.path) }
     }
 
     /// 만료 하루 전으로 로컬 알림을 예약한다(요청: 1일 남으면 알림). 앱이 닫혀 있어도 떠서 열어 재서명하게

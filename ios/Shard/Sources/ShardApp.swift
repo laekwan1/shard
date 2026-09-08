@@ -105,6 +105,9 @@ struct RootView: View {
             if phase == .active {
                 autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)
                 autoResign.scheduleExpiryReminder()
+                // 2단계 자체 업데이트: Veil 마커에 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
+                // update_url.txt(인프라)가 없으면 조용히 넘어가 — 켜기 전엔 아무 일도 안 한다.
+                Task { await autoResign.checkForUpdate() }
             }
         }
         // 포그라운드 만료 임박 '재서명 필요' 알림창(요청): 확인만, 누르면 저장된 계정으로 재서명 시작 →
