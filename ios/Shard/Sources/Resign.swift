@@ -716,8 +716,6 @@ struct ResignView: View {
         // 곧 자기 덮어쓰기 설치를 확정한다(installd가 앱 종료 시 새 번들로 교체).
         .alert("앱을 다시 시작해 주세요", isPresented: $model.showRestartAlert) {
             Button("확인") { exit(0) }
-        } message: {
-            Text("설치가 진행됐습니다. 앱을 종료합니다 — 다시 열면 갱신된 서명이 적용되고 유효기간이 새로 시작됩니다.")
         }
     }
 

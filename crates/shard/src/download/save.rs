@@ -904,7 +904,7 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     let mut offer = Offer::parse(offer_json)?;
     // InnerTube의 상위 화질(최대 2160p)을 목록에 합친다 — MWEB은 ≤720p만 나열하므로, 안 하면 4K가
     // 메뉴에 아예 안 뜬다. 실패하면 offer는 그대로라 ≤720p만 보인다(퇴행 없음).
-    enrich_with_innertube(&mut offer);
+    let diag = enrich_with_innertube(&mut offer);
     // portable=true so the "음악만 저장" row shows the AAC (.m4a) track that
     // run_youtube will actually take — iOS plays .m4a through AVPlayer (clean over
     // Bluetooth), unlike Opus/libVLC. The label's codec/bitrate then match the file.
@@ -913,7 +913,9 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
     if let Some(audio) = offer.best_audio(&wish) {
         rows.push((
             MUSIC_ITAG,
-            "음악".to_string(),
+            // 진단(임시): InnerTube가 기기에서 실제로 돌았는지 보이게 음악 행에 붙인다. 2160p가
+            // 확인되면 뗀다. 예: "음악 (IT+7/39)" = 받은 39개 중 새로 7개 추가, "IT:novid"·"IT:err".
+            format!("음악 ({diag})"),
             format!("{} · {} {}k", human(audio.size()), audio.codec(), audio.bitrate / 1000),
         ));
     }
@@ -937,26 +939,33 @@ pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>>
         let total = video.size() + audio.map(|a| a.size()).unwrap_or(0);
         if video.size_is_exact() { human(total) } else { format!("약 {}", human(total)) }
     };
-    // One row per resolution: the best codec (AV1 > H.264 > VP9). No separate H.264 row —
-    // AV1 already covers the AVPlayer path, and H.264 is picked automatically for a
-    // resolution that has no AV1.
-    let mut best: std::collections::HashMap<String, (u8, u32, String, String)> = std::collections::HashMap::new();
-    let mut order: Vec<String> = Vec::new();
+    // One row per resolution HEIGHT, best codec (AV1 > H.264 > VP9), 30fps preferred over 60.
+    // Grouping by height (not the "1080p"/"1080p60" label) keeps a resolution as one row whether
+    // it ships at 30 or 60fps. The old code dropped every "…60" outright, which hid 2160p on the
+    // many videos that only offer 4K at 60fps (사용자: 2160p가 목록에 안 뜸). Within a height a
+    // 30fps format still beats a 60fps one (smaller), and at equal fps the better codec wins — so
+    // a resolution that has 30fps keeps showing 30fps, and one that is 60fps-only is no longer lost.
+    let mut best: std::collections::HashMap<u32, (bool, u8, u32, String, String)> =
+        std::collections::HashMap::new();
+    let mut order: Vec<u32> = Vec::new();
     for video in offer.video_tracks() {
-        // Drop 60fps ("1080p60") — much heavier for little gain, and the user asked to
-        // exclude it. A resolution left with only 60fps falls away.
-        if video.quality.ends_with("60") { continue; }
+        let h = video.height();
+        if h == 0 { continue; }
+        let is60 = video.quality.ends_with("60");
         let codec = video.codec();
         let label = if codec.is_empty() { video.quality.clone() } else { format!("{} · {}", video.quality, codec) };
-        if !order.contains(&video.quality) { order.push(video.quality.clone()); }
-        let better = best.get(&video.quality).map_or(true, |(cr, ..)| codec_rank(codec) < *cr);
+        if !order.contains(&h) { order.push(h); }
+        let better = match best.get(&h) {
+            None => true,
+            Some((b_is60, b_cr, ..)) => if *b_is60 != is60 { !is60 } else { codec_rank(codec) < *b_cr },
+        };
         if better {
-            best.insert(video.quality.clone(),
-                        (codec_rank(codec), video.itag, label, size_of(video, audio_for(codec))));
+            best.insert(h, (is60, codec_rank(codec), video.itag, label, size_of(video, audio_for(codec))));
         }
     }
-    for q in &order {
-        if let Some((_, itag, label, size)) = best.get(q) {
+    order.sort_by(|a, b| b.cmp(a)); // highest resolution first
+    for h in &order {
+        if let Some((_, _, itag, label, size)) = best.get(h) {
             rows.push((*itag, label.clone(), size.clone()));
         }
     }
@@ -985,10 +994,13 @@ fn human(bytes: u64) -> String {
 /// id, bot check, network — leaves the offer untouched, so the caller falls back to the ≤720p
 /// SABR list and this only ever *adds* options. `save` and `innertube` share the `download`
 /// feature gate, so no extra cfg is needed here.
-fn enrich_with_innertube(offer: &mut crate::download::youtube::Offer) {
+/// Returns a short diagnostic (`IT+<added>/<got>`, `IT:novid`, `IT:err`, …) so a caller can
+/// surface *whether InnerTube actually ran on the device* — the desktop can curl-verify, the
+/// phone cannot, so the quality list carries this until 2160p is confirmed working there.
+fn enrich_with_innertube(offer: &mut crate::download::youtube::Offer) -> String {
     use crate::download::innertube;
     if offer.video_id.is_empty() {
-        return; // Not a watch page (or the ASK script gave no id) — nothing to ask InnerTube.
+        return "IT:novid".into(); // ASK script gave no videoId — nothing to ask InnerTube.
     }
     // Install ring as rustls's process crypto provider before ANY HTTPS here. reqwest is built
     // `rustls-no-provider`, so a TLS call with no provider **panics** — and this is the first
@@ -1001,11 +1013,19 @@ fn enrich_with_innertube(offer: &mut crate::download::youtube::Offer) {
         .build()
     {
         Ok(c) => c,
-        Err(_) => return,
+        Err(_) => return "IT:noclient".into(),
     };
     match innertube::formats(&client, &offer.video_id) {
-        Ok(extra) => offer.merge_formats(extra),
-        Err(e) => tracing::info!("InnerTube 확장 실패(→ SABR ≤720p 유지): {e:#}"),
+        Ok(extra) => {
+            let got = extra.len();
+            let before = offer.formats.len();
+            offer.merge_formats(extra);
+            format!("IT+{}/{}", offer.formats.len() - before, got)
+        }
+        Err(e) => {
+            tracing::info!("InnerTube 확장 실패(→ SABR ≤720p 유지): {e:#}");
+            "IT:err".into()
+        }
     }
 }
 
