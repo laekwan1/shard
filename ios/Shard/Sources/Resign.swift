@@ -438,8 +438,8 @@ final class ResignModel: ObservableObject {
     func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false) {
         guard !autoRenewStarted, !running, hasPairing, nothingPlaying else { return }
         guard let exp = SigningInfo.expirationDate() else { return }
-        let test = Self.testRenew   // 테스트: 3일 → 6일23시간50분(갓 서명 ~10분 뒤 발동)
-        let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 50 * 60) : (3 * 86400)
+        let test = Self.testRenew   // 테스트: 3일 → 6일23시간55분(갓 서명 ~5분 뒤 발동)
+        let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 55 * 60) : (3 * 86400)
         guard exp.timeIntervalSinceNow <= threshold else { return }   // 만료 임박 아님
 
         if !fromBackground {
@@ -476,7 +476,11 @@ final class ResignModel: ObservableObject {
 
     /// 저장된 계정+비번+터널주소(무인 재서명 입력). 없으면 nil — 그러면 자동 재서명을 안 한다.
     private func savedRenewInputs() -> (String, String, String)? {
-        let email = !lastEmail.isEmpty ? lastEmail : (accounts.first?.email ?? "")
+        // **수동 재서명이 쓰는 계정과 동일해야 한다** — 다른 계정이면 번들ID(App ID = 팀ID+번들)가 달라
+        // 설치본과 어긋나 in-place 재설치가 실패한다(재설치 안 됨의 진짜 원인). @AppStorage("resign.email")을
+        // 우선한다: lastEmail은 공유 인스턴스에선 비어 있고, accounts.first는 다른 계정(예: 메인)일 수 있다.
+        let stored = UserDefaults.standard.string(forKey: "resign.email") ?? ""
+        let email = !stored.isEmpty ? stored : (!lastEmail.isEmpty ? lastEmail : (accounts.first?.email ?? ""))
         guard !email.isEmpty else { return nil }
         let password = PasswordStore.load(for: email)
         guard !password.isEmpty else { return nil }

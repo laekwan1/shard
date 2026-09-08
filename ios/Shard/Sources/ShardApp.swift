@@ -119,5 +119,15 @@ struct RootView: View {
         .alert("앱을 다시 시작해 주세요", isPresented: $autoResign.showRestartAlert) {
             Button("확인") { exit(0) }
         }
+        // 자동(포그라운드) 재서명이 실패하면 이유를 보여준다 — 예전엔 errorText가 시트에만 떠(자동은 시트가
+        // 닫힘) 실패가 조용히 묻혔고, 그래서 "재설치도 스탬프 갱신도 안 된다"의 원인이 안 보였다.
+        .alert("재서명 실패", isPresented: Binding(
+            get: { autoResign.errorText != nil },
+            set: { if !$0 { autoResign.errorText = nil } }
+        )) {
+            Button("확인") { }
+        } message: {
+            Text(autoResign.errorText ?? "")
+        }
     }
 }
