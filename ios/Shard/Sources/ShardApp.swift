@@ -19,6 +19,10 @@ struct RootView: View {
     // One player for the whole app, owned here — so it is never duplicated when
     // the library view comes and goes, which was stacking playback.
     @StateObject private var player = VLCController()
+    // 앱 수준 전용 재서명 인스턴스 — 시트의 ResignModel과 별개로, 실행 시 만료 임박하면 조용히 자동
+    // 갱신하는 데만 쓴다(시트를 안 열어도 돌아야 하므로 여기 둔다). 동시 서명은 사실상 안 겹치고
+    // (자동은 .active 순간에만, 수동은 시트를 직접 열어야) 겹쳐도 RSD 터널 점유로 하나가 에러날 뿐 무해.
+    @StateObject private var resignAuto = ResignModel()
     @State private var showLibrary = false
     // 앱이 실제로 OS 백그라운드(홈 버튼·잠금)로 들어가는 순간을 잡으려는 것. 오디오 세션이 .playback +
     // audio 백그라운드 모드라, 아무 처리도 안 하면 '백그라운드 재생'이 꺼져 있어도 계속 재생된다(사용자 지적).
@@ -79,6 +83,12 @@ struct RootView: View {
         .onChange(of: scenePhase) { phase in
             if phase == .background && !prefs.background {
                 player.stop()
+            }
+            // 활성화(콜드런치·포그라운드 복귀) 때 만료 임박하면 조용히 자동 재서명(팝업 없이, 다음
+            // 콜드런치에 적용 · VPN 켜져 있고 재생 안 할 때만 · 하루 1회). 모르는 사람도 그냥 앱을 쓰면
+            // 서명이 알아서 갱신되도록.
+            if phase == .active {
+                resignAuto.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)
             }
         }
     }

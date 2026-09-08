@@ -157,6 +157,12 @@ final class ResignModel: ObservableObject {
     @Published var showRestartAlert = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
     @Published var accounts: [SignedAccount] = SignedAccountStore.load()
+    // 자동(백그라운드) 갱신이 도는 동안 true — appendLog가 @@RESTART@@ 재시작 sentinel을 무시하게 해서
+    // 팝업이 안 뜨게 한다(사용자: 수동 재서명만 팝업, 백그라운드는 조용히).
+    private var silentRenew = false
+    // 이번 실행에서 자동 갱신을 이미 시작했으면 true — scenePhase가 .active로 여러 번 와도 반복 안 되게.
+    // (실행 중인 앱은 새 서명이 적용되기 전까지 옛 만료일을 계속 읽으므로 안 그러면 매번 재시도한다.)
+    private var autoRenewStarted = false
 
     private let tfaSem = DispatchSemaphore(value: 0)
     private var tfaCode = ""
@@ -327,9 +333,10 @@ final class ResignModel: ObservableObject {
 
     /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, RSD(rppairing 터널)로
     /// 폰에 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
-    func selfUpdate(email: String, password: String, addr: String) {
+    func selfUpdate(email: String, password: String, addr: String, silent: Bool = false) {
         guard !running, hasPairing else { return }
         running = true
+        silentRenew = silent   // appendLog가 이 값으로 재시작 팝업을 띄울지 결정
         logLines = []; summary = nil; errorText = nil; notice = nil
         lastEmail = email
         let ctx = Unmanaged.passUnretained(self).toOpaque()
@@ -344,7 +351,9 @@ final class ResignModel: ObservableObject {
             if !self.vpnReachable(addr, port: 49152) {
                 DispatchQueue.main.async {
                     self.running = false
-                    self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요."
+                    self.silentRenew = false
+                    // 자동 갱신이면 조용히 멈춘다(모래시계 앰버가 신호). 수동일 때만 안내.
+                    if !silent { self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요." }
                 }
                 return
             }
@@ -362,7 +371,10 @@ final class ResignModel: ObservableObject {
                   let obj = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
                   (obj["ok"] as? Bool) == true, let ipaPath = obj["path"] as? String else {
                 let err = (json.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["error"] as? String
-                DispatchQueue.main.async { self.running = false; self.errorText = "서명 단계 실패 — \(err ?? json)" }
+                DispatchQueue.main.async {
+                    self.running = false; self.silentRenew = false
+                    if !silent { self.errorText = "서명 단계 실패 — \(err ?? json)" }
+                }
                 return
             }
             // 2) RSD(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치. classic minimuxer는
@@ -376,26 +388,58 @@ final class ResignModel: ObservableObject {
             if let raw2 = raw2 { shard_string_free(raw2) }
             DispatchQueue.main.async {
                 self.running = false
+                let silentNow = self.silentRenew
+                self.silentRenew = false   // 다음 수동 재서명은 다시 팝업을 띄우게
                 if let d2 = json2.data(using: .utf8),
                    let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
                     if (obj2["ok"] as? Bool) == true {
                         self.summary = obj2["path"] as? String
                         // 재시작 팝업은 보통 rsd_install의 '@@RESTART@@' sentinel이 스테이징 직후(몇 초) 이미
-                        // 띄운다(appendLog). 여기는 fallback — 설치가 8초 안에 Ok로 끝나 sentinel이 안 나온
-                        // 드문 경우에도 팝업이 뜨게 한다. 이미 떠 있으면 no-op.
-                        self.showRestartAlert = true
+                        // 띄운다(appendLog). 여기는 fallback — 설치가 짧게 Ok로 끝나 sentinel이 안 나온 드문
+                        // 경우에도 팝업이 뜨게 한다. 자동(silent) 갱신은 팝업 없이 조용히 끝낸다.
+                        if !silentNow { self.showRestartAlert = true }
                     }
-                    else {
+                    else if !silentNow {
                         let e = obj2["error"] as? String ?? json2
                         // 터널 연결 실패(대개 LocalDevVPN 꺼짐)는 그것만 콕 집어 안내한다 — "설치 실패"로 뭉개면
-                        // 사용자가 원인을 못 찾는다(요청). 연결 단계 마커/문구로 판별.
+                        // 사용자가 원인을 못 찾는다(요청). 연결 단계 마커/문구로 판별. (자동 갱신 실패는 조용히.)
                         if e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과") {
                             self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
                         } else {
                             self.errorText = "설치 실패 — \(e)"
                         }
                     }
-                } else { self.errorText = "설치 응답 파싱 실패" }
+                } else if !silentNow { self.errorText = "설치 응답 파싱 실패" }
+            }
+        }
+    }
+
+    /// 앱 실행/포그라운드에서 호출: 현재 서명이 만료 3일 이내이고 무인 서명이 가능하면 **조용히**(팝업 없이)
+    /// 백그라운드로 재서명한다. 자기 덮어쓰기 설치라 새 서명은 **다음 콜드런치**에 적용된다(installd가 앱
+    /// 종료 시 교체). 안전장치: 이번 실행 1회 + 하루 1회(스테이징이 적용 안 돼 옛 만료일을 계속 읽어도
+    /// 매 실행 재시도하지 않게), LocalDevVPN이 켜져 있고 재생 중이 아닐 때만. VPN이 꺼져 있으면 조용히
+    /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
+    func autoRenewIfNeeded(nothingPlaying: Bool) {
+        guard !autoRenewStarted, !running, hasPairing, nothingPlaying else { return }
+        guard let exp = SigningInfo.expirationDate(),
+              exp.timeIntervalSinceNow <= 3 * 86400 else { return }   // 만료 임박 아님
+        let key = "resign.lastAutoRenew"
+        let last = UserDefaults.standard.double(forKey: key)
+        if last > 0, Date().timeIntervalSince1970 - last < 24 * 3600 { return }  // 하루 1회
+        // 무인 서명엔 저장된 계정+비밀번호가 필요(silent 경로엔 2FA UI가 없다).
+        let email = !lastEmail.isEmpty ? lastEmail : (accounts.first?.email ?? "")
+        guard !email.isEmpty else { return }
+        let password = PasswordStore.load(for: email)
+        guard !password.isEmpty else { return }
+        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
+        // VPN 확인은 오프메인(1.5s). 켜져 있을 때만 진행하고 그때만 하루 예산을 쓴다.
+        DispatchQueue.global(qos: .utility).async {
+            guard self.vpnReachable(addr, port: 49152) else { return }  // 꺼짐: 조용히 스킵(스탬프 안 찍음 → VPN 켜고 다시 열면 곧 갱신)
+            DispatchQueue.main.async {
+                guard !self.autoRenewStarted, !self.running else { return }
+                self.autoRenewStarted = true
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+                self.selfUpdate(email: email, password: password, addr: addr, silent: true)
             }
         }
     }
@@ -447,7 +491,9 @@ final class ResignModel: ObservableObject {
         // 우리가 종료해야 오므로(구조상) 설치 함수 반환을 기다리면 팝업이 한참 늦게 떴다 — 이 sentinel로
         // 스테이징이 끝난 몇 초 시점에 팝업을 즉시 띄운다. (로그는 이제 화면에 안 뿌리므로 append 안 함.)
         if line.hasPrefix("@@RESTART@@") {
-            DispatchQueue.main.async { self.showRestartAlert = true }
+            // 자동(백그라운드) 갱신 중이면 팝업을 띄우지 않는다 — 조용히 스테이징만 하고, 다음 콜드런치에
+            // 새 서명이 적용된다. 수동 재서명일 때만 즉시 팝업.
+            if !silentRenew { DispatchQueue.main.async { self.showRestartAlert = true } }
             return
         }
         DispatchQueue.main.async { self.logLines.append(line) }
