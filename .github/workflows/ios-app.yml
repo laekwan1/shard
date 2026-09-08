@@ -154,4 +154,3 @@ jobs:
                  --notes "자동 자체 업데이트 — 미서명 ipa. 폰이 사용자 인증서로 재서명·설치."
           gh release upload "$TAG" "$IPA" marker.txt --clobber
           echo "자체 업데이트 발행: v$VER → $IPA_URL"
-          if-no-files-found: error
