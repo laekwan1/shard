@@ -126,6 +126,10 @@ pub async fn resign_app(
     work: &Path,
     log: &mut dyn FnMut(&str),
 ) -> Result<PathBuf> {
+    // 0) 원격 설정 최신화(최선노력) — 애플이 서버 쪽 값(포털 상수 등)을 옮겼으면 Veil의 설정 파일에서 받아
+    //    덮는다. 실패·타임아웃이면 캐시/기본값으로 그대로 진행한다(흐름을 절대 안 깬다). 재서명은 주 1회
+    //    수준이라 8초 최선노력은 무해하다.
+    crate::config::RemoteConfig::refresh(&state_dir).await;
     // 1) 로그인 (③) — 저장된 세션이 있으면 재로그인 없이 복원(계정 잠금 위험 감소).
     let (session, _resumed) = AppleSession::resume_or_login(
         req.email.clone(),
@@ -135,7 +139,7 @@ pub async fn resign_app(
         log,
     )
     .await?;
-    let dev = DeveloperApi::new(session);
+    let dev = DeveloperApi::new(session, crate::config::RemoteConfig::load(&state_dir));
 
     // 2) 팀 (무료 개인 팀은 대개 하나)
     log("[②③ 팀] 조회...");
@@ -891,11 +895,13 @@ pub fn verify_apple_flow_blocking(
         .build()
         .map_err(|e| anyhow!("tokio 런타임: {e}"))?;
     rt.block_on(async {
+        // 0) 원격 설정 최신화(최선노력) — 아래 DeveloperApi가 읽기 전에 Veil에서 받아 캐시. 실패해도 무해.
+        crate::config::RemoteConfig::refresh(&state_dir).await;
         // 1) 저장된 세션을 먼저 시도(재로그인 회피 = 잠금 위험 감소). 복원 세션이 실패하면 — 공유
         //    anisette 정체성 변화로 GS 토큰 재요청이 거부(et 없음)되거나 세션이 만료된 것 — 지우고
         //    같은 실행에서 새 로그인으로 재시도한다. 사용자는 한 번만 누르고 결과는 반드시 나온다.
         if let Some(session) = AppleSession::resume(&state_dir, log).await {
-            let dev = DeveloperApi::new(session);
+            let dev = DeveloperApi::new(session, crate::config::RemoteConfig::load(&state_dir));
             match run_verify_flow(&dev, &bundle_id, &app_name, &state_dir, log).await {
                 Ok(s) => return Ok(s),
                 Err(e) => {
@@ -907,7 +913,7 @@ pub fn verify_apple_flow_blocking(
         // 2) 새 로그인 후 같은 흐름.
         let session =
             AppleSession::login(email, password, || tfa(), state_dir.clone(), log).await?;
-        let dev = DeveloperApi::new(session);
+        let dev = DeveloperApi::new(session, crate::config::RemoteConfig::load(&state_dir));
         run_verify_flow(&dev, &bundle_id, &app_name, &state_dir, log).await
     })
 }

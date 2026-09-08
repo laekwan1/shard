@@ -13,6 +13,8 @@
 //! feature로 얹어 xcframework로 빌드한다(shard→shard-mobile와 같은 길).
 
 pub mod auth;
+// 원격 설정(설정 계층): 애플이 서버 쪽에서 바꾸는 얕은 값을 Veil에서 받아 덮는다(없으면 내장 기본값).
+pub mod config;
 pub mod dev_api;
 pub mod engine;
 pub mod install;

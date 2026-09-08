@@ -18,14 +18,17 @@
 use anyhow::{anyhow, bail, Result};
 use plist::{Dictionary, Value};
 
-const CLIENT_ID: &str = "XABBG36SBA";
-const PROTOCOL_VERSION: &str = "QH65B2";
+use crate::config::RemoteConfig;
 
-/// 개발자 포털 URL. `{seg}`는 기기종류 세그먼트, `{action}`은 `listTeams.action` 등.
-fn portal_url(device: DeviceType, action: &str) -> String {
+/// 개발자 포털 URL. clientId·protocolVersion·베이스는 **원격 설정**에서 온다(없으면 내장 기본값) —
+/// 애플이 옮기면 Veil 설정 한 줄로 고치려는 것. `{seg}`는 기기종류 세그먼트, `{action}`은 `listTeams.action` 등.
+fn portal_url(cfg: &RemoteConfig, device: DeviceType, action: &str) -> String {
     format!(
-        "https://developerservices2.apple.com/services/{PROTOCOL_VERSION}/{seg}{action}?clientId={CLIENT_ID}",
+        "{base}/{ver}/{seg}{action}?clientId={id}",
+        base = cfg.dev_base_url,
+        ver = cfg.dev_protocol_version,
         seg = device.url_segment(),
+        id = cfg.dev_client_id,
     )
 }
 
@@ -98,11 +101,12 @@ pub struct ProvisioningProfile {
 
 pub struct DeveloperApi<T: Transport> {
     transport: T,
+    config: RemoteConfig,
 }
 
 impl<T: Transport> DeveloperApi<T> {
-    pub fn new(transport: T) -> Self {
-        Self { transport }
+    pub fn new(transport: T, config: RemoteConfig) -> Self {
+        Self { transport, config }
     }
 
     /// 공통 층: 기본 파라미터를 넣고 보내고 resultCode를 검사한다(원본 `sendRequest`).
@@ -114,8 +118,8 @@ impl<T: Transport> DeveloperApi<T> {
         device: DeviceType,
         mut params: Dictionary,
     ) -> Result<Dictionary> {
-        params.insert("clientId".into(), CLIENT_ID.into());
-        params.insert("protocolVersion".into(), PROTOCOL_VERSION.into());
+        params.insert("clientId".into(), self.config.dev_client_id.clone().into());
+        params.insert("protocolVersion".into(), self.config.dev_protocol_version.clone().into());
         params.insert(
             "requestId".into(),
             uuid::Uuid::new_v4().to_string().to_uppercase().into(),
@@ -125,7 +129,7 @@ impl<T: Transport> DeveloperApi<T> {
             Value::Array(vec!["en_US".into()]),
         );
 
-        let url = portal_url(device, action);
+        let url = portal_url(&self.config, device, action);
         let resp = self.transport.post_plist(&url, params).await?;
 
         // resultCode != 0 이면 실패. userString → resultString 순으로 메시지.
