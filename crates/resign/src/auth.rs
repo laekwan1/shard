@@ -72,7 +72,13 @@ fn anisette_url(state_dir: &Path) -> String {
     {
         return u;
     }
-    // 2) 앱에 심은 기본 전용 서버 — CI 시크릿 ANISETTE_URL로 **빌드 때** 컴파일에 주입된다(build.rs가
+    // 2) 원격 설정(Veil, 설정 계층) — anisette 서버가 옮기면 **재빌드 없이** 여기서 고친다. 로그인 계층이
+    //    가장 자주 깨지므로 원격화 효용이 크다. 비어 있으면(대개) 다음으로 넘어간다.
+    let remote = crate::config::RemoteConfig::load(state_dir).anisette_url;
+    if !remote.is_empty() {
+        return remote;
+    }
+    // 3) 앱에 심은 기본 전용 서버 — CI 시크릿 ANISETTE_URL로 **빌드 때** 컴파일에 주입된다(build.rs가
     //    변경 감지). 소스·커밋엔 값이 없다(저장소 PUBLIC). 이게 있으면 사용자가 아무것도 안 넣어도
     //    전용 서버를 써서 잠금·재로그인이 근본 차단된다("앱 자체에 서버 등록" 요구 충족).
     if let Some(u) = option_env!("ANISETTE_URL") {
@@ -80,7 +86,7 @@ fn anisette_url(state_dir: &Path) -> String {
             return u.to_string();
         }
     }
-    // 3) 그래도 없으면 공유 기본(마지막 폴백).
+    // 4) 그래도 없으면 공유 기본(마지막 폴백).
     "https://ani.sidestore.io".to_string()
 }
 

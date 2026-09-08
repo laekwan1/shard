@@ -14,4 +14,9 @@ dev_client_id=XABBG36SBA
 dev_protocol_version=QH65B2
 dev_base_url=https://developerservices2.apple.com/services
 
+# ── anisette 서버(로그인 계층) — 서버가 옮기면 재빌드 없이 여기서 고친다. 비워 두면(또는 이 줄을 빼면)
+#    앱은 기존대로 고른다: 사용자가 앱에 넣은 값 > CI 빌드에 심은 값 > 공유 기본. 값을 넣으면 그게 CI
+#    빌드값·공유 기본보다 우선한다(사용자 수동값보다는 아래). ──
+# anisette_url=http://<veil>:6969
+
 # 앞으로 원격화할 후보(구현되면 키가 늘어난다): GSA 엔드포인트, InnerTube 클라 버전 등.

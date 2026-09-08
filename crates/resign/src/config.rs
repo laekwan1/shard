@@ -33,6 +33,10 @@ pub struct RemoteConfig {
     pub dev_protocol_version: String,
     /// 개발자 포털 베이스 URL — `{base}/{version}/{seg}{action}?clientId={id}` 로 쓰인다.
     pub dev_base_url: String,
+    /// anisette 서버 URL. **비어 있으면 무시** — 이때 auth.rs가 (사용자 수동값 > CI 빌드값 > 공유 기본)을
+    /// 쓴다. Veil에서 이 값을 두면 재빌드 없이 anisette 서버를 옮길 수 있다(로그인 계층이 가장 자주
+    /// 깨지므로 원격화 효용이 크다). 사용자가 앱에서 직접 넣은 값은 여전히 이보다 우선한다.
+    pub anisette_url: String,
 }
 
 impl Default for RemoteConfig {
@@ -41,14 +45,15 @@ impl Default for RemoteConfig {
             dev_client_id: "XABBG36SBA".into(),
             dev_protocol_version: "QH65B2".into(),
             dev_base_url: "https://developerservices2.apple.com/services".into(),
+            anisette_url: String::new(), // 비어 있음 = 원격 오버라이드 없음(auth.rs가 기존 3단으로 고름)
         }
     }
 }
 
 impl RemoteConfig {
     /// 응답이 우리 설정 파일이 맞는지 볼 때 찾는 키들(엉뚱한 HTML 페이지를 캐시하지 않게).
-    const LOOKS_VALID: [&'static str; 3] =
-        ["dev_client_id=", "dev_protocol_version=", "dev_base_url="];
+    const LOOKS_VALID: [&'static str; 4] =
+        ["dev_client_id=", "dev_protocol_version=", "dev_base_url=", "anisette_url="];
 
     /// 캐시된 설정(`<state_dir>/shard-config.txt`)을 읽어 기본값 위에 덮는다. 파일이 없거나 아는 키가
     /// 없으면 그 값은 기본값 그대로 — 부분 설정도 안전하고, 구버전 앱이 모르는 새 키를 만나도 무시한다.
@@ -75,6 +80,7 @@ impl RemoteConfig {
                 "dev_client_id" => self.dev_client_id = v.to_string(),
                 "dev_protocol_version" => self.dev_protocol_version = v.to_string(),
                 "dev_base_url" => self.dev_base_url = v.to_string(),
+                "anisette_url" => self.anisette_url = v.to_string(),
                 _ => {} // 미래 키는 무시 — 앞으로 이 목록만 늘리면 된다
             }
         }
