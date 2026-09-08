@@ -156,6 +156,66 @@ fn whole(got: u64, expected: u64) -> bool {
     expected > 0 && got >= expected
 }
 
+/// Fill `video_url`/`audio_url` into their sinks by range-GET — the direct (InnerTube 2160p)
+/// path. Sibling of [`pull`]: there is no SABR conversation here, each stream is a plain file
+/// fetched in windows. `get` is `(url, start, end) -> bytes`, a closure like `pull`'s `post`,
+/// so the arithmetic (window boundaries, short-final stop) is testable without a network.
+pub fn pull_direct_pair(
+    video_url: &str,
+    audio_url: &str,
+    video_sink: &mut dyn Sink,
+    audio_sink: &mut dyn Sink,
+    get: &mut dyn FnMut(&str, u64, u64) -> Result<Vec<u8>>,
+    on_progress: &mut dyn FnMut(Progress),
+    cancelled: &dyn Fn() -> bool,
+    audio_only: bool,
+) -> Result<Progress> {
+    let mut done = Progress::default();
+    // Audio first (small), then video. Report after each stream so the bar advances.
+    done.audio = fetch_stream(audio_url, audio_sink, get, cancelled)?;
+    on_progress(done);
+    if !audio_only {
+        done.video = fetch_stream(video_url, video_sink, get, cancelled)?;
+        on_progress(done);
+    }
+    Ok(done)
+}
+
+/// Fetch one stream to its sink in 8 MiB windows until a short/empty reply ends it; returns
+/// how many bytes landed. Bounded windows keep each request inside the client timeout and
+/// hold only one chunk in RAM (streamed to disk via `write_at`) — necessary on the phone,
+/// where a single whole-file GET of a multi-GB 4K stream would run out of memory.
+fn fetch_stream(
+    url: &str,
+    sink: &mut dyn Sink,
+    get: &mut dyn FnMut(&str, u64, u64) -> Result<Vec<u8>>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<u64> {
+    const CHUNK: u64 = 8 * 1024 * 1024;
+    let mut off: u64 = 0;
+    let mut requests: u32 = 0;
+    loop {
+        if cancelled() {
+            bail!("취소되었습니다");
+        }
+        requests += 1;
+        if requests > MAX_REQUESTS {
+            bail!("요청이 너무 많아 중단했습니다");
+        }
+        let bytes = get(url, off, off + CHUNK - 1)?;
+        if bytes.is_empty() {
+            break;
+        }
+        sink.write_at(off, &bytes)?;
+        off += bytes.len() as u64;
+        // A reply shorter than the window means the server had no more — the stream's end.
+        if (bytes.len() as u64) < CHUNK {
+            break;
+        }
+    }
+    Ok(off)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,6 +243,51 @@ mod tests {
 
     fn template() -> Template {
         Template { url: "https://example.invalid/videoplayback".into(), body: Vec::new() }
+    }
+
+    // The direct (2160p) pull stops at the first window shorter than 8 MiB — that short reply
+    // is the server saying there is no more. Getting this wrong loops forever (empty reads) or
+    // truncates (stops early); this pins the boundary arithmetic without a network.
+    #[test]
+    fn a_short_final_window_ends_the_direct_pull() {
+        const CHUNK: u64 = 8 * 1024 * 1024;
+        let total = CHUNK + 2 * 1024 * 1024; // one full window + a short 2 MiB tail
+        let calls = Rc::new(RefCell::new(0u32));
+        let c = calls.clone();
+        let mut get = move |_url: &str, start: u64, end: u64| -> Result<Vec<u8>> {
+            *c.borrow_mut() += 1;
+            let want = (end - start + 1).min(total.saturating_sub(start));
+            Ok(vec![0u8; want as usize])
+        };
+        let mut v = Buffer::default();
+        let mut a = Buffer::default();
+        let done = pull_direct_pair(
+            "v-url", "a-url", &mut v, &mut a, &mut get, &mut |_| {}, &|| false, false,
+        )
+        .expect("direct pull");
+        assert_eq!(done.audio, total, "audio filled to its length");
+        assert_eq!(done.video, total, "video filled to its length");
+        assert_eq!(v.0.len() as u64, total);
+        assert_eq!(*calls.borrow(), 4, "2 windows per stream (full + short), audio then video");
+    }
+
+    // audio_only takes the sound alone and never touches the video sink/URL.
+    #[test]
+    fn audio_only_direct_pull_skips_the_video_stream() {
+        let total = 1024 * 1024u64; // a 1 MiB stream: one short window ends it
+        let mut get = move |_url: &str, start: u64, end: u64| -> Result<Vec<u8>> {
+            let want = (end - start + 1).min(total.saturating_sub(start));
+            Ok(vec![0u8; want as usize])
+        };
+        let mut v = Buffer::default();
+        let mut a = Buffer::default();
+        let done = pull_direct_pair(
+            "v-url", "a-url", &mut v, &mut a, &mut get, &mut |_| {}, &|| false, true,
+        )
+        .expect("direct pull");
+        assert_eq!(done.audio, total);
+        assert_eq!(done.video, 0, "video untouched in audio_only");
+        assert!(v.0.is_empty());
     }
 
     /// A reply carrying one run for each track, at the given positions.

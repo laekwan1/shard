@@ -406,6 +406,10 @@ impl Downloads {
             mp4: false,   // desktop plays through the WebView, which opens MKV/WebM too
             // Chosen by the row (the MP3 music row), not a setting.
             music_mp3: want_mp3,
+            // Desktop still uses SABR here; the direct (InnerTube 2160p) path is wired for the
+            // phone first (save::run_youtube). Desktop parity is a later step.
+            video_url: None,
+            audio_url: None,
         };
         // Music-only never fetches the video (the "video" here is only a small decoy
         // named as already-playing), so counting its bytes in the total made the bar

@@ -20,6 +20,10 @@
 pub mod browser;
 pub mod ebml;
 pub mod hls;
+// InnerTube app-client format source (up to 2160p, plaintext URLs) — needs reqwest, so it
+// lives behind the same `download` gate as `save`.
+#[cfg(feature = "download")]
+pub mod innertube;
 pub mod mkv;
 pub mod mp4;
 pub mod mp4mux;

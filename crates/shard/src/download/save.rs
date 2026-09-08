@@ -64,6 +64,12 @@ pub struct Job {
     /// Convert a music-only save (AAC) to MP3 rather than keeping the .m4a.
     /// Desktop only; ignored for anything but the AAC music row.
     pub music_mp3: bool,
+    /// Direct (InnerTube plaintext) URLs. When BOTH are `Some`, the two scratch files are
+    /// filled by range-GET instead of SABR — that is the 2160p path (the captured MWEB
+    /// session lists ≤720p, so SABR can't reach 4K). `None`/`None` = the existing SABR path.
+    /// The muxer downstream reads the same two files either way, so nothing after changes.
+    pub video_url: Option<String>,
+    pub audio_url: Option<String>,
 }
 
 /// Fetch both streams and join them. Returns where the file landed.
@@ -108,18 +114,53 @@ pub fn run(
             Ok(response.bytes()?.to_vec())
         };
 
-        let done = pull::pull(
-            &job.template,
-            &job.video,
-            &job.audio,
-            &job.decoy,
-            &mut video_sink,
-            &mut audio_sink,
-            &mut post,
-            on_progress,
-            cancelled,
-            job.audio_only,
-        )?;
+        // Direct (2160p) path when both InnerTube URLs are present: range-GET straight into
+        // the same two scratch files. Otherwise the existing SABR path. Everything after
+        // (flush, whole gate, mux) is shared — the muxer only reads the two files.
+        let done = if let (Some(v), Some(a)) = (&job.video_url, &job.audio_url) {
+            let mut get = |url: &str, start: u64, end: u64| -> Result<Vec<u8>> {
+                let response = client
+                    .get(url)
+                    .header("Range", format!("bytes={start}-{end}"))
+                    // Same UA family as the InnerTube player POST that issued the URL —
+                    // googlevideo ties the URL to the issuing identity, so keep it consistent.
+                    .header(
+                        "User-Agent",
+                        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+                    )
+                    .send()?;
+                let status = response.status();
+                if !(status == reqwest::StatusCode::OK
+                    || status == reqwest::StatusCode::PARTIAL_CONTENT)
+                {
+                    bail!("서버가 {} 로 응답했습니다", status.as_u16());
+                }
+                Ok(response.bytes()?.to_vec())
+            };
+            pull::pull_direct_pair(
+                v,
+                a,
+                &mut video_sink,
+                &mut audio_sink,
+                &mut get,
+                on_progress,
+                cancelled,
+                job.audio_only,
+            )?
+        } else {
+            pull::pull(
+                &job.template,
+                &job.video,
+                &job.audio,
+                &job.decoy,
+                &mut video_sink,
+                &mut audio_sink,
+                &mut post,
+                on_progress,
+                cancelled,
+                job.audio_only,
+            )?
+        };
         video_sink.flush()?;
         audio_sink.flush()?;
 
@@ -860,7 +901,10 @@ pub const MUSIC_ITAG: u32 = u32::MAX;
 pub fn youtube_qualities(offer_json: &str) -> Result<Vec<(u32, String, String)>> {
     use crate::config::AudioQuality;
     use crate::download::youtube::{AudioWish, Offer};
-    let offer = Offer::parse(offer_json)?;
+    let mut offer = Offer::parse(offer_json)?;
+    // InnerTube의 상위 화질(최대 2160p)을 목록에 합친다 — MWEB은 ≤720p만 나열하므로, 안 하면 4K가
+    // 메뉴에 아예 안 뜬다. 실패하면 offer는 그대로라 ≤720p만 보인다(퇴행 없음).
+    enrich_with_innertube(&mut offer);
     // portable=true so the "음악만 저장" row shows the AAC (.m4a) track that
     // run_youtube will actually take — iOS plays .m4a through AVPlayer (clean over
     // Bluetooth), unlike Opus/libVLC. The label's codec/bitrate then match the file.
@@ -935,6 +979,77 @@ fn human(bytes: u64) -> String {
     }
 }
 
+/// Fold InnerTube's app-client formats (up to 2160p, plaintext URLs) into a captured offer,
+/// best-effort. The browser session is MWEB and lists only ≤720p SABR formats; re-asking as an
+/// app client (see `innertube`) adds the higher rungs with direct URLs. Any failure — no video
+/// id, bot check, network — leaves the offer untouched, so the caller falls back to the ≤720p
+/// SABR list and this only ever *adds* options. `save` and `innertube` share the `download`
+/// feature gate, so no extra cfg is needed here.
+fn enrich_with_innertube(offer: &mut crate::download::youtube::Offer) {
+    use crate::download::innertube;
+    if offer.video_id.is_empty() {
+        return; // Not a watch page (or the ASK script gave no id) — nothing to ask InnerTube.
+    }
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    match innertube::formats(&client, &offer.video_id) {
+        Ok(extra) => offer.merge_formats(extra),
+        Err(e) => tracing::info!("InnerTube 확장 실패(→ SABR ≤720p 유지): {e:#}"),
+    }
+}
+
+/// Build a Job that downloads the chosen video + its audio straight from InnerTube's direct
+/// URLs, when both have one. Returns `None` if either lacks a plaintext URL (the chosen itag is
+/// a SABR-only capture format, or InnerTube gave nothing) — the caller then uses the SABR path.
+/// Same codec→container rule as SABR: AV1/H.264 → MP4/AVPlayer, VP9 → WebM/libVLC.
+fn build_direct_job(
+    offer: &crate::download::youtube::Offer,
+    itag: u32,
+    into: &Path,
+    audio_only: bool,
+) -> Option<Job> {
+    use crate::config::AudioQuality;
+    use crate::download::youtube::AudioWish;
+    let video = if audio_only {
+        offer.video_tracks().into_iter().last()
+    } else {
+        offer.formats.iter().find(|f| f.itag == itag)
+    }?;
+    let avplayer = !audio_only && matches!(video.codec(), "AV1" | "H.264");
+    let wish = AudioWish {
+        language: String::new(),
+        quality: AudioQuality::Best,
+        portable: audio_only || avplayer,
+    };
+    let audio = offer.best_audio(&wish)?;
+    // The gate: only take the direct path when we can actually range-GET what we need — the
+    // audio always, and the video unless this is audio-only. A `?` here means "no direct URL",
+    // so `run_youtube` falls back to SABR for this pick.
+    let audio_url = audio.direct_url()?.to_string();
+    let video_url = if audio_only { None } else { Some(video.direct_url()?.to_string()) };
+    Some(Job {
+        // No SABR template on this path — a placeholder keeps the field's shape; run() takes the
+        // direct branch whenever video_url/audio_url are set and never reads this.
+        template: Template { url: String::new(), body: Vec::new() },
+        video: video.track(),
+        audio: audio.track(),
+        decoy: audio.track(), // unused on the direct branch (no SABR priming)
+        title: offer.title.clone(),
+        into: into.to_path_buf(),
+        cover: offer.thumb.clone(),
+        audio_only,
+        mp4: avplayer,
+        music_mp3: false,
+        video_url,
+        audio_url: Some(audio_url),
+    })
+}
+
 /// Download a YouTube video (or its audio alone) from a captured offer.
 ///
 /// `offer_json` is the `ytInitialPlayerResponse` the page script captured;
@@ -950,10 +1065,25 @@ pub fn run_youtube(
 ) -> Result<PathBuf> {
     use crate::config::AudioQuality;
     use crate::download::youtube::{AudioWish, Offer};
-    let offer = Offer::parse(offer_json)?;
-    let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
-
+    let mut offer = Offer::parse(offer_json)?;
     let audio_only = itag == MUSIC_ITAG;
+
+    // Direct (2160p) attempt first: re-ask InnerTube as an app client for plaintext URLs up to
+    // 2160p — MWEB caps its SABR list at ≤720p — and if the chosen video and its audio both have
+    // a direct URL, range-GET those straight (run() takes the direct branch). Any failure falls
+    // through to the SABR body below (the browser's captured template), so ≤720p never regresses.
+    enrich_with_innertube(&mut offer);
+    if let Some(job) = build_direct_job(&offer, itag, into, audio_only) {
+        let expected = if audio_only { job.audio.bytes } else { job.video.bytes + job.audio.bytes };
+        let mut progress = |p: Progress| on_progress(p.video + p.audio, expected);
+        match run(&job, &mut progress, cancelled) {
+            Ok(path) => return Ok(path),
+            Err(e) => tracing::warn!("direct 2160p 실패(→ SABR로 폴백): {e:#}"),
+        }
+    }
+
+    // ── SABR path (browser's captured template; ≤720p) ──
+    let template = offer.template().ok_or_else(|| anyhow!("받을 것을 찾지 못했습니다"))?;
     let video = if audio_only {
         offer.video_tracks().into_iter().last()
     } else {
@@ -993,6 +1123,9 @@ pub fn run_youtube(
         mp4: avplayer,
         // The phone keeps the original AAC (.m4a); MP3 is a desktop switch.
         music_mp3: false,
+        // SABR path: the direct (InnerTube) attempt above sets these when it takes over.
+        video_url: None,
+        audio_url: None,
     };
     // Audio-only never downloads the video (it is only a decoy), so its bytes must
     // not count toward the total — otherwise the bar stalls partway and jumps to

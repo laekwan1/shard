@@ -45,6 +45,16 @@ pub struct Format {
     /// True for the track the video plays by default.
     #[serde(default, rename = "audioDefault")]
     pub audio_default: bool,
+    /// A directly-fetchable media URL, when InnerTube gave one. Empty for capture-path
+    /// (SABR) formats — the page never handed URLs out, so those are downloaded via the
+    /// captured template instead. See [`direct_url`].
+    #[serde(default)]
+    pub url: String,
+    /// Present when the URL is signature-ciphered (WEB/MWEB clients). We have no JS engine
+    /// to run YouTube's signature transform, so a ciphered format is unusable directly and
+    /// falls back to SABR — see [`direct_url`].
+    #[serde(default, rename = "signatureCipher", alias = "cipher")]
+    pub signature_cipher: String,
 }
 
 impl Format {
@@ -112,6 +122,21 @@ impl Format {
             bytes: self.size(),
         }
     }
+
+    /// A directly-fetchable URL, only when there is one AND no signature to solve.
+    ///
+    /// InnerTube's app clients (ANDROID/IOS) return plaintext URLs; the web clients return
+    /// `signatureCipher`, which needs YouTube's player JS to unscramble — we have no JS
+    /// engine and won't add one (편의를 위한 의존성 금지). So a ciphered format is "not direct"
+    /// and the caller falls back to SABR. Empirically (측정) the app clients give plaintext 4K,
+    /// so this returns Some for the formats we actually want.
+    pub fn direct_url(&self) -> Option<&str> {
+        if !self.url.is_empty() && self.signature_cipher.is_empty() {
+            Some(&self.url)
+        } else {
+            None
+        }
+    }
 }
 
 /// Everything the page had to offer.
@@ -147,11 +172,28 @@ pub struct Offer {
     /// CDNs refuse a request that does not look like it came from the page.
     #[serde(default)]
     pub referer: String,
+    /// The 11-char YouTube video id, when the page is a watch page. Lets the download
+    /// re-ask YouTube's InnerTube API as an app client for the full format list (up to
+    /// 2160p with plaintext URLs) that m.youtube (MWEB) never lists — see `innertube`.
+    #[serde(default, rename = "videoId")]
+    pub video_id: String,
 }
 
 impl Offer {
     pub fn parse(payload: &str) -> Result<Self> {
         serde_json::from_str(payload).map_err(|e| anyhow!("페이지 응답을 읽지 못했습니다: {e}"))
+    }
+
+    /// Fold InnerTube's app-client formats into the captured list. An itag the page already
+    /// had is kept as-is (the capture is what SABR can fetch); a new one (2160p etc.) is
+    /// appended, so `video_tracks()` and `find(itag)` then see it. The appended ones carry a
+    /// direct URL, so the download can range-GET them without SABR.
+    pub fn merge_formats(&mut self, extra: Vec<Format>) {
+        for f in extra {
+            if !self.formats.iter().any(|g| g.itag == f.itag) {
+                self.formats.push(f);
+            }
+        }
     }
 
     /// The captured request, if the player has fetched anything yet.
@@ -549,6 +591,7 @@ pub const ASK: &str = r#"
     formats: out,
     title: (data.videoDetails || {}).title || '',
     thumb: thumb(data),
+    videoId: (data.videoDetails || {}).videoId || '',
     templateUrl: captured ? captured.url : '',
     templateBody: captured ? captured.body : '',
     reason: captured ? '' : 'not-played'
