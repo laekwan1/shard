@@ -202,7 +202,10 @@ struct BrowserScreen: View {
                 pendingThumb = ""
             }
             if offer.isYouTube {
-                guard let rows = Downloader.youtubeQualities(json), !rows.isEmpty else {
+                // await: youtubeQualities now re-asks InnerTube over the network (2160p ladder),
+                // so it runs off the main thread — the "다운로드 확인 중…" banner stays up until
+                // the rows are back instead of the UI freezing for the fetch.
+                guard let rows = await Downloader.youtubeQualities(json), !rows.isEmpty else {
                     banner = "화질을 찾지 못했습니다"; return
                 }
                 banner = nil

@@ -48,20 +48,30 @@ enum Downloader {
     }
 
     /// The quality rows for a captured YouTube offer, or nil if it is not a
-    /// YouTube offer / cannot be read.
-    static func youtubeQualities(_ offerJSON: String) -> [YtRow]? {
-        guard let raw = offerJSON.withCString({ shard_youtube_qualities($0) }) else { return nil }
-        let json = String(cString: raw)
-        shard_string_free(raw)
-        guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              (obj["ok"] as? Bool) == true,
-              let rows = obj["rows"] as? [[String: Any]] else { return nil }
-        return rows.compactMap { row in
-            guard let itag = (row["itag"] as? NSNumber)?.uint32Value,
-                  let label = row["label"] as? String,
-                  let detail = row["detail"] as? String else { return nil }
-            return YtRow(itag: itag, label: label, detail: detail)
+    /// YouTube offer / cannot be read. **Off the main thread**: it now re-asks
+    /// InnerTube over the network for the full ladder (up to 2160p), so calling it
+    /// synchronously on the MainActor would freeze the UI for the fetch's duration.
+    static func youtubeQualities(_ offerJSON: String) async -> [YtRow]? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let raw = offerJSON.withCString { shard_youtube_qualities($0) }
+                guard let raw = raw else { continuation.resume(returning: nil); return }
+                let json = String(cString: raw)
+                shard_string_free(raw)
+                guard let data = json.data(using: .utf8),
+                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      (obj["ok"] as? Bool) == true,
+                      let rows = obj["rows"] as? [[String: Any]] else {
+                    continuation.resume(returning: nil); return
+                }
+                let out: [YtRow] = rows.compactMap { row in
+                    guard let itag = (row["itag"] as? NSNumber)?.uint32Value,
+                          let label = row["label"] as? String,
+                          let detail = row["detail"] as? String else { return nil }
+                    return YtRow(itag: itag, label: label, detail: detail)
+                }
+                continuation.resume(returning: out)
+            }
         }
     }
 
