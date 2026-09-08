@@ -257,11 +257,13 @@ pub async fn rsd_install(
     // 함수 반환을 안 기다림). ② 남은 시간 동안 터널을 살려 두어(어댑터 소유 유지) installd가 PublicStaging
     // 에서 마저 삼키게 하고, 늦은 거부도 붙잡는다.
     tokio::pin!(install);
-    match tokio::time::timeout(std::time::Duration::from_secs(8), &mut install).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut install).await {
         Ok(Ok(())) => return Ok("설치 완료 🎉 — 앱을 강제종료 후 다시 여세요.".to_string()),
         // installd가 **거부**하면(서명·엔티틀먼트 문제 등) 여기로 온다 — 진짜 실패. {e:?}에 ErrorDescription 담김.
         Ok(Err(e)) => return Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
-        // 8초 동안 거부가 없었다 = 업로드·스테이징 성공. 재시작 팝업을 지금 띄우게 sentinel을 흘린다.
+        // 5초 동안 거부가 없었다 = 업로드·스테이징 성공(요청: 팝업 5초 이내). 재시작 팝업을 지금 띄우게
+        // sentinel을 흘린다. 서명이 안정돼 거부는 드물고, 로컬 터널 업로드(35MB)는 1~2초라 5초면 스테이징
+        // 판정에 충분하다.
         Err(_) => {
             let p = last_pct.load(Ordering::SeqCst);
             let phase = if p == NO_CB { "백그라운드 설치 중".to_string() } else { format!("{p}% 진행 중") };

@@ -1080,7 +1080,10 @@ struct PlayerStage: View {
     private var screenLandscape: Bool {
         UIScreen.main.bounds.width > UIScreen.main.bounds.height
     }
-    private var seekInset: CGFloat { fullscreen ? (screenLandscape ? 34 : 6) : 0 }
+    // The seek bar (with its two time labels) is pulled in to the SAME inset as the buttons, so
+    // its ends sit above the '이전' button (left) and the '전체/창' button (right) instead of
+    // running wider than them (사용자 요청: 시크바·시간 길이를 그 두 버튼까지로 **줄임** — 확장 아님).
+    private var seekInset: CGFloat { buttonInset }
     // A touch inside the time labels so the outer buttons do not stick out past
     // them.
     private var buttonInset: CGFloat { fullscreen ? (screenLandscape ? 46 : 24) : 10 }
@@ -1155,8 +1158,9 @@ struct PlayerStage: View {
     private var transport: some View {
         VStack(spacing: fullscreen ? 14 : 10) {
             // Top row: the seek bar only — its own subview so it (and only it)
-            // re-renders as the position ticks, leaving the library still. It spans
-            // the full width (long); only the buttons below are pulled inward.
+            // re-renders as the position ticks, leaving the library still. Pulled in
+            // to the same inset as the buttons below (seekInset == buttonInset), so its
+            // ends line up with the '이전' and '전체/창' buttons rather than overhanging them.
             SeekRow(ui: controller.ui,
                     onBegin: { controller.beginScrub(); interacting = true; keepBar() },
                     onScrub: { controller.previewSeek(Float($0)); keepBar() },

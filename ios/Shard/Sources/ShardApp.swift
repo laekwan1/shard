@@ -20,6 +20,9 @@ struct RootView: View {
     // the library view comes and goes, which was stacking playback.
     @StateObject private var player = VLCController()
     @State private var showLibrary = false
+    // 앱이 실제로 OS 백그라운드(홈 버튼·잠금)로 들어가는 순간을 잡으려는 것. 오디오 세션이 .playback +
+    // audio 백그라운드 모드라, 아무 처리도 안 하면 '백그라운드 재생'이 꺼져 있어도 계속 재생된다(사용자 지적).
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         GeometryReader { geo in
@@ -69,5 +72,13 @@ struct RootView: View {
         }
         .tint(.accent)
         .onAppear { SystemVolume.shared.attach() }
+        // '백그라운드 재생'이 꺼져 있으면 앱이 백그라운드로 들어갈 때 재생을 멈춘다(설정 ON이면 그대로 둔다).
+        // 화면을 나갈 때만 멈추던 위 LibraryScreen onClose와 달리, 이건 홈 버튼/잠금으로 OS 백그라운드에
+        // 들어가는 경로를 막는다 — pause라 다시 열면 이어서 볼 수 있다(stop이면 위치를 잃음).
+        .onChange(of: scenePhase) { phase in
+            if phase == .background && !prefs.background {
+                player.pause()
+            }
+        }
     }
 }
