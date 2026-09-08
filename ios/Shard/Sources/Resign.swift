@@ -168,9 +168,6 @@ final class ResignModel: ObservableObject {
     // 포그라운드에서 만료 임박(≤1일) 시 "재서명 필요" 알림창을 띄우는 신호(요청). 확인 → confirmRenew().
     // 자동 재서명은 시트가 닫힌 상태에서도 떠야 하므로 이 신호로 루트 뷰가 알림창을 띄운다.
     @Published var showRenewPrompt = false
-    // 위 알림창을 띄우는 시점의 VPN 상태 — 문구를 고른다(요청). true(꺼짐)면 "LocalDevVPN 켠 뒤 확인",
-    // false(켜짐)면 "확인을 누르면 지금 재서명"만. 예전엔 상태와 무관하게 늘 "VPN 켠 뒤"라 켜져 있어도 그렇게 떴다.
-    @Published var renewNeedsVpn = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
     @Published var accounts: [SignedAccount] = SignedAccountStore.load()
     // 자동(백그라운드) 갱신이 도는 동안 true — appendLog가 @@RESTART@@ 재시작 sentinel을 무시하게 해서
@@ -379,14 +376,16 @@ final class ResignModel: ObservableObject {
         let bgTask = UIApplication.shared.beginBackgroundTask(withName: "resign")
         DispatchQueue.global(qos: .userInitiated).async {
             defer { if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } } }
-            // 0) VPN 선확인(요청): 꺼져 있으면 아래 rppairing ①이 10초를 매달렸다 실패하니, 그 전에 짧게 찔러
-            //    보고 "LocalDevVPN을 켜주세요"만 버튼 아래 띄우고 조용히 멈춘다. 켜져 있으면 바로 진행.
-            if !self.vpnReachable(addr, port: 49152) {
+            // 0) VPN 선확인은 **무인 백그라운드 갱신(silent)에서만** 게이트로 쓴다 — 거기선 VPN이 꺼져 있으면
+            //    ①이 10초 매달리다 실패하니 그 전에 조용히 건너뛰어야 하기 때문. **사용자가 직접 누른 재서명
+            //    (!silent)에서는 선확인으로 막지 않는다**: 선확인(NWConnection이든 원시 소켓이든)이 이 루프백
+            //    터널을 켜져 있어도 "꺼짐"으로 잘못 봐 재서명을 통째로 막던 문제가 있었다(사용자 지적: 켜져
+            //    있는데 "켜주세요"·작동 안 함). 진짜 판정은 실제 설치 ①이다 — LocalDevVPN으로 서명이 잘 됐던
+            //    그 경로 그대로 붙고, 정말 꺼져 있으면 아래 설치 에러가 "LocalDevVPN 꺼짐"으로 콕 집어 알려준다.
+            if silent && !self.vpnReachable(addr, port: 49152) {
                 DispatchQueue.main.async {
                     self.running = false
                     self.silentRenew = false
-                    // 자동 갱신이면 조용히 멈춘다(모래시계 앰버가 신호). 수동일 때만 안내.
-                    if !silent { self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요." }
                 }
                 return
             }
@@ -468,16 +467,10 @@ final class ResignModel: ObservableObject {
             let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
             guard urgent, savedRenewInputs() != nil else { return }
             autoRenewStarted = true
-            // 알림창 문구를 VPN 상태에 맞춘다(요청). vpnReachable은 인터페이스 검사라 대개 즉시지만 폴백
-            // TCP가 최대 1.5초 메인을 막을 수 있어 백그라운드에서 재고, 결과로 문구를 정한 뒤 알림창을 띄운다.
-            let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.1.1"
-            DispatchQueue.global(qos: .userInitiated).async {
-                let on = self.vpnReachable(addr, port: 49152)
-                DispatchQueue.main.async {
-                    self.renewNeedsVpn = !on
-                    self.showRenewPrompt = true
-                }
-            }
+            // 알림창을 바로 띄운다 — VPN 선확인으로 문구를 가르지 않는다. 선확인이 켜져 있어도 "꺼짐"으로
+            // 잘못 봐 "켜라"가 잘못 뜨던 문제가 있었다(사용자: 포그라운드 자동도 VPN 연결 안 된 걸로 나옴).
+            // 확인을 누르면 실제 설치가 진짜 판정을 하고, 정말 꺼져 있으면 그때 설치 에러로 알려준다.
+            showRenewPrompt = true
             return
         }
 
@@ -512,7 +505,7 @@ final class ResignModel: ObservableObject {
         guard !email.isEmpty else { return nil }
         let password = PasswordStore.load(for: email)
         guard !password.isEmpty else { return nil }
-        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.1.1"
+        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
         return (email, password, addr)
     }
 
@@ -756,7 +749,7 @@ struct ResignView: View {
     @State private var password = ""
     @State private var tfaInput = ""
     @State private var showPairingPicker = false
-    @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.1.1"
+    @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
     // 전용 anisette 서버 주소(비우면 기본 공유서버). 고정 기기 정체성 → 잠금·재로그인 근본 차단.
     @AppStorage("resign.anisetteURL") private var anisetteURL = ""
     // 발급·페어링이 끝난 뒤엔 ID·anisette·터널 칸을 접어 두고(값은 @AppStorage로 기억됨) "변경"으로만
@@ -879,8 +872,8 @@ struct ResignView: View {
                     }
 
                     // 설치엔 RP 페어링과 LocalDevVPN(별도 앱, 루프백 VPN)이 필요하다. 페어링이 **없을 때만**
-                    // 가져오기를 보인다. 터널 IP는 반사(reflector) VPN마다 다르므로(StosVPN=10.7.0.1,
-                    // LocalDevVPN='터널' 10.7.1.1) 아래 입력칸으로 직접 맞춘다 — 틀리면 선확인·설치가 다 실패한다.
+                    // 가져오기를 보인다. 터널 주소는 기본 10.7.0.1(probeAddr) — LocalDevVPN이 이 주소로 서명이
+                    // 잘 됐던 값이라 그대로 둔다.
                     Divider().background(Color.toolbar)
                     VStack(alignment: .leading, spacing: 10) {
                         if !model.hasPairing {
@@ -891,16 +884,6 @@ struct ResignView: View {
                                 Button("가져오기") { showPairingPicker = true }
                                     .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                             }
-                        }
-                        // 터널 IP — LocalDevVPN이 표시하는 **'터널'** 주소(예 10.7.1.1). 이 앱이 여기에 붙어
-                        // 재서명·설치를 한다. 반사 VPN마다 대상이 달라(폰 자신=기기 10.7.0.1이 아니라 반대편
-                        // 터널 주소로 붙어야 함) 틀리면 "켜주세요"·설치실패가 난다. 값은 기억되고(@AppStorage)
-                        // 선확인과 설치가 같은 값을 쓴다. 안 되면 10.7.0.1도 시험해 볼 것.
-                        labeled("터널 IP (LocalDevVPN ‘터널’ 주소)") {
-                            TextField("10.7.1.1", text: $probeAddr)
-                                .textInputAutocapitalization(.never)
-                                .keyboardType(.numbersAndPunctuation)
-                                .disableAutocorrection(true)
                         }
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
