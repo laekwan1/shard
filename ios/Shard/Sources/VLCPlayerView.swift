@@ -588,6 +588,10 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         teardownAV()
         audioSink.stop()
         currentURL = nil
+        // Clear the lock-screen / notification transport (Now Playing) so no media controls
+        // linger after we stop — without this, backgrounding with '백그라운드 재생' off left the
+        // controls up even though playback was gone (사용자 지적).
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
         // Release the audio session so other devices/apps can take the Bluetooth route
         // back — holding it active kept the earbuds bound to us, which is why the Watch
         // could not grab them and Apple Music would not play while Shard was open.

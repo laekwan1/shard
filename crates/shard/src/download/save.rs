@@ -990,6 +990,12 @@ fn enrich_with_innertube(offer: &mut crate::download::youtube::Offer) {
     if offer.video_id.is_empty() {
         return; // Not a watch page (or the ASK script gave no id) — nothing to ask InnerTube.
     }
+    // Install ring as rustls's process crypto provider before ANY HTTPS here. reqwest is built
+    // `rustls-no-provider`, so a TLS call with no provider **panics** — and this is the first
+    // network call on the quality-list path (youtube_qualities used to only parse), so without
+    // this the download button crashed the app. `run()`/`media_client()` already do the same;
+    // `use_ring()` is idempotent (std::sync::Once).
+    use_ring();
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
         .build()

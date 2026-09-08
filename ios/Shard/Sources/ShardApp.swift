@@ -72,12 +72,13 @@ struct RootView: View {
         }
         .tint(.accent)
         .onAppear { SystemVolume.shared.attach() }
-        // '백그라운드 재생'이 꺼져 있으면 앱이 백그라운드로 들어갈 때 재생을 멈춘다(설정 ON이면 그대로 둔다).
-        // 화면을 나갈 때만 멈추던 위 LibraryScreen onClose와 달리, 이건 홈 버튼/잠금으로 OS 백그라운드에
-        // 들어가는 경로를 막는다 — pause라 다시 열면 이어서 볼 수 있다(stop이면 위치를 잃음).
+        // '백그라운드 재생'이 꺼져 있으면 앱이 백그라운드로 들어갈 때 **종료처리(stop)**한다. pause만 하면
+        // 소리는 멎어도 잠금화면/알림창에 재생 컨트롤(Now Playing)이 남는데, 사용자는 "백그라운드 재생일 때만
+        // 컨트롤이 뜨고 아니면 그냥 종료"를 원했다 — stop()이 오디오 세션을 내리고 Now Playing을 지워 컨트롤을
+        // 없앤다. 설정 ON이면 그대로 둬(재생·컨트롤 유지) 백그라운드 재생이 된다.
         .onChange(of: scenePhase) { phase in
             if phase == .background && !prefs.background {
-                player.pause()
+                player.stop()
             }
         }
     }
