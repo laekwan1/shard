@@ -761,17 +761,17 @@ private struct SeekRow: View {
     var onEnd: (Double) -> Void
     var body: some View {
         HStack(spacing: 6) {
-            // Fixed width so the bar does not grow/shrink as the elapsed time gains or
-            // loses a digit; wide enough for an hours clock (1:23:45), and lineLimit(1)
-            // + a scale floor keep it to ONE line instead of wrapping to two.
+            // 시간 텍스트는 **내용폭**(fixedSize)으로 둔다 — 짧으면(3:45) 좁게, 길면(1:23:45) 넓게. 그러면
+            // 가운데 시크바가 남는 폭을 채워(maxWidth:.infinity) 시간 표시 길이에 반비례해 늘고 준다(요청:
+            // 시간이 짧으면 바 길게, 길면 바 짧게). monospacedDigit이라 같은 자릿수 안에선 폭이 안 흔들리고,
+            // 자릿수가 바뀔 때만(9:59→10:00) 왼쪽 끝이 한 칸 움직인다 — 고정폭이 막던 그 흔들림은 이 값과 맞바꾼다.
             Text(ui.elapsed).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-                .frame(width: 50, alignment: .trailing)
+                .monospacedDigit().lineLimit(1).fixedSize()
             SeekSlider(value: Binding(get: { Double(ui.position) }, set: { onScrub($0) }),
                        onBegin: onBegin, onScrub: onScrub, onEnd: onEnd)
+                .frame(maxWidth: .infinity)
             Text(ui.duration).font(.system(size: 10)).foregroundColor(.white)
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-                .frame(width: 50, alignment: .leading)
+                .monospacedDigit().lineLimit(1).fixedSize()
         }
     }
 }
@@ -825,6 +825,8 @@ struct PlayerStage: View {
     @State private var zoom: CGFloat = 1
     /// A brief double-tap flash: (rightward, seconds).
     @State private var seekFlash: (right: Bool, secs: Int)?
+    // 홀드(꾹 눌러 2배속/되감기) 중 화면에 뭘 하는지 표시(요청). 누르는 동안 유지, 떼면 nil.
+    @State private var holdFlash: (right: Bool, label: String)?
 
     /// The saved cover for the song now playing, so a music stage shows art.
     private var musicCover: UIImage? {
@@ -888,6 +890,7 @@ struct PlayerStage: View {
                     .onEnded { _ in if zoom < 1.1 { withAnimation { zoom = 1 } } }
             )
             if let f = seekFlash { seekFlashView(f) }
+            if let h = holdFlash { holdFlashView(h) }
             if let g = gauge { Gauge(icon: g.icon, value: g.value) }
             // Hide the controls while the interface is rotating — otherwise they
             // were seen jumping from the windowed/portrait insets to the landscape
@@ -945,10 +948,28 @@ struct PlayerStage: View {
         // full screen. While it is down, the vertical-drag brightness/volume is
         // suppressed (see vdrag), so the two no longer fire together.
         holdActive = active
-        if x > w / 2 {
+        let right = x > w / 2
+        // 홀드 액션을 화면에 표시(요청) — 오른쪽=2배속, 왼쪽=되감기. 누르는 동안 유지, 떼면 사라짐.
+        holdFlash = active ? (right, right ? "2× 빨리감기" : "되감기") : nil
+        if right {
             controller.holdRate(active ? 2.0 : nil)
         } else {
             active ? startRewind() : stopRewind()
+        }
+    }
+
+    /// 홀드 중 상단 중앙에 반투명 알약으로 현재 액션을 표시(2배속/되감기). seekFlashView와 같은 결.
+    private func holdFlashView(_ h: (right: Bool, label: String)) -> some View {
+        VStack {
+            HStack(spacing: 5) {
+                Image(systemName: h.right ? "forward.fill" : "backward.fill").font(.caption)
+                Text(h.label).font(.caption.weight(.semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .background(Capsule().fill(Color.black.opacity(0.55)))
+            .padding(.top, 24)
+            Spacer()
         }
     }
 

@@ -362,7 +362,13 @@ final class ResignModel: ObservableObject {
                 self.running = false
                 if let d2 = json2.data(using: .utf8),
                    let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
-                    if (obj2["ok"] as? Bool) == true { self.summary = obj2["path"] as? String }
+                    if (obj2["ok"] as? Bool) == true {
+                        self.summary = obj2["path"] as? String
+                        // 사용자가 '지금 갱신'을 눌러 설치 명령이 전송된 뒤엔 재시작 안내 팝업을 띄운다(요청).
+                        // 자기 덮어쓰기 설치는 완료 신호가 안 와도 디스크엔 설치되므로, 확인을 누르면 앱을 종료해
+                        // 다음 실행 때 새 번들(갱신된 서명)이 뜨게 한다(iOS는 자동 재실행을 못 하므로 종료까지만).
+                        self.showRestartAlert = true
+                    }
                     else {
                         let e = obj2["error"] as? String ?? json2
                         // 터널 연결 실패(대개 LocalDevVPN 꺼짐)는 그것만 콕 집어 안내한다 — "설치 실패"로 뭉개면
@@ -498,6 +504,8 @@ struct ResignView: View {
     // now가 흐르면서 남은 시간이 매초 줄어드는 걸 화면이 그린다.
     @State private var now = Date()
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    // '지금 갱신'으로 설치 명령을 보낸 뒤 재시작 안내 팝업(요청) — 확인 시 exit(0).
+    @State private var showRestartAlert = false
     @Environment(\.dismiss) private var dismiss
 
     // iOS 15 배포 타깃이라 NavigationStack(16+)·alert 속 TextField(16+)를 피하고 커스텀 헤더 +
@@ -673,6 +681,14 @@ struct ResignView: View {
         // 탭은 그 컨트롤이 먼저 먹으므로 입력·동작엔 지장 없고, 스크롤(드래그)과도 구분된다.
         .contentShape(Rectangle())
         .onTapGesture { hideKeyboard() }
+        // 재시작 안내(요청): '지금 갱신'으로 설치 명령을 보낸 뒤 뜬다. 확인 → 앱 종료(다음 실행 때 새 번들
+        // 적용). iOS는 앱이 스스로 다시 실행하는 걸 막으므로 종료까지만 하고 재실행은 사용자가 한다.
+        .alert("앱을 다시 시작해 주세요", isPresented: $showRestartAlert) {
+            Button("종료하고 다시 열기") { exit(0) }
+            Button("나중에", role: .cancel) { }
+        } message: {
+            Text("설치가 진행됐습니다. 앱을 다시 시작하면 갱신된 서명이 적용되고 유효기간이 새로 시작됩니다.")
+        }
     }
 
     // 현재 서명의 정확한 남은 일수(모래시계는 '양'으로, 여기선 숫자로). 없으면 정보 없음.

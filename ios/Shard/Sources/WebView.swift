@@ -191,7 +191,15 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
         // by pushState (SPA), which fires no navigation callback — so the address
         // bar kept showing the URL from the first load. KVO on `url` catches those.
         urlObservation = view.observe(\.url, options: [.new]) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.sync() }
+            DispatchQueue.main.async {
+                // SPA 네비게이션(pushState/popstate — 유튜브 쇼츠에서 back 등)도 "네비게이션 순간"으로
+                // 기록한다. 안 그러면 back 직후 Capture.js repaint의 scrollTo가 최상단 RefreshControl을
+                // 튕겨 원치 않는 reload를 부른다(1.2초 가드가 lastNavAt=진짜 로드에서만 갱신돼 통과). 이 한
+                // 줄로 SPA back의 스크롤 튕김도 가드 안에 들어와 억제된다. 진짜 pull-to-refresh는 정지 후
+                // 손으로 당기는 거라 창(1.2초) 밖이라 정상.
+                self?.lastNavAt = Date()
+                self?.sync()
+            }
         }
         progressObservation = view.observe(\.estimatedProgress, options: [.new]) { [weak self] wv, _ in
             DispatchQueue.main.async { self?.progress = wv.estimatedProgress }
