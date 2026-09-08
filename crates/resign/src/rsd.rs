@@ -249,22 +249,32 @@ pub async fn rsd_install(
         },
         (),
     );
-    match tokio::time::timeout(std::time::Duration::from_secs(120), install).await {
-        Ok(Ok(())) => Ok("설치 완료 🎉 — 앱이 교체됩니다. 다시 여세요.".to_string()),
+    // **재시작 팝업을 완료 신호에 매달지 않는다.** 자기 덮어쓰기 설치의 완료 신호는 우리가 종료해야
+    // 오므로(폰 실측) 실행 중엔 절대 안 온다 — 예전엔 그래서 120초 타임아웃이 다 지나야 팝업이 떠서
+    // "한참 걸린다"고 지적받았다. 두 단계로 나눈다. ① 짧은 grace(10s): 진짜 서명 거부는 Ok(Err)로 몇 초
+    // 안에 빠르게 오므로 여기서 잡혀 에러로 갈리고, 로컬 터널 업로드(35MB)는 1~2초라 10초면 스테이징이 끝나
+    // 있다. 거부가 없으면 곧바로 '@@RESTART@@' sentinel 로그를 흘려 UI가 팝업을 **즉시** 띄우게 한다(설치
+    // 함수 반환을 안 기다림). ② 남은 시간 동안 터널을 살려 두어(어댑터 소유 유지) installd가 PublicStaging
+    // 에서 마저 삼키게 하고, 늦은 거부도 붙잡는다.
+    tokio::pin!(install);
+    match tokio::time::timeout(std::time::Duration::from_secs(8), &mut install).await {
+        Ok(Ok(())) => return Ok("설치 완료 🎉 — 앱을 강제종료 후 다시 여세요.".to_string()),
         // installd가 **거부**하면(서명·엔티틀먼트 문제 등) 여기로 온다 — 진짜 실패. {e:?}에 ErrorDescription 담김.
-        Ok(Err(e)) => Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
-        // 타임아웃 = 완료 신호 누락(실패 아님). Ok로 반환해 UI가 빨간 실패 대신 안내로 보이게 한다.
+        Ok(Err(e)) => return Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
+        // 8초 동안 거부가 없었다 = 업로드·스테이징 성공. 재시작 팝업을 지금 띄우게 sentinel을 흘린다.
         Err(_) => {
             let p = last_pct.load(Ordering::SeqCst);
-            let phase = if p == NO_CB {
-                "installd가 백그라운드에서 설치 중".to_string()
-            } else {
-                format!("installd 설치 {p}% 진행 중")
-            };
-            Ok(format!(
-                "설치 명령 전송됨 · {phase}. 자기 덮어쓰기 설치라 완료 신호가 안 옵니다 — 홈 화면 아이콘의 \
-                 설치가 끝나면 앱을 강제종료 후 다시 여세요. 상단 '✓ 자체 재서명됨' 시각이 갱신됐으면 성공입니다."
-            ))
+            let phase = if p == NO_CB { "백그라운드 설치 중".to_string() } else { format!("{p}% 진행 중") };
+            // '@@RESTART@@' 접두는 Swift appendLog가 가로채 팝업만 띄우고 뒤 문장만 화면 로그에 남긴다.
+            log(&format!("@@RESTART@@설치 스테이징 완료({phase}) — 앱을 강제종료 후 다시 여세요."));
         }
+    }
+    // ② 꼬리: 알림은 이미 떴다. 업로드(35MB)는 1~2초에 끝나 installd가 PublicStaging(디스크)에서 읽으므로
+    //    터널이 더는 대량 전송에 필요치 않다 — 30초만 더 살려 installd가 마저 흡수하게 하고(늦은 거부도
+    //    붙잡음) 반환한다. 사용자가 '확인'을 누르면 exit(0)로 어차피 즉시 끝난다.
+    match tokio::time::timeout(std::time::Duration::from_secs(30), &mut install).await {
+        Ok(Ok(())) => Ok("설치 완료 🎉 — 앱을 강제종료 후 다시 여세요.".to_string()),
+        Ok(Err(e)) => Err(anyhow!("[⑤ 설치] 실패(스테이징 후): {e:?}")),
+        Err(_) => Ok("설치 명령 전송됨 · 앱을 강제종료 후 다시 여세요(완료 신호는 종료 시 반영).".to_string()),
     }
 }

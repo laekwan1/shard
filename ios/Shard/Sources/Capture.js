@@ -626,9 +626,16 @@
       var y = window.scrollY || window.pageYOffset || 0;
       window.scrollTo(0, y + 1);
       window.scrollTo(0, y);
+      // 피드 썸네일(영상 미리보기)은 IntersectionObserver로 지연 로드·디코드된다 — 뒤로가기로
+      // 돌아온 직후엔 스크롤이 안 움직여 옵저버가 재평가를 안 해 검은 채로 남고, 손으로 스크롤해야
+      // 뜬다(사용자 지적). 합성 scroll 이벤트로 옵저버 재평가를 깨워 썸네일이 바로 로드되게 한다.
+      window.dispatchEvent(new Event('scroll'));
     } catch (err) {}
   };
-  var repaintBurst = function () { repaint(); setTimeout(repaint, 120); setTimeout(repaint, 400); };
+  // 썸네일이 늦게 붙기도 해 버스트 창을 늘린다(0/120/400/800ms).
+  var repaintBurst = function () {
+    repaint(); setTimeout(repaint, 120); setTimeout(repaint, 400); setTimeout(repaint, 800);
+  };
   // Full-navigation back restores from the back-forward cache (pageshow persisted).
   window.addEventListener('pageshow', function (e) { if (e.persisted) repaintBurst(); });
   // YouTube moves between videos WITHOUT a page load, so back there is a same-document

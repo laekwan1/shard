@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit  // UIApplication/UIResponder — 키보드 내리기(hideKeyboard). SwiftUI가 늘 재노출하진 않음.
 import UniformTypeIdentifiers
 import Darwin  // freopen/setvbuf/stderr/_IONBF — idevice C stderr를 파일로 붙잡으려고(④ 진단)
+import Network  // NWConnection — '재서명' 누를 때 LocalDevVPN(루프백) 살았는지 빠르게 선확인
 
 // 현재 앱 서명의 남은 유효기간. 앱 번들의 `embedded.mobileprovision`(현재 서명한 도구가 넣은 것 —
 // 지금은 SideStore/Sideloadly, 나중엔 우리 엔진)의 ExpirationDate를 읽는다. 모래시계가 이 값을 담는다.
@@ -147,8 +148,11 @@ final class ResignModel: ObservableObject {
     @Published var running = false
     @Published var summary: String?
     @Published var errorText: String?
+    // 실패가 아닌 가벼운 안내(예: "LocalDevVPN을 켜주세요"). 상세 로그는 이제 숨기므로(서명이 안정됨),
+    // 사용자에게 필요한 한 줄만 이걸로 버튼 아래 보인다.
+    @Published var notice: String?
     @Published var needs2FA = false
-    // '지금 갱신'으로 설치 명령을 보낸 뒤 재시작 안내 팝업을 띄우는 신호(요청). selfUpdate가 모델
+    // '재서명'으로 설치 명령을 보낸 뒤 재시작 안내 팝업을 띄우는 신호(요청). selfUpdate가 모델
     // 메서드라 여기(모델)에 둔다 — View의 @State면 모델에서 못 건드린다.
     @Published var showRestartAlert = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
@@ -326,7 +330,7 @@ final class ResignModel: ObservableObject {
     func selfUpdate(email: String, password: String, addr: String) {
         guard !running, hasPairing else { return }
         running = true
-        logLines = []; summary = nil; errorText = nil
+        logLines = []; summary = nil; errorText = nil; notice = nil
         lastEmail = email
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         let bundlePath = Bundle.main.bundlePath
@@ -335,6 +339,15 @@ final class ResignModel: ObservableObject {
         let work = URL(fileURLWithPath: sd).appendingPathComponent("work").path
         let pairingPath = pairingURL.path
         DispatchQueue.global(qos: .userInitiated).async {
+            // 0) VPN 선확인(요청): 꺼져 있으면 아래 rppairing ①이 10초를 매달렸다 실패하니, 그 전에 짧게 찔러
+            //    보고 "LocalDevVPN을 켜주세요"만 버튼 아래 띄우고 조용히 멈춘다. 켜져 있으면 바로 진행.
+            if !self.vpnReachable(addr, port: 49152) {
+                DispatchQueue.main.async {
+                    self.running = false
+                    self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요."
+                }
+                return
+            }
             // 1) Rust: 발급 + 자기 재서명 (설치는 minimuxer가 → device_addr/pairing_path = NULL로 서명만).
             let raw: UnsafeMutablePointer<CChar>? =
                 email.withCString { e in password.withCString { p in bundleId.withCString { b in
@@ -367,9 +380,9 @@ final class ResignModel: ObservableObject {
                    let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
                     if (obj2["ok"] as? Bool) == true {
                         self.summary = obj2["path"] as? String
-                        // 사용자가 '지금 갱신'을 눌러 설치 명령이 전송된 뒤엔 재시작 안내 팝업을 띄운다(요청).
-                        // 자기 덮어쓰기 설치는 완료 신호가 안 와도 디스크엔 설치되므로, 확인을 누르면 앱을 종료해
-                        // 다음 실행 때 새 번들(갱신된 서명)이 뜨게 한다(iOS는 자동 재실행을 못 하므로 종료까지만).
+                        // 재시작 팝업은 보통 rsd_install의 '@@RESTART@@' sentinel이 스테이징 직후(몇 초) 이미
+                        // 띄운다(appendLog). 여기는 fallback — 설치가 8초 안에 Ok로 끝나 sentinel이 안 나온
+                        // 드문 경우에도 팝업이 뜨게 한다. 이미 떠 있으면 no-op.
                         self.showRestartAlert = true
                     }
                     else {
@@ -377,7 +390,7 @@ final class ResignModel: ObservableObject {
                         // 터널 연결 실패(대개 LocalDevVPN 꺼짐)는 그것만 콕 집어 안내한다 — "설치 실패"로 뭉개면
                         // 사용자가 원인을 못 찾는다(요청). 연결 단계 마커/문구로 판별.
                         if e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과") {
-                            self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘지금 갱신’을 다시 눌러 주세요."
+                            self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
                         } else {
                             self.errorText = "설치 실패 — \(e)"
                         }
@@ -430,7 +443,35 @@ final class ResignModel: ObservableObject {
     }
 
     fileprivate func appendLog(_ line: String) {
+        // rsd_install이 스테이징 완료 직후 흘리는 재시작 신호(@@RESTART@@). 자기 덮어쓰기 설치의 완료 신호는
+        // 우리가 종료해야 오므로(구조상) 설치 함수 반환을 기다리면 팝업이 한참 늦게 떴다 — 이 sentinel로
+        // 스테이징이 끝난 몇 초 시점에 팝업을 즉시 띄운다. (로그는 이제 화면에 안 뿌리므로 append 안 함.)
+        if line.hasPrefix("@@RESTART@@") {
+            DispatchQueue.main.async { self.showRestartAlert = true }
+            return
+        }
         DispatchQueue.main.async { self.logLines.append(line) }
+    }
+
+    /// LocalDevVPN(루프백 10.7.0.x)이 살아 있는지 빠르게(≈1.5s) 확인한다. 꺼져 있으면 rppairing ① 연결이
+    /// 10초를 매달렸다 실패하므로(사용자엔 그냥 멈춘 듯 보임), 그 전에 짧게 찔러 보고 "VPN 켜주세요"를 바로
+    /// 띄우려는 것. .ready면 살아 있음, timeout/실패면 꺼짐으로 본다.
+    func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 1.5) -> Bool {
+        guard let p = NWEndpoint.Port(rawValue: port) else { return false }
+        let conn = NWConnection(host: NWEndpoint.Host(addr), port: p, using: .tcp)
+        let sem = DispatchSemaphore(value: 0)
+        var ok = false
+        conn.stateUpdateHandler = { st in
+            switch st {
+            case .ready: ok = true; sem.signal()
+            case .failed, .cancelled: sem.signal()
+            default: break
+            }
+        }
+        conn.start(queue: DispatchQueue.global(qos: .userInitiated))
+        _ = sem.wait(timeout: .now() + timeout)
+        conn.cancel()
+        return ok
     }
 
     private func finish(_ json: String) {
@@ -526,9 +567,6 @@ struct ResignView: View {
                     signatureStatus
                     if !model.accounts.isEmpty { signedAccounts }
 
-                    Text("Apple ID로 로그인해 이 앱의 개발 인증서·프로비저닝 프로파일을 발급받습니다. (.ipa 서명·설치는 다음 단계)")
-                        .font(.caption).foregroundColor(.muted)
-
                     // ID·anisette는 값이 기억돼 있으면(accountKnown) 접어 요약만 보이고, "변경"으로 편다.
                     if accountKnown && !editingAccount {
                         HStack(alignment: .top) {
@@ -616,9 +654,6 @@ struct ResignView: View {
                         }
                     }
 
-                    if let s = model.summary {
-                        Text("발급 성공 — \(s)").font(.footnote).foregroundColor(.accent)
-                    }
                     if let e = model.errorText {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
                     }
@@ -641,7 +676,7 @@ struct ResignView: View {
                             PasswordStore.save(password, for: email)
                             model.selfUpdate(email: email, password: password, addr: probeAddr)
                         } label: {
-                            Text(model.running ? "진행 중..." : "지금 갱신 (서명+설치)")
+                            Text(model.running ? "재서명 중..." : "재서명")
                                 .font(.body.weight(.semibold))
                                 .frame(maxWidth: .infinity).padding(.vertical, 12)
                                 .background(canSelfUpdate ? Color.accent : Color.toolbar)
@@ -649,24 +684,18 @@ struct ResignView: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         .disabled(!canSelfUpdate)
-                        Text("LocalDevVPN을 켜고 눌러 주세요 — 발급 → 자기 재서명 → 설치까지 자동. 끝나면 앱을 다시 여세요.")
-                            .font(.caption2).foregroundColor(.muted)
+                        // VPN 선확인 등 가벼운 안내를 버튼 바로 아래 보인다(요청). 예전의 "LocalDevVPN을 켜고
+                        // 눌러 주세요" 고정 설명은 제거하고, 정말 꺼져 있을 때만 이 자리에 뜬다.
+                        if let n = model.notice {
+                            Text(n).font(.caption).foregroundColor(.accent)
+                        }
                     }
                     .fileImporter(isPresented: $showPairingPicker, allowedContentTypes: [.item]) { result in
                         if case .success(let url) = result { model.importPairing(from: url) }
                     }
 
-                    if !model.logLines.isEmpty {
-                        Divider().background(Color.toolbar)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(model.logLines.indices, id: \.self) { i in
-                                Text(model.logLines[i])
-                                    .font(.caption2.monospaced())
-                                    .foregroundColor(.muted)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
+                    // 상세 로그 표시는 제거(요청: 서명이 안정돼 사용자가 볼 필요가 없다). 사용자에게 필요한
+                    // 한 줄(예: VPN 안내)은 위 model.notice로, 실패는 model.errorText로만 보인다.
                 }
                 .padding()
                 // anisette 칸을 접어 두면 그 칸의 onAppear가 안 뜨므로, 저장은 여기서(늘 실행) 한다.
@@ -682,13 +711,13 @@ struct ResignView: View {
         // 탭은 그 컨트롤이 먼저 먹으므로 입력·동작엔 지장 없고, 스크롤(드래그)과도 구분된다.
         .contentShape(Rectangle())
         .onTapGesture { hideKeyboard() }
-        // 재시작 안내(요청): '지금 갱신'으로 설치 명령을 보낸 뒤 뜬다. 확인 → 앱 종료(다음 실행 때 새 번들
-        // 적용). iOS는 앱이 스스로 다시 실행하는 걸 막으므로 종료까지만 하고 재실행은 사용자가 한다.
+        // 재시작 안내(요청): '재서명'으로 설치 명령을 보낸 뒤 몇 초 시점에 뜬다. 버튼은 '확인' 하나뿐이고
+        // 누르면 바로 종료한다(요청) — iOS는 자동 재실행을 막으므로 다음 실행은 사용자가 직접 연다. 종료가
+        // 곧 자기 덮어쓰기 설치를 확정한다(installd가 앱 종료 시 새 번들로 교체).
         .alert("앱을 다시 시작해 주세요", isPresented: $model.showRestartAlert) {
-            Button("종료하고 다시 열기") { exit(0) }
-            Button("나중에", role: .cancel) { }
+            Button("확인") { exit(0) }
         } message: {
-            Text("설치가 진행됐습니다. 앱을 다시 시작하면 갱신된 서명이 적용되고 유효기간이 새로 시작됩니다.")
+            Text("설치가 진행됐습니다. 앱을 종료합니다 — 다시 열면 갱신된 서명이 적용되고 유효기간이 새로 시작됩니다.")
         }
     }
 
