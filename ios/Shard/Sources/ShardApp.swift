@@ -115,7 +115,10 @@ struct RootView: View {
         .alert("재서명이 필요합니다", isPresented: $autoResign.showRenewPrompt) {
             Button("확인") { autoResign.confirmRenew() }
         } message: {
-            Text("서명 만료가 임박했습니다. LocalDevVPN을 켠 뒤 확인을 누르면 지금 재서명합니다.")
+            // 문구는 VPN 상태에 맞춘다(요청): 켜져 있으면 그냥 재서명한다고만, 꺼져 있을 때만 켜라고 안내.
+            Text(autoResign.renewNeedsVpn
+                 ? "서명 만료가 임박했습니다. LocalDevVPN을 켠 뒤 확인을 눌러 주세요."
+                 : "서명 만료가 임박했습니다. 확인을 누르면 지금 재서명합니다.")
         }
         // 자동(포그라운드) 재서명이 스테이징을 마치면 뜨는 재시작 팝업 — 수동 재서명의 것(시트)과 별개로,
         // 자동은 공유 인스턴스라 여기 루트에 바인딩해야 뜬다. 확인 → 종료(다음 실행 때 새 서명 적용).

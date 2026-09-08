@@ -13,6 +13,7 @@
 //!
 //! ⚠️ 검증 0: 실기기+LocalDevVPN+RP페어링이 있어야만 동작 확인. 헤드리스는 컴파일까지.
 
+use std::io::Read as _; // ZipFile::read_to_end — 서명된 ipa에서 Info.plist(CFBundleIdentifier) 뽑기
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 
@@ -23,8 +24,10 @@ use idevice::remote_pairing::{
 use idevice::rsd::RsdHandshake;
 use idevice::tcp::adapter::Adapter;
 use idevice::tcp::handle::AdapterHandle;
+// AFC 업로드를 직접(분리해) 하려고 afc 클라이언트를 쓴다 — 예전엔 install_package_with_callback_rsd가
+// 업로드+설치를 한 함수로 묶어, 업로드가 언제 끝났는지 알 수 없어 재시작 팝업 타이밍을 못 맞췄다.
+use idevice::services::afc::{opcode::AfcFopenMode, AfcClient};
 use idevice::services::installation_proxy::InstallationProxyClient;
-use idevice::utils::installation::install_package_with_callback_rsd;
 // connect_rsd는 RsdService 트레이트 메서드라 스코프에 있어야 호출된다.
 use idevice::RsdService;
 
@@ -41,6 +44,39 @@ fn load_rp_pairing(pairing: &[u8]) -> Result<RpPairingFile> {
              idevice_pair로 'Remote pairing' 파일을 발급해 가져오세요(classic .mobiledevicepairing은 안 됨)."
         )
     })
+}
+
+/// 서명된 .ipa에서 CFBundleIdentifier를 뽑는다 — Install ClientOptions에 넣어 installd가 **어떤 번들을
+/// 업그레이드할지** 특정하게 한다(예전 helper install_package_with_callback_rsd가 내부에서 자동으로 하던
+/// 일 — 업로드를 직접 분리하면 우리가 넣어야 한다). `Payload/<app>.app/Info.plist`(깊이 3)만 본다 —
+/// 프레임워크 등 더 깊은 Info.plist는 건너뛴다. 못 뽑으면 Err(설치는 빈 옵션으로 계속 시도한다).
+fn ipa_bundle_id(ipa: &Path) -> Result<String> {
+    let f = std::fs::File::open(ipa).map_err(|e| anyhow!("ipa 열기: {e}"))?;
+    let mut zip = zip::ZipArchive::new(f).map_err(|e| anyhow!("ipa zip: {e}"))?;
+    let mut target: Option<String> = None;
+    for i in 0..zip.len() {
+        let name = zip.by_index(i).map_err(|e| anyhow!("zip entry: {e}"))?.name().to_string();
+        let trimmed = name.trim_end_matches('/');
+        if trimmed.ends_with("Info.plist") {
+            let segs: Vec<&str> = trimmed.split('/').collect();
+            if segs.len() == 3 && segs[0] == "Payload" && segs[1].ends_with(".app") {
+                target = Some(name);
+                break;
+            }
+        }
+    }
+    let name = target.ok_or_else(|| anyhow!("ipa에 Payload/*.app/Info.plist 없음"))?;
+    let mut buf = Vec::new();
+    zip.by_name(&name)
+        .map_err(|e| anyhow!("Info.plist 열기: {e}"))?
+        .read_to_end(&mut buf)
+        .map_err(|e| anyhow!("Info.plist 읽기: {e}"))?;
+    let v: plist::Value = plist::from_bytes(&buf).map_err(|e| anyhow!("Info.plist 파싱: {e}"))?;
+    v.as_dictionary()
+        .and_then(|d| d.get("CFBundleIdentifier"))
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .ok_or_else(|| anyhow!("Info.plist에 CFBundleIdentifier 없음"))
 }
 
 /// `tunnel_create_rppairing` 재현: 직접 TCP → RPPairing(pair-verify) → TLS-PSK 터널 → jktcp userspace
@@ -225,55 +261,92 @@ pub async fn rsd_install(
         Err(e) => log(&format!("[진단] instproxy(RSD) 연결 실패(무시하고 설치 진행): {e:?}")),
     }
 
-    log("⑤ AFC 업로드(35MB) + installation_proxy 설치...");
-    // **자기 자신 덮어쓰기 설치는 installd가 패키지를 받아 비동기로 설치하고 진행/완료 신호를 이 채널로
-    // 안 돌려준다**(폰 실측: 진행 콜백이 0회인데도 홈 화면 아이콘이 "설치 중"을 표시하고, 재실행 시 재서명
-    // 스탬프가 갱신됨 = 실제로 설치 성공). 그래서 완료 신호를 기다리면 영원히 멈춘다. 대응: (1) 진행 콜백으로
-    // 퍼센트를 원자값에 기록, (2) 120초 타임아웃으로 감싼다(35MB 업로드가 끝날 만큼은 준다). **타임아웃은
-    // 실패가 아니라 "installd가 백그라운드에서 설치 중"으로 처리**한다 — 진짜 실패(서명 거부 등)는 아래
-    // Ok(Err)로 즉시 잡히므로 타임아웃 경로로 오지 않는다. options=None이면 helper가 .ipa의
-    // CFBundleIdentifier로 PublicStaging 업로드 후 설치한다.
+    // bundle_id를 서명된 ipa에서 뽑는다 — 아래 Install ClientOptions의 CFBundleIdentifier로 쓴다. 못
+    // 뽑아도(빈 값) 설치는 계속 시도한다(installd가 ipa 자체에서 번들을 읽어낼 수도 있음).
+    let bundle_id = ipa_bundle_id(ipa).unwrap_or_default();
+
+    // ── ⑤-a AFC 업로드 ── **이 단계가 끝나면 서명된 ipa가 기기 PublicStaging에 "완전히" 올라간 것**이다.
+    // 예전 버그(사용자 지적: "스피너 돈 뒤 재설치 안 됨"): 업로드+설치를 install_package_with_callback_rsd로
+    // 묶고 5초 뒤 '@@RESTART@@'를 흘렸는데, 로컬 터널 업로드가 5초 안에 안 끝나면 스테이징이 미완인 채
+    // 재시작 팝업이 떠 버렸다 — 그 시점에 앱을 종료하면 installd가 삼킬 완전한 ipa가 없어 재설치가 안 됐다.
+    // 그래서 이제 업로드를 **직접**(helper의 비공개 prepare_file_upload_rsd 대신) 하고 **끝까지 기다린 뒤에만**
+    // 팝업을 띄운다. 업로드가 끝났으면 이후 사용자가 종료해도 installd가 종료 시점에 완전한 ipa로 교체한다.
+    log("⑤ AFC 업로드 — 완료까지 대기(스피너 유지)...");
+    // tokio "fs" 피처가 이 크레이트엔 없어(net/time/io-util만) std::fs로 읽는다 — 33MB 한 번 읽기는
+    // current-thread 런타임을 잠깐 막지만(수십 ms) 그 사이 진행시킬 다른 태스크가 없어 문제없다.
+    let data = std::fs::read(ipa).map_err(|e| anyhow!("[⑤ 업로드] ipa 읽기 실패: {e}"))?;
+    const STAGING_DIR: &str = "PublicStaging";
+    const REMOTE_IPA: &str = "PublicStaging/idevice.ipa";
+    {
+        let mut afc = AfcClient::connect_rsd(&mut adapter, &mut hs)
+            .await
+            .map_err(|e| anyhow!("[⑤ 업로드] AFC 연결 실패: {e:?}"))?;
+        // PublicStaging이 없으면 만든다(helper ensure_public_staging와 동일).
+        if afc.get_file_info(STAGING_DIR).await.is_err() {
+            afc.mk_dir(STAGING_DIR)
+                .await
+                .map_err(|e| anyhow!("[⑤ 업로드] PublicStaging 생성 실패: {e:?}"))?;
+        }
+        let mut fd = afc
+            .open(REMOTE_IPA, AfcFopenMode::WrOnly)
+            .await
+            .map_err(|e| anyhow!("[⑤ 업로드] 파일 열기 실패: {e:?}"))?;
+        // 업로드에 하드 캡(180s) — 터널이 도중에 죽으면 무한 대기 대신 실패로 끊어 알린다. write가 실패해도
+        // fd는 반드시 닫는다(기기 쪽 fd 누수 방지 — helper afc_upload_file와 동일).
+        let wr = tokio::time::timeout(
+            std::time::Duration::from_secs(180),
+            fd.write_entire(&data),
+        )
+        .await;
+        let closed = fd.close().await;
+        match wr {
+            Err(_) => return Err(anyhow!("[⑤ 업로드] 180초 초과 — LocalDevVPN/터널 연결 확인")),
+            Ok(Err(e)) => return Err(anyhow!("[⑤ 업로드] 실패: {e:?}")),
+            Ok(Ok(())) => {}
+        }
+        closed.map_err(|e| anyhow!("[⑤ 업로드] close 실패: {e:?}"))?;
+    }
+    log("업로드 완료 — 기기에 ipa 적재됨. 설치 명령 전송...");
+
+    // ── ⑤-b Install 명령 + 짧은 grace ── 업로드가 끝났으니 여기서부터는 종료해도 안전하다.
+    // **자기 덮어쓰기 설치는 완료 신호가 종료 때만 온다**(폰 실측: 진행 콜백 0회인데 재실행 시 스탬프 갱신
+    // = 설치 성공). 그래서 완료를 기다리면 멈춘다. Install 명령을 보내고(watch_completion) 짧게(8s)만
+    // 거부를 살핀 뒤, 거부가 없으면 '@@RESTART@@'로 팝업을 띄운다 — 이때 팝업은 "정말 재시작해도 되는" 시점.
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    const NO_CB: u64 = u64::MAX; // 콜백 0회 = 진행 신호를 못 받음(자기 덮어쓰기 설치의 정상 동작 — 설치는 됨)
+    const NO_CB: u64 = u64::MAX; // 콜백 0회 = 진행 신호 못 받음(자기 덮어쓰기의 정상 — 설치는 됨)
     let last_pct = Arc::new(AtomicU64::new(NO_CB));
     let cb_pct = last_pct.clone();
-    let install = install_package_with_callback_rsd(
-        &mut adapter,
-        &mut hs,
-        ipa,
-        None,
+    let mut opt = plist::Dictionary::new();
+    if !bundle_id.is_empty() {
+        opt.insert("CFBundleIdentifier".into(), plist::Value::String(bundle_id));
+    }
+    let mut inst = InstallationProxyClient::connect_rsd(&mut adapter, &mut hs)
+        .await
+        .map_err(|e| anyhow!("[⑤ 설치] instproxy 연결 실패: {e:?}"))?;
+    let install = inst.install_with_callback(
+        REMOTE_IPA,
+        Some(plist::Value::Dictionary(opt)),
         move |(pct, ()): (u64, ())| {
             cb_pct.store(pct, Ordering::SeqCst);
             async {}
         },
         (),
     );
-    // **재시작 팝업을 완료 신호에 매달지 않는다.** 자기 덮어쓰기 설치의 완료 신호는 우리가 종료해야
-    // 오므로(폰 실측) 실행 중엔 절대 안 온다 — 예전엔 그래서 120초 타임아웃이 다 지나야 팝업이 떠서
-    // "한참 걸린다"고 지적받았다. 두 단계로 나눈다. ① 짧은 grace(10s): 진짜 서명 거부는 Ok(Err)로 몇 초
-    // 안에 빠르게 오므로 여기서 잡혀 에러로 갈리고, 로컬 터널 업로드(35MB)는 1~2초라 10초면 스테이징이 끝나
-    // 있다. 거부가 없으면 곧바로 '@@RESTART@@' sentinel 로그를 흘려 UI가 팝업을 **즉시** 띄우게 한다(설치
-    // 함수 반환을 안 기다림). ② 남은 시간 동안 터널을 살려 두어(어댑터 소유 유지) installd가 PublicStaging
-    // 에서 마저 삼키게 하고, 늦은 거부도 붙잡는다.
     tokio::pin!(install);
-    match tokio::time::timeout(std::time::Duration::from_secs(5), &mut install).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(8), &mut install).await {
         Ok(Ok(())) => return Ok("설치 완료 🎉 — 앱을 강제종료 후 다시 여세요.".to_string()),
-        // installd가 **거부**하면(서명·엔티틀먼트 문제 등) 여기로 온다 — 진짜 실패. {e:?}에 ErrorDescription 담김.
+        // installd가 **거부**하면(서명·엔티틀먼트 문제 등) 여기 — 진짜 실패. {e:?}에 ErrorDescription 담김.
         Ok(Err(e)) => return Err(anyhow!("[⑤ 설치] 실패: {e:?}")),
-        // 5초 동안 거부가 없었다 = 업로드·스테이징 성공(요청: 팝업 5초 이내). 재시작 팝업을 지금 띄우게
-        // sentinel을 흘린다. 서명이 안정돼 거부는 드물고, 로컬 터널 업로드(35MB)는 1~2초라 5초면 스테이징
-        // 판정에 충분하다.
         Err(_) => {
             let p = last_pct.load(Ordering::SeqCst);
-            let phase = if p == NO_CB { "백그라운드 설치 중".to_string() } else { format!("{p}% 진행 중") };
+            let phase = if p == NO_CB { "스테이징".to_string() } else { format!("{p}% 진행") };
             // '@@RESTART@@' 접두는 Swift appendLog가 가로채 팝업만 띄우고 뒤 문장만 화면 로그에 남긴다.
-            log(&format!("@@RESTART@@설치 스테이징 완료({phase}) — 앱을 강제종료 후 다시 여세요."));
+            log(&format!("@@RESTART@@업로드·설치 명령 완료({phase}) — 앱을 강제종료 후 다시 여세요."));
         }
     }
-    // ② 꼬리: 알림은 이미 떴다. 업로드(35MB)는 1~2초에 끝나 installd가 PublicStaging(디스크)에서 읽으므로
-    //    터널이 더는 대량 전송에 필요치 않다 — 30초만 더 살려 installd가 마저 흡수하게 하고(늦은 거부도
-    //    붙잡음) 반환한다. 사용자가 '확인'을 누르면 exit(0)로 어차피 즉시 끝난다.
+    // 꼬리: installd가 마저 처리하도록 터널을 30초 더 살린다(늦은 거부도 붙잡음). 사용자가 '확인'을 누르면
+    // exit(0)로 어차피 즉시 끝난다.
     match tokio::time::timeout(std::time::Duration::from_secs(30), &mut install).await {
         Ok(Ok(())) => Ok("설치 완료 🎉 — 앱을 강제종료 후 다시 여세요.".to_string()),
         Ok(Err(e)) => Err(anyhow!("[⑤ 설치] 실패(스테이징 후): {e:?}")),

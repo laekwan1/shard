@@ -166,6 +166,9 @@ final class ResignModel: ObservableObject {
     // 포그라운드에서 만료 임박(≤1일) 시 "재서명 필요" 알림창을 띄우는 신호(요청). 확인 → confirmRenew().
     // 자동 재서명은 시트가 닫힌 상태에서도 떠야 하므로 이 신호로 루트 뷰가 알림창을 띄운다.
     @Published var showRenewPrompt = false
+    // 위 알림창을 띄우는 시점의 VPN 상태 — 문구를 고른다(요청). true(꺼짐)면 "LocalDevVPN 켠 뒤 확인",
+    // false(켜짐)면 "확인을 누르면 지금 재서명"만. 예전엔 상태와 무관하게 늘 "VPN 켠 뒤"라 켜져 있어도 그렇게 떴다.
+    @Published var renewNeedsVpn = false
     // 발급에 성공한 계정 목록(체크 표시로 관리). 시작 시 저장소에서 읽는다.
     @Published var accounts: [SignedAccount] = SignedAccountStore.load()
     // 자동(백그라운드) 갱신이 도는 동안 true — appendLog가 @@RESTART@@ 재시작 sentinel을 무시하게 해서
@@ -351,6 +354,11 @@ final class ResignModel: ObservableObject {
                     bundlePathOverride: String? = nil) {
         guard !running, hasPairing else { return }
         running = true
+        // 이번 실행에서 재서명을 시작했음을 표시한다 — 수동/자동/자체업데이트 모두. 이게 없으면 수동
+        // '재서명' 뒤 앱을 껐다 켤 때(재시작 전엔 옛 만료일이라 여전히 "임박") autoRenewIfNeeded가 또
+        // "재서명 필요" 팝업을 띄웠다(사용자 지적: "다시 실행하면 또 팝업창 뜬다"). 한 번 재서명했으면
+        // 새 서명은 다음 콜드런치에 적용되니 이번 실행엔 다시 물어볼 필요가 없다.
+        autoRenewStarted = true
         silentRenew = silent   // appendLog가 이 값으로 재시작 팝업을 띄울지 결정
         logLines = []; summary = nil; errorText = nil; notice = nil
         lastEmail = email
@@ -443,7 +451,9 @@ final class ResignModel: ObservableObject {
     /// 매 실행 재시도하지 않게), LocalDevVPN이 켜져 있고 재생 중이 아닐 때만. VPN이 꺼져 있으면 조용히
     /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
     func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false) {
-        guard !autoRenewStarted, !running, hasPairing, nothingPlaying else { return }
+        // !showRestartAlert: 이미 재서명이 끝나 재시작 팝업이 떠 있으면(사용자가 아직 종료 안 함) 다시
+        // 물어보지 않는다 — 그 위에 또 팝업이 겹치던 것을 막는다.
+        guard !autoRenewStarted, !running, !showRestartAlert, hasPairing, nothingPlaying else { return }
         guard let exp = SigningInfo.expirationDate() else { return }
         let test = Self.testRenew   // 테스트: 3일 → 6일23시간55분(갓 서명 ~5분 뒤 발동)
         let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 55 * 60) : (3 * 86400)
@@ -456,7 +466,16 @@ final class ResignModel: ObservableObject {
             let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
             guard urgent, savedRenewInputs() != nil else { return }
             autoRenewStarted = true
-            showRenewPrompt = true
+            // 알림창 문구를 VPN 상태에 맞춘다(요청). vpnReachable은 인터페이스 검사라 대개 즉시지만 폴백
+            // TCP가 최대 1.5초 메인을 막을 수 있어 백그라운드에서 재고, 결과로 문구를 정한 뒤 알림창을 띄운다.
+            let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
+            DispatchQueue.global(qos: .userInitiated).async {
+                let on = self.vpnReachable(addr, port: 49152)
+                DispatchQueue.main.async {
+                    self.renewNeedsVpn = !on
+                    self.showRenewPrompt = true
+                }
+            }
             return
         }
 
@@ -516,7 +535,7 @@ final class ResignModel: ObservableObject {
     /// 보다 크면 받아 적용(코드까지 갱신, in-place라 데이터 보존). **update_url.txt가 없으면(인프라 미설정)
     /// 조용히 넘어간다** — 켜기 전엔 아무 일도 안 한다. 서명·설치는 무인 계정으로, 완료 시 재시작 팝업.
     func checkForUpdate() async {
-        guard !selfUpdateStarted, !running, hasPairing, savedRenewInputs() != nil else { return }
+        guard !selfUpdateStarted, !running, !showRestartAlert, hasPairing, savedRenewInputs() != nil else { return }
         // 마커 URL은 **앱에 내장**된 GitHub Release 고정 URL — 폰에 아무것도 입력할 필요 없다(사용자 요청).
         // state_dir/update_url.txt가 있으면 그걸로 덮는다(다른 채널로 바꿀 때만). 저장소가 PUBLIC이라 인증
         // 없이 받아진다(PRIVATE 전환 시엔 이 URL을 API+내장 토큰 방식으로 바꿔야 함).
@@ -632,10 +651,43 @@ final class ResignModel: ObservableObject {
         DispatchQueue.main.async { self.logLines.append(line) }
     }
 
-    /// LocalDevVPN(루프백 10.7.0.x)이 살아 있는지 빠르게(≈1.5s) 확인한다. 꺼져 있으면 rppairing ① 연결이
-    /// 10초를 매달렸다 실패하므로(사용자엔 그냥 멈춘 듯 보임), 그 전에 짧게 찔러 보고 "VPN 켜주세요"를 바로
-    /// 띄우려는 것. .ready면 살아 있음, timeout/실패면 꺼짐으로 본다.
+    /// LocalDevVPN(루프백 10.7.0.x)이 살아 있는지 확인한다. **먼저 네트워크 인터페이스를 본다**: StosVPN이
+    /// 켜지면 utun 인터페이스에 10.7.0.x 주소를 얹으므로 getifaddrs로 그 주소가 있으면 VPN이 켜진 것이다
+    /// (즉시·확실). 예전엔 10.7.0.1:49152에 NWConnection을 1.5초 안에 .ready 못 받아 **VPN이 켜져 있는데도
+    /// "꺼짐"으로 오판**했다(사용자 지적: "vpn 연결되어있는데도 켜달라고 뜬다") — RemotePairing 엔드포인트가
+    /// bare TCP 핸드셰이크를 곧바로 안 받아 주는 탓. 인터페이스에 없으면(라우트만 있는 드문 경우) TCP로 폴백.
     func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 1.5) -> Bool {
+        if hasTunnelInterface(forAddr: addr) { return true }
+        return tcpReachable(addr, port: port, timeout: timeout)
+    }
+
+    /// addr과 같은 /24(앞 세 옥텟) 대역의 IPv4 주소를 얹은 **활성** 인터페이스가 있으면 true. StosVPN이
+    /// 켜지면 utun에 그 대역을 얹으므로 이걸로 "VPN 켜짐"을 즉시 판별한다(오판 없음).
+    private func hasTunnelInterface(forAddr addr: String) -> Bool {
+        let octets = addr.split(separator: ".")
+        guard octets.count >= 3 else { return false }
+        let prefix = octets[0...2].joined(separator: ".") + "."   // "10.7.0."
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return false }
+        defer { freeifaddrs(ifaddr) }
+        var cur: UnsafeMutablePointer<ifaddrs>? = first
+        while let c = cur {
+            defer { cur = c.pointee.ifa_next }
+            guard (c.pointee.ifa_flags & UInt32(IFF_UP)) != 0,
+                  let sa = c.pointee.ifa_addr,
+                  sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count),
+                           nil, 0, NI_NUMERICHOST) == 0,
+               String(cString: host).hasPrefix(prefix) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// 폴백 — addr:port로 TCP를 짧게 찔러 .ready면 켜짐으로 본다(인터페이스에서 못 잡은 드문 경우).
+    private func tcpReachable(_ addr: String, port: UInt16, timeout: TimeInterval) -> Bool {
         guard let p = NWEndpoint.Port(rawValue: port) else { return false }
         let conn = NWConnection(host: NWEndpoint.Host(addr), port: p, using: .tcp)
         let sem = DispatchSemaphore(value: 0)
