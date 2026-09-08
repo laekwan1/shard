@@ -144,6 +144,9 @@ enum SignedAccountStore {
 // 로그 콜백은 진행 상황을 화면에 스트리밍한다.
 
 final class ResignModel: ObservableObject {
+    // 앱 수준 자동 재서명 전용 공유 인스턴스 — ShardApp(포그라운드)과 AppDelegate(BGProcessingTask, 새벽)이
+    // 같은 걸 쓴다(시트의 인스턴스와는 별개). 하나만 두어야 running 플래그로 동시 서명이 안 겹친다.
+    static let shared = ResignModel()
     @Published var logLines: [String] = []
     @Published var running = false
     @Published var summary: String?
@@ -419,10 +422,20 @@ final class ResignModel: ObservableObject {
     /// 종료 시 교체). 안전장치: 이번 실행 1회 + 하루 1회(스테이징이 적용 안 돼 옛 만료일을 계속 읽어도
     /// 매 실행 재시도하지 않게), LocalDevVPN이 켜져 있고 재생 중이 아닐 때만. VPN이 꺼져 있으면 조용히
     /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
-    func autoRenewIfNeeded(nothingPlaying: Bool) {
+    func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true) {
         guard !autoRenewStarted, !running, hasPairing, nothingPlaying else { return }
-        guard let exp = SigningInfo.expirationDate(),
-              exp.timeIntervalSinceNow <= 3 * 86400 else { return }   // 만료 임박 아님
+        guard let exp = SigningInfo.expirationDate() else { return }
+        let daysLeft = exp.timeIntervalSinceNow / 86400.0
+        guard daysLeft <= 3 else { return }   // 만료 임박 아님(모래시계 앰버와 같은 3일)
+        // 선호 시간대: 새벽 4-6시(사용자 요청). 포그라운드 경로(preferredWindowOnly=true)는 그 시간이
+        // 아니면 미루되, 만료가 급하면(≤1일) 시간과 무관하게 갱신한다(만료 방지). BGProcessingTask 경로는
+        // 이미 새벽으로 예약돼 오므로 시간 게이트를 안 건다(preferredWindowOnly=false).
+        if preferredWindowOnly {
+            let hour = Calendar.current.component(.hour, from: Date())
+            let inWindow = (4..<6).contains(hour)
+            let urgent = daysLeft <= 1
+            guard inWindow || urgent else { return }
+        }
         let key = "resign.lastAutoRenew"
         let last = UserDefaults.standard.double(forKey: key)
         if last > 0, Date().timeIntervalSince1970 - last < 24 * 3600 { return }  // 하루 1회

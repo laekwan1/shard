@@ -46,6 +46,14 @@
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
+        <string>processing</string>
+    </array>
+
+    <!-- 새벽 자동 재서명(BGProcessingTask)용 식별자. AppDelegate가 이 값으로 핸들러를 등록하고
+         다음 새벽 4시로 예약한다. 이 배열에 없는 식별자로 register/submit하면 iOS가 거부한다. -->
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>net.sw.shard.autorenew</string>
     </array>
 
     <key>UILaunchScreen</key>
