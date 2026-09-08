@@ -470,7 +470,7 @@ final class ResignModel: ObservableObject {
             autoRenewStarted = true
             // 알림창 문구를 VPN 상태에 맞춘다(요청). vpnReachable은 인터페이스 검사라 대개 즉시지만 폴백
             // TCP가 최대 1.5초 메인을 막을 수 있어 백그라운드에서 재고, 결과로 문구를 정한 뒤 알림창을 띄운다.
-            let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
+            let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.1.1"
             DispatchQueue.global(qos: .userInitiated).async {
                 let on = self.vpnReachable(addr, port: 49152)
                 DispatchQueue.main.async {
@@ -512,7 +512,7 @@ final class ResignModel: ObservableObject {
         guard !email.isEmpty else { return nil }
         let password = PasswordStore.load(for: email)
         guard !password.isEmpty else { return nil }
-        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.0.1"
+        let addr = UserDefaults.standard.string(forKey: "resign.tunnelAddr") ?? "10.7.1.1"
         return (email, password, addr)
     }
 
@@ -673,13 +673,16 @@ final class ResignModel: ObservableObject {
         sin.sin_family = sa_family_t(AF_INET)
         sin.sin_port = port.bigEndian
         guard addr.withCString({ inet_pton(AF_INET, $0, &sin.sin_addr) }) == 1 else { return false }
+        var connErrno: Int32 = 0
         let cres = withUnsafePointer(to: &sin) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa -> Int32 in
+                let r = connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
+                connErrno = errno // errno는 이후 런타임 호출에 덮일 수 있어 connect 직후 즉시 붙잡는다
+                return r
             }
         }
         if cres == 0 { return true } // 즉시 연결됨(드묾)
-        if errno != EINPROGRESS { return false } // 라우트 없음 등 → 즉시 실패 = VPN 꺼짐
+        if connErrno != EINPROGRESS { return false } // 라우트 없음 등 → 즉시 실패 = VPN 꺼짐
         var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
         guard poll(&pfd, 1, Int32(timeout * 1000)) > 0, (pfd.revents & Int16(POLLOUT)) != 0 else {
             return false // 타임아웃/에러
@@ -753,7 +756,7 @@ struct ResignView: View {
     @State private var password = ""
     @State private var tfaInput = ""
     @State private var showPairingPicker = false
-    @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
+    @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.1.1"
     // 전용 anisette 서버 주소(비우면 기본 공유서버). 고정 기기 정체성 → 잠금·재로그인 근본 차단.
     @AppStorage("resign.anisetteURL") private var anisetteURL = ""
     // 발급·페어링이 끝난 뒤엔 ID·anisette·터널 칸을 접어 두고(값은 @AppStorage로 기억됨) "변경"으로만
@@ -875,8 +878,9 @@ struct ResignView: View {
                         Text("실패 — \(e)").font(.footnote).foregroundColor(.red)
                     }
 
-                    // 설치엔 RP 페어링과 LocalDevVPN(별도 앱, 루프백 VPN)이 필요하다. 연결 테스트 UI는 제거하고
-                    // (요청), 페어링이 **없을 때만** 가져오기를 보인다. 터널 주소는 기본 10.7.0.1(probeAddr) 사용.
+                    // 설치엔 RP 페어링과 LocalDevVPN(별도 앱, 루프백 VPN)이 필요하다. 페어링이 **없을 때만**
+                    // 가져오기를 보인다. 터널 IP는 반사(reflector) VPN마다 다르므로(StosVPN=10.7.0.1,
+                    // LocalDevVPN='터널' 10.7.1.1) 아래 입력칸으로 직접 맞춘다 — 틀리면 선확인·설치가 다 실패한다.
                     Divider().background(Color.toolbar)
                     VStack(alignment: .leading, spacing: 10) {
                         if !model.hasPairing {
@@ -887,6 +891,16 @@ struct ResignView: View {
                                 Button("가져오기") { showPairingPicker = true }
                                     .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                             }
+                        }
+                        // 터널 IP — LocalDevVPN이 표시하는 **'터널'** 주소(예 10.7.1.1). 이 앱이 여기에 붙어
+                        // 재서명·설치를 한다. 반사 VPN마다 대상이 달라(폰 자신=기기 10.7.0.1이 아니라 반대편
+                        // 터널 주소로 붙어야 함) 틀리면 "켜주세요"·설치실패가 난다. 값은 기억되고(@AppStorage)
+                        // 선확인과 설치가 같은 값을 쓴다. 안 되면 10.7.0.1도 시험해 볼 것.
+                        labeled("터널 IP (LocalDevVPN ‘터널’ 주소)") {
+                            TextField("10.7.1.1", text: $probeAddr)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.numbersAndPunctuation)
+                                .disableAutocorrection(true)
                         }
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
