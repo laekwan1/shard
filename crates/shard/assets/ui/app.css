@@ -818,7 +818,13 @@ body.bmDragActive, body.bmDragActive * { cursor: grabbing !important; }
   display: flex;
   flex-direction: column;
 }
-#stage { flex: 1; position: relative; display: grid; place-items: center; overflow: hidden; }
+/* Flex-centre, not grid place-items: a grid item's height:100% does NOT resolve against the
+   cell here (place-items:center leaves the video auto-sized by width×aspect), so a PORTRAIT
+   video grew to 1280×2276 and overflow:hidden cut its top and bottom off — it read as cropped.
+   In a flex centre the video's height:100% resolves to the stage height, so object-fit:contain
+   letterboxes it whole (사용자: 세로 영상이 잘려서 나옴 → 영상 비율대로 전체가 보이게). #art and
+   #queue are position:absolute, so the display change touches only the video. */
+#stage { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 #video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 /* A song has no picture, so the note stands in for one. */
 /*
@@ -828,6 +834,11 @@ body.bmDragActive, body.bmDragActive * { cursor: grabbing !important; }
 */
 #art {
   position: absolute;
+  /* Centre explicitly (not via the parent's flex/grid static position) so the music cover stays
+     put now that #stage is flex — the parent's centring no longer feeds an abs child's position. */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: grid;
   place-items: center;
   width: 152px;
