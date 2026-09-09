@@ -176,6 +176,10 @@ final class ResignModel: ObservableObject {
     // 이번 실행에서 자동 갱신을 이미 시작했으면 true — scenePhase가 .active로 여러 번 와도 반복 안 되게.
     // (실행 중인 앱은 새 서명이 적용되기 전까지 옛 만료일을 계속 읽으므로 안 그러면 매번 재시도한다.)
     private var autoRenewStarted = false
+    // 포그라운드에서 '재서명 필요'를 사용자가 **확인**했으면 true — 이후 (VPN 꺼짐 등으로) 실패해도 다시
+    // 묻지 않고, 앱이 포그라운드로 돌아올 때마다 **바로 재시도**한다(성공하면 false). 루트에 alert가 여러 개
+    // 겹쳐 재표시가 불안정했던 것을 우회한다(사용자: "내렸다 올리면 재시도 안 됨"). 성공 시 리셋.
+    private var renewConfirmed = false
     // 자체 업데이트도 마찬가지 — 설치 후 콜드런치 전까지 실행 중 앱은 옛 CFBundleVersion을 계속 읽어
     // 마커 버전이 계속 커 보이므로, 한 번 시작하면 이번 실행에선 다시 안 하게 막는다.
     private var selfUpdateStarted = false
@@ -385,8 +389,17 @@ final class ResignModel: ObservableObject {
                     self.running = false
                     self.silentRenew = false
                     self.autoRenewStarted = false
-                    if silent { self.notifyVpnOff() }
-                    else { self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요." }
+                    if silent {
+                        self.notifyVpnOff()
+                    } else if self === ResignModel.shared {
+                        // 자동 경로(루트 알림창 '확인'). notice는 시트에서만 보여 여기선 아무 안내 없이 끝났었다
+                        // (사용자: "확인하면 스피너 돌다 사라지고 그냥 끝난다"). errorText로 루트에 알리고, VPN을
+                        // 켜고 포그라운드로 돌아오면 renewConfirmed로 자동 재시도된다.
+                        self.errorText = "LocalDevVPN이 꺼져 있습니다. 켠 뒤 앱으로 돌아오면 자동으로 다시 시도합니다."
+                    } else {
+                        // 수동 '재서명' 버튼(시트) — 시트 안에 안내. 다시 누르면 재시도.
+                        self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요."
+                    }
                 }
                 return
             }
@@ -428,6 +441,7 @@ final class ResignModel: ObservableObject {
                     .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
                 if (obj2?["ok"] as? Bool) == true {
                     self.summary = obj2?["path"] as? String
+                    self.renewConfirmed = false   // 성공 → 자동 재시도 종료
                     // 성공: 자동(silent)이면 쿨다운을 **여기서만** 찍는다 — 옛 만료일을 콜드런치 전까지 계속
                     // 읽어도 이번 성공 뒤엔 다시 안 하게. 실패면 안 찍으므로 다음 시도가 막히지 않는다.
                     if silentNow {
@@ -474,12 +488,17 @@ final class ResignModel: ObservableObject {
             // 확인 누르면 재서명/재설치). 정기 갱신은 새벽 BGTask가 조용히 하므로, 포그라운드는 그게 안 됐을
             // 때의 안전망 — 급할 때(≤1일, 테스트는 즉시)만 뜬다. 무인 재서명할 계정+비번이 있어야 물어본다.
             let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
-            guard urgent, savedRenewInputs() != nil else { return }
+            guard urgent, let (email, password, addr) = savedRenewInputs() else { return }
             autoRenewStarted = true
-            // 알림창을 바로 띄운다 — VPN 선확인으로 문구를 가르지 않는다. 선확인이 켜져 있어도 "꺼짐"으로
-            // 잘못 봐 "켜라"가 잘못 뜨던 문제가 있었다(사용자: 포그라운드 자동도 VPN 연결 안 된 걸로 나옴).
-            // 확인을 누르면 실제 설치가 진짜 판정을 하고, 정말 꺼져 있으면 그때 설치 에러로 알려준다.
-            showRenewPrompt = true
+            if renewConfirmed {
+                // 이미 한 번 확인을 눌렀다(그런데 VPN 꺼짐 등으로 실패) → 다시 묻지 않고 **바로 재시도**.
+                // 포그라운드로 돌아올 때마다 시도해, VPN을 켜면 그때 성공한다(사용자: "내렸다 올리면 재시도돼야").
+                selfUpdate(email: email, password: password, addr: addr)
+            } else {
+                // 첫 도래: 자동으로 서명하지 않고 **알림창으로 물어본다**(사용자: "재서명 필요" 확인 후 진행).
+                // 확인을 누르면 실제 설치가 진짜 판정을 하고, 꺼져 있으면 설치 에러로 알린다.
+                showRenewPrompt = true
+            }
             return
         }
 
@@ -514,6 +533,7 @@ final class ResignModel: ObservableObject {
     /// '앱을 다시 시작해 주세요' 팝업이 떠(루트에 바인딩) 확인하면 종료·재설치된다.
     func confirmRenew() {
         showRenewPrompt = false
+        renewConfirmed = true   // 이후 실패해도 포그라운드 복귀 시 자동 재시도(성공하면 리셋)
         guard let (email, password, addr) = savedRenewInputs() else { return }
         selfUpdate(email: email, password: password, addr: addr)
     }

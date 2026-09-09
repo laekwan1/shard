@@ -9,9 +9,15 @@ struct BrowserScreen: View {
     /// True while the library is shown over the browser — then page videos are
     /// paused and blocked from entering full screen (see WebModel.setBrowserActive).
     var libraryVisible: Bool = false
+    /// Playback settings — the web video should honor '백그라운드 재생' just like the
+    /// library's files: with it off, a page video is paused when the app backgrounds
+    /// so the lock-screen Now Playing panel does not linger (user request).
+    @ObservedObject var prefs: PlaybackPrefs
     var openLibrary: () -> Void
 
     @StateObject private var model = WebModel()
+    // 화면 잠금/홈 이동을 잡아 '백그라운드 재생' 꺼짐이면 페이지 영상을 멈춘다(라이브러리 파일과 동일 규칙).
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var bookmarks = BookmarksStore()
     @State private var showStart = false
     @State private var renaming: Bookmark?
@@ -148,6 +154,13 @@ struct BrowserScreen: View {
             // full screen when the library forces landscape.
             model.setBrowserActive(!visible)
             if visible { model.pauseWebVideos() }
+        }
+        // '백그라운드 재생' 꺼짐 상태에서 앱이 백그라운드로 가면(홈·잠금) 페이지 영상을 멈춘다 — 안 그러면
+        // WKWebView가 계속 재생하며 잠금화면 Now Playing 패널을 띄운다(사용자 지적). 켜짐이면 그대로 둬
+        // 백그라운드 재생 + 패널 조작이 되게 한다(WKWebView가 알아서 원격 명령을 처리). 라이브러리 파일이
+        // ShardApp에서 같은 규칙으로 멈추는 것과 일관.
+        .onChange(of: scenePhase) { phase in
+            if phase == .background, !prefs.background { model.pauseWebVideos() }
         }
         // Web video full-screen rotation is left to iOS. Forcing landscape here
         // kept corrupting the window geometry on exit (page and library came back
