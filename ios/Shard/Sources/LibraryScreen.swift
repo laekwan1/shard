@@ -36,6 +36,9 @@ struct LibraryScreen: View {
     @State private var dragging: Item?
     @State private var dropTarget: Item?
     @Namespace private var shelfNS
+    // 화면 잠금/해제를 잡으려는 것 — 전체화면(가로) 재생 중 화면을 껐다 켜면 보관함이 가로로 남던 것을
+    // 잠금 시점에 전체화면을 풀어(세로 복원) 막는다(백그라운드 재생 꺼짐일 때만; 켜짐이면 영상이 이어짐).
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -130,6 +133,19 @@ struct LibraryScreen: View {
         // a different shape — re-decide orientation once it starts.
         .onChange(of: player.currentURL) { _ in
             if fullscreen { DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { lockForVideo() } }
+        }
+        // 화면 잠금(→ .background)이고 **백그라운드 재생이 꺼져 있으면** 영상이 곧 멈춘다(ShardApp이 stop).
+        // 그때 전체화면이었다면 방향이 가로로 잠긴 채 남아, 잠금 해제 후 보관함이 가로로 보였다(사용자 지적).
+        // 잠금 시점에 전체화면을 풀고 방향을 되돌려(free) 해제 후 세로 보관함으로 돌아오게 한다. 안드로이드가
+        // 전체화면 아닐 때 SCREEN_ORIENTATION_UNSPECIFIED(센서 따름)로 두는 것과 결을 맞춘다. 백그라운드 재생
+        // 켜짐이면 영상이 이어지므로 그대로 둬(해제 시 전체화면 가로 유지).
+        .onChange(of: scenePhase) { phase in
+            if phase == .background, fullscreen, !prefs.background {
+                orientGen += 1
+                fullscreen = false
+                Orientation.shared.free()
+                player.settling = false
+            }
         }
         .onChange(of: visible) { shown in
             if !shown && fullscreen { fullscreen = false; Orientation.shared.free(); player.settling = false }
