@@ -26,6 +26,10 @@ struct RootView: View {
     // 앱이 실제로 OS 백그라운드(홈 버튼·잠금)로 들어가는 순간을 잡으려는 것. 오디오 세션이 .playback +
     // audio 백그라운드 모드라, 아무 처리도 안 하면 '백그라운드 재생'이 꺼져 있어도 계속 재생된다(사용자 지적).
     @Environment(\.scenePhase) private var scenePhase
+    // 앱이 떠 있는 동안(웹 보는 중 등) 재서명 기간이 도래하면 팝업이 뜨도록 주기적으로 확인한다 — 예전엔
+    // scenePhase .active(포그라운드 복귀)에서만 확인해, 웹을 보는 도중 도래하면 내렸다 올리기 전엔 안 떴다
+    // (사용자 지적). allowRetry:false라 최초 알림만 띄우고(재시도는 복귀 때만) 스팸을 막는다.
+    private let renewTick = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         GeometryReader { geo in
@@ -37,7 +41,12 @@ struct RootView: View {
                     // video reporting itself was pausing the library's own playback
                     // (a track paused ~1s in; full screen dropped to pause on exit).
                     guard !showLibrary else { return }
-                    if on && player.isPlaying { player.pause() }
+                    if on {
+                        if player.isPlaying { player.pause() }
+                        // 웹 영상이 잠금화면 Now Playing/원격 명령을 갖도록 VLC가 비켜준다 — 안 그러면 패널
+                        // 명령이 VLC로 가 조작이 안 됐다(사용자 지적). VLC는 다시 재생하면 open/resume에서 되찾음.
+                        player.stepAsideForWeb()
+                    }
                 }, libraryVisible: showLibrary, prefs: prefs) {
                     // If the browser was turned to landscape (address rotate button),
                     // force portrait before the library slides in — free() alone left
@@ -108,12 +117,17 @@ struct RootView: View {
             // 띄우고, 정기 갱신은 새벽 BGTask가 조용히 한다. 그리고 만료 하루 전 로컬 알림을 (재)예약해
             // 앱을 안 열어도 알림이 오게 한다.
             if phase == .active {
-                autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)
+                autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)   // 복귀: 재시도 허용
                 autoResign.scheduleExpiryReminder()
                 // 2단계 자체 업데이트: Veil 마커에 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
                 // update_url.txt(인프라)가 없으면 조용히 넘어가 — 켜기 전엔 아무 일도 안 한다.
                 Task { await autoResign.checkForUpdate() }
             }
+        }
+        // 앱이 떠 있는 동안 주기 확인 — 웹 보는 도중 기간이 도래해도 팝업이 뜨게(사용자 지적). allowRetry:false로
+        // 최초 알림만(재시도는 .active에서). 백그라운드에선 타이머가 멈추므로 배터리 영향 없음.
+        .onReceive(renewTick) { _ in
+            autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying, allowRetry: false)
         }
         // 포그라운드 만료 임박 '재서명 필요' 알림창(요청): 확인만, 누르면 저장된 계정으로 재서명 시작 →
         // 완료 시 아래 '재시작' 팝업이 뜬다. 자동 재서명은 시트가 닫혀 있어도 떠야 하므로 루트에 둔다.

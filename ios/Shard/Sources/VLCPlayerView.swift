@@ -266,7 +266,14 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// Lock screen and headset controls, so a video listened to like music is
     /// controlled like music.
     private func setupRemoteCommands() {
+        steppedAside = false   // VLC가 잠금화면을 되찾는다 — updateNowPlaying이 다시 동작
         let center = MPRemoteCommandCenter.shared()
+        // 먼저 제거해 **멱등**하게 — open()마다 다시 불러 웹에 양보했던 명령을 되찾는데, 안 지우면 addTarget가
+        // 쌓여 한 번 눌러도 여러 번 실행된다.
+        for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
+                  center.nextTrackCommand, center.previousTrackCommand, center.changePlaybackPositionCommand] {
+            c.removeTarget(nil)
+        }
         center.playCommand.addTarget { [weak self] _ in self?.resume(); return .success }
         center.pauseCommand.addTarget { [weak self] _ in self?.pause(); return .success }
         center.togglePlayPauseCommand.addTarget { [weak self] _ in self?.toggle(); return .success }
@@ -283,7 +290,12 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         }
     }
 
+    // 웹 영상에 잠금화면을 양보한 동안 true — VLC의 상태변경 알림(async)이 updateNowPlaying로 Now Playing을
+    // 다시 뺏는 걸 막는다. reclaim(setupRemoteCommands)에서 false로 되돌린다.
+    private var steppedAside = false
+
     private func updateNowPlaying() {
+        guard !steppedAside else { return }
         var info: [String: Any] = [MPMediaItemPropertyTitle: nowPlayingTitle]
         if let length = player.media?.length.intValue, length > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = Double(length) / 1000
@@ -291,6 +303,20 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = Double(player.time.intValue) / 1000
         info[MPNowPlayingInfoPropertyPlaybackRate] = player.isPlaying ? Double(rate) : 0
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+
+    /// 웹 영상이 활성이 되면 VLC가 잠금화면 Now Playing/원격 명령에서 **비켜준다**. VLC가 전역 명령을 잡고
+    /// 있으면 웹 영상 재생 중 패널 명령이 VLC로 가 조작이 안 되고(사용자 지적) 패널도 안 사라졌다. 비켜주면
+    /// WKWebView가 자기 미디어의 패널·원격 명령을 직접 처리한다. VLC가 다시 open()하면 setupRemoteCommands로
+    /// 되찾는다(멱등). 라이브러리 재생은 open이 되찾으므로 영향 없음.
+    func stepAsideForWeb() {
+        steppedAside = true
+        let center = MPRemoteCommandCenter.shared()
+        for c in [center.playCommand, center.pauseCommand, center.togglePlayPauseCommand,
+                  center.nextTrackCommand, center.previousTrackCommand, center.changePlaybackPositionCommand] {
+            c.removeTarget(nil)
+        }
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 
     func attach(to view: UIView) {
@@ -312,6 +338,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // Music merely sat paused left two sessions coexisting and the Bluetooth output
         // crackled. Re-match the route's rate/buffer right after.
         try? AVAudioSession.sharedInstance().setActive(true)
+        setupRemoteCommands()   // 웹에 양보했던 잠금화면 명령을 VLC가 되찾는다(멱등)
         configureForCurrentRoute()
 
         if prefersAV(url) {
@@ -480,6 +507,7 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// the web video may have taken the audio route.
     func resume() {
         try? AVAudioSession.sharedInstance().setActive(true)
+        setupRemoteCommands()   // 웹에 양보했으면 잠금화면 명령을 되찾는다(멱등)
         if backend == .vlc, audioRouted { audioSink.start() }
         backend == .av ? avPlay() : player.play()
         userPaused = false

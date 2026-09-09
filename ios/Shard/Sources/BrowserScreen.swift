@@ -1,4 +1,6 @@
 import SwiftUI
+import MediaPlayer    // MPNowPlayingInfoCenter — 백그라운드 꺼짐 시 웹 영상 잠금화면 패널 제거
+import AVFoundation   // AVAudioSession — 세션을 내려 패널을 확실히 지운다
 
 /// The browser: a thin top bar and the page. Downloads are handed to the shared
 /// store and run in parallel; the library slides in from the right, or from a
@@ -160,7 +162,14 @@ struct BrowserScreen: View {
         // 백그라운드 재생 + 패널 조작이 되게 한다(WKWebView가 알아서 원격 명령을 처리). 라이브러리 파일이
         // ShardApp에서 같은 규칙으로 멈추는 것과 일관.
         .onChange(of: scenePhase) { phase in
-            if phase == .background, !prefs.background { model.pauseWebVideos() }
+            if phase == .background, !prefs.background {
+                model.pauseWebVideos()
+                // 멈춤만으론 잠금화면 패널이 '멈춤 상태'로 남는다(사용자 지적). Now Playing을 비우고 오디오
+                // 세션을 내려 패널을 확실히 지운다 — 백그라운드 재생 꺼짐이면 라이브러리도 이미 멈춰(ShardApp)
+                // 세션을 내려도 안전하다. 켜짐이면 이 분기를 안 타 재생·패널이 유지된다.
+                MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+                try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            }
         }
         // Web video full-screen rotation is left to iOS. Forcing landscape here
         // kept corrupting the window geometry on exit (page and library came back

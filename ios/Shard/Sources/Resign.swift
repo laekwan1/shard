@@ -484,7 +484,10 @@ final class ResignModel: ObservableObject {
     /// 종료 시 교체). 안전장치: 이번 실행 1회 + 하루 1회(스테이징이 적용 안 돼 옛 만료일을 계속 읽어도
     /// 매 실행 재시도하지 않게), LocalDevVPN이 켜져 있고 재생 중이 아닐 때만. VPN이 꺼져 있으면 조용히
     /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
-    func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false) {
+    /// allowRetry: 이미 확인(renewConfirmed)한 뒤 실패한 건에 대해 **재시도까지** 할지. 포그라운드 복귀
+    /// (.active)·백그라운드 작업은 true, 앱이 떠 있는 동안 도는 **주기 타이머는 false**(최초 알림만 띄우고
+    /// 재시도는 안 함 — VPN 꺼진 동안 30초마다 스피너·실패가 반복되는 걸 막는다).
+    func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false, allowRetry: Bool = true) {
         // !showRestartAlert: 이미 재서명이 끝나 재시작 팝업이 떠 있으면(사용자가 아직 종료 안 함) 다시
         // 물어보지 않는다 — 그 위에 또 팝업이 겹치던 것을 막는다. !anyResignRunning: 수동 시트가 재서명 중이면
         // (다른 인스턴스라 running으론 안 잡힘) 자동을 띄우지 않는다 — 동시 실행/겹침 방지.
@@ -500,14 +503,17 @@ final class ResignModel: ObservableObject {
             // 때의 안전망 — 급할 때(≤1일, 테스트는 즉시)만 뜬다. 무인 재서명할 계정+비번이 있어야 물어본다.
             let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
             guard urgent, let (email, password, addr) = savedRenewInputs() else { return }
-            autoRenewStarted = true
             if renewConfirmed {
-                // 이미 한 번 확인을 눌렀다(그런데 VPN 꺼짐 등으로 실패) → 다시 묻지 않고 **바로 재시도**.
-                // 포그라운드로 돌아올 때마다 시도해, VPN을 켜면 그때 성공한다(사용자: "내렸다 올리면 재시도돼야").
+                // 이미 한 번 확인을 눌렀다(그런데 VPN 꺼짐 등으로 실패) → 다시 묻지 않고 재시도. 단 재시도는
+                // 복귀(.active)·백그라운드에서만(allowRetry) — 주기 타이머(allowRetry=false)면 건너뛴다(autoRenewStarted도
+                // 안 건드려 다음 복귀에 재시도되게). 포그라운드로 돌아올 때 VPN을 켰으면 그때 성공한다.
+                guard allowRetry else { return }
+                autoRenewStarted = true
                 selfUpdate(email: email, password: password, addr: addr)
             } else {
                 // 첫 도래: 자동으로 서명하지 않고 **알림창으로 물어본다**(사용자: "재서명 필요" 확인 후 진행).
-                // 확인을 누르면 실제 설치가 진짜 판정을 하고, 꺼져 있으면 설치 에러로 알린다.
+                // 앱이 떠 있는 동안(웹 보는 중 등) 기간이 도래해도 주기 타이머가 이 분기로 팝업을 띄운다.
+                autoRenewStarted = true
                 showRenewPrompt = true
             }
             return
