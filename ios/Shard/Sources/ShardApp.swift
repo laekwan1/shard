@@ -41,13 +41,11 @@ struct RootView: View {
                     // video reporting itself was pausing the library's own playback
                     // (a track paused ~1s in; full screen dropped to pause on exit).
                     guard !showLibrary else { return }
-                    if on {
-                        if player.isPlaying { player.pause() }
-                        // 웹 영상은 오디오 세션을 **믹스(.mixWithOthers)**로 둔다 — 믹스 세션은 Now Playing
-                        // 주체가 안 돼 잠금화면 패널이 안 뜬다(사용자 요청: 웹 백그라운드가 안 되면 패널 자체를
-                        // 없앤다). VLC가 파일을 재생하면 open/resume이 비믹스로 되찾아 라이브러리 패널은 유지.
-                        player.webAudioMode()
-                    }
+                    // 웹 영상이 스스로 재생을 알리면 라이브러리 재생만 멈춘다(겹침 방지). 웹의 잠금화면
+                    // 패널은 WKWebView가 별도 미디어 프로세스에서 자체 관리해 앱 오디오 세션으로 못 없앤다
+                    // (여러 방식 시도했으나 플랫폼 한계 — 세션을 바꾸면 소리만 죽고 패널은 남는다). 그래서
+                    // 웹은 사파리처럼 패널이 뜨는 원래 동작으로 둔다.
+                    if on && player.isPlaying { player.pause() }
                 }, libraryVisible: showLibrary, prefs: prefs) {
                     // If the browser was turned to landscape (address rotate button),
                     // force portrait before the library slides in — free() alone left

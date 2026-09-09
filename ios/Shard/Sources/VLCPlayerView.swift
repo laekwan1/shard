@@ -299,20 +299,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         if (player.drawable as? UIView) !== view { player.drawable = view }
     }
 
-    /// 라이브러리(VLC)가 잠금화면 Now Playing의 **주체**가 되게 한다(믹스 아님) — 패널·백그라운드·조작이
-    /// VLC로 간다. open/resume에서 불러, 웹이 잠깐 믹스로 바꿔 놨어도 되찾는다.
-    func ownAudioMode() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
-    }
-    /// 웹 영상이 재생될 때 세션을 **.soloAmbient**로 둔다 — ambient 세션은 잠금화면 Now Playing 미디어
-    /// 주체가 **원천적으로 안 돼** 패널이 안 뜬다(사용자 요청: 웹은 패널 아예 없게). .mixWithOthers(.playback)
-    /// 로는 WKWebView가 Now Playing을 그대로 등록해 패널이 남았다 — ambient라야 확실. 트레이드오프: ambient는
-    /// 무음 스위치·화면 잠금 시 소리가 멎는다(일반 인라인 영상과 동일). VLC가 파일을 재생하면 open/resume이
-    /// ownAudioMode(.playback)로 되찾아 라이브러리 패널·백그라운드는 그대로.
-    func webAudioMode() {
-        try? AVAudioSession.sharedInstance().setCategory(.soloAmbient)
-    }
-
     func open(_ url: URL) {
         currentURL = url
         userPaused = false
@@ -325,7 +311,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
         // .playback session interrupts it so we OWN the output outright; playing while
         // Music merely sat paused left two sessions coexisting and the Bluetooth output
         // crackled. Re-match the route's rate/buffer right after.
-        ownAudioMode()   // 웹이 믹스로 바꿔 놨을 수 있으니 VLC가 비믹스로 되찾는다(라이브러리 패널 유지)
         try? AVAudioSession.sharedInstance().setActive(true)
         configureForCurrentRoute()
 
@@ -494,7 +479,6 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     /// Resume after we paused for a web video — reactivate the session first, since
     /// the web video may have taken the audio route.
     func resume() {
-        ownAudioMode()   // 웹에 양보(믹스)했으면 VLC가 비믹스로 되찾는다 — 라이브러리 패널 유지
         try? AVAudioSession.sharedInstance().setActive(true)
         if backend == .vlc, audioRouted { audioSink.start() }
         backend == .av ? avPlay() : player.play()

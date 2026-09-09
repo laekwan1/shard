@@ -39,6 +39,28 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKScript
             "document.querySelectorAll('video').forEach(function(v){try{v.pause()}catch(e){}})",
             completionHandler: nil)
     }
+
+    /// 홈/잠금(백그라운드) 시 웹 영상을 멈추고 **Media Session까지 지운다**. 잠금화면 Now Playing 패널은
+    /// 앱 오디오 세션이 아니라 **웹페이지의 `navigator.mediaSession`(메타데이터·playbackState)**이 띄운다 —
+    /// 그래서 오디오 세션을 바꾸면 소리만 죽고 패널은 남았다(사용자 지적: "엉뚱한 층"). 여기서 영상 pause +
+    /// `playbackState='none'` + metadata·액션핸들러 제거로 패널의 진짜 원인을 끊는다. 백그라운드로 가면
+    /// WKWebView의 JS가 멈춰 페이지가 다시 세팅하지 못하므로 남아 있는다.
+    func suppressMediaSession() {
+        let js = """
+        (function(){
+          try { document.querySelectorAll('video,audio').forEach(function(v){ try{v.pause()}catch(e){} }); } catch(e) {}
+          try {
+            if ('mediaSession' in navigator) {
+              navigator.mediaSession.playbackState = 'none';
+              navigator.mediaSession.metadata = null;
+              ['play','pause','stop','seekbackward','seekforward','seekto','previoustrack','nexttrack']
+                .forEach(function(a){ try { navigator.mediaSession.setActionHandler(a, null); } catch(e) {} });
+            }
+          } catch(e) {}
+        })();
+        """
+        webView.evaluateJavaScript(js, completionHandler: nil)
+    }
     /// The `Cookie:` header the page would send for `urlString`, pulled from the
     /// web view's own cookie store — the download engine runs outside the browser,
     /// so a site that gates its media behind a session cookie (pornhub) needs this

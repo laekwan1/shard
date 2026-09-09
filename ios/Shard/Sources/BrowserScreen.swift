@@ -160,9 +160,10 @@ struct BrowserScreen: View {
         // 백그라운드 재생 + 패널 조작이 되게 한다(WKWebView가 알아서 원격 명령을 처리). 라이브러리 파일이
         // ShardApp에서 같은 규칙으로 멈추는 것과 일관.
         .onChange(of: scenePhase) { phase in
-            // 백그라운드 재생 꺼짐이면 홈/잠금 시 웹 영상을 멈춘다(라이브러리 파일과 같은 규칙). 웹은
-            // 오디오 세션이 믹스(webAudioMode)라 잠금화면 패널 자체가 없다 — 그래서 여기선 멈추기만 하면 된다.
-            if phase == .background, !prefs.background { model.pauseWebVideos() }
+            // 백그라운드 재생 꺼짐이면 홈/잠금 시 웹 영상을 멈추고 **Media Session까지 지워** 잠금화면 패널을
+            // 없앤다(사용자 아이디어: 홈/잠금을 '보관함으로 넘어간 것'처럼 처리 + 패널의 진짜 원인인 mediaSession
+            // 정리). 켜짐이면 그대로 둬 웹이 백그라운드로 재생된다.
+            if phase == .background, !prefs.background { model.suppressMediaSession() }
         }
         // Web video full-screen rotation is left to iOS. Forcing landscape here
         // kept corrupting the window geometry on exit (page and library came back
