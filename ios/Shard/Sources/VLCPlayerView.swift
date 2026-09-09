@@ -304,12 +304,13 @@ final class VLCController: NSObject, ObservableObject, VLCMediaPlayerDelegate {
     func ownAudioMode() {
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP])
     }
-    /// 웹 영상이 재생될 때 세션을 **믹스**(.mixWithOthers)로 둔다 — 믹스 세션은 Now Playing 주체가 안 돼서
-    /// 잠금화면/제어센터 패널이 안 뜬다(사용자 요청: 웹 백그라운드가 안 되면 웹 패널은 아예 안 뜨게). 여전히
-    /// .playback이라 무음 스위치와 무관하게 소리는 난다. VLC가 다시 재생하면 ownAudioMode로 되찾는다.
+    /// 웹 영상이 재생될 때 세션을 **.soloAmbient**로 둔다 — ambient 세션은 잠금화면 Now Playing 미디어
+    /// 주체가 **원천적으로 안 돼** 패널이 안 뜬다(사용자 요청: 웹은 패널 아예 없게). .mixWithOthers(.playback)
+    /// 로는 WKWebView가 Now Playing을 그대로 등록해 패널이 남았다 — ambient라야 확실. 트레이드오프: ambient는
+    /// 무음 스위치·화면 잠금 시 소리가 멎는다(일반 인라인 영상과 동일). VLC가 파일을 재생하면 open/resume이
+    /// ownAudioMode(.playback)로 되찾아 라이브러리 패널·백그라운드는 그대로.
     func webAudioMode() {
-        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default,
-                                                         options: [.allowBluetoothA2DP, .mixWithOthers])
+        try? AVAudioSession.sharedInstance().setCategory(.soloAmbient)
     }
 
     func open(_ url: URL) {
