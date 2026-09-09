@@ -67,28 +67,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
-    /// 다음 새벽 4시(대략)로 재서명 백그라운드 작업을 예약. 정확한 시각은 iOS가 정하지만(idle·자원 여유),
-    /// earliestBeginDate 이후로 잡는다. 네트워크는 필요(애플 로그인·설치), 충전은 요구하지 않는다(요구하면
-    /// 새벽에 안 도는 경우가 많다). 실패해도(이미 예약됨 등) try?로 삼킨다.
+    /// 재서명 백그라운드 작업을 예약한다. **밤낮 가리지 않고**(사용자 요청) 다음 기회에 iOS가 돌리게 한다 —
+    /// 새벽 4시로 묶으면 그만큼 실행 기회가 줄어 잘 안 돈다. earliestBeginDate만 살짝 뒤로 두고, 실제 실행
+    /// 시각은 iOS가 정한다(대개 충전·유휴·네트워크 여유 시). 재서명은 조용하고(무팝업) 만료 임박일 때만 실제로
+    /// 서명하므로 아무 때나 돌아도 무해하다. 네트워크 필요, 충전 불요(요구하면 실행이 더 드묾). try?로 삼킨다.
+    /// ※ 배경 자동 재서명의 진짜 제약은 시각이 아니라 **그때 LocalDevVPN이 켜져 있어야** 설치가 되는 것 —
+    ///   앱은 백그라운드에서 VPN을 못 켠다. 꺼져 있으면 설치가 실패하고 로컬 알림(notifyVpnOff)으로 알린다.
     func scheduleRenew() {
         let req = BGProcessingTaskRequest(identifier: Self.renewTaskID)
         req.requiresNetworkConnectivity = true
         req.requiresExternalPower = false
-        // 테스트 모드: 다음 새벽 대신 곧(20초 뒤)로 잡아 백그라운드 자동 재서명을 바로 시험 가능하게 한다.
-        // 실제 실행 시각은 iOS가 정하므로 즉시는 아니고 대개 앱 백그라운드 후 몇 분 안. 운영: 다음 새벽 4시.
-        req.earliestBeginDate = ResignModel.testRenew ? Date(timeIntervalSinceNow: 20) : Self.next4am()
+        req.earliestBeginDate = Date(timeIntervalSinceNow: ResignModel.testRenew ? 20 : 60)
         try? BGTaskScheduler.shared.submit(req)
-    }
-
-    /// 지금 이후의 가장 가까운 새벽 4시.
-    private static func next4am() -> Date {
-        let cal = Calendar.current
-        let now = Date()
-        var comps = cal.dateComponents([.year, .month, .day], from: now)
-        comps.hour = 4; comps.minute = 0
-        let today4 = cal.date(from: comps) ?? now.addingTimeInterval(4 * 3600)
-        return today4 > now ? today4
-            : (cal.date(byAdding: .day, value: 1, to: today4) ?? today4.addingTimeInterval(86400))
     }
 
     private func handleRenew(_ task: BGProcessingTask) {

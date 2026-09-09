@@ -85,6 +85,10 @@ char *shard_resign_verify(const char *email, const char *password,
 char *shard_resign_probe(const char *pairing_path, const char *addr,
                          ShardLog log, void *ctx);
 
+// VPN(LocalDevVPN) 터널 도달성 — 설치 ①과 같은 TCP connect(addr:port)를 timeout_ms로 감싼다.
+// 1=붙음(VPN 켜짐), 0=못 붙음(꺼짐). 별도 프로브가 설치와 다르게 "꺼짐"으로 오판하던 것 방지. 페어링 불필요.
+int32_t shard_tunnel_reachable(const char *addr, uint16_t port, uint32_t timeout_ms);
+
 // ④ RSD 스모크(iOS 17+): rppairing 터널(addr:port + RP 페어링, 예 10.7.0.1:49152)을 세우고 터널 안
 // RSD 서비스 목록 확인. classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 대체.
 // pairing_path는 **RpPairingFile**(idevice_pair 발급, classic .mobiledevicepairing 아님).

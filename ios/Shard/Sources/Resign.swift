@@ -376,16 +376,17 @@ final class ResignModel: ObservableObject {
         let bgTask = UIApplication.shared.beginBackgroundTask(withName: "resign")
         DispatchQueue.global(qos: .userInitiated).async {
             defer { if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } } }
-            // 0) VPN 선확인은 **무인 백그라운드 갱신(silent)에서만** 게이트로 쓴다 — 거기선 VPN이 꺼져 있으면
-            //    ①이 10초 매달리다 실패하니 그 전에 조용히 건너뛰어야 하기 때문. **사용자가 직접 누른 재서명
-            //    (!silent)에서는 선확인으로 막지 않는다**: 선확인(NWConnection이든 원시 소켓이든)이 이 루프백
-            //    터널을 켜져 있어도 "꺼짐"으로 잘못 봐 재서명을 통째로 막던 문제가 있었다(사용자 지적: 켜져
-            //    있는데 "켜주세요"·작동 안 함). 진짜 판정은 실제 설치 ①이다 — LocalDevVPN으로 서명이 잘 됐던
-            //    그 경로 그대로 붙고, 정말 꺼져 있으면 아래 설치 에러가 "LocalDevVPN 꺼짐"으로 콕 집어 알려준다.
-            if silent && !self.vpnReachable(addr, port: 49152) {
+            // 0) VPN 선확인 — 이제 설치 ①과 **같은 연결**(vpnReachable→shard_tunnel_reachable, Rust
+            //    TcpStream::connect)로 보므로 믿을 수 있다("설치는 되는데 확인은 꺼짐" 불일치 없음). 꺼져 있으면
+            //    ①이 10초 매달리기 전에 즉시 갈린다: 수동은 "켜주세요", 자동(silent)은 로컬 알림. 그리고 실패로
+            //    끝나므로 autoRenewStarted를 내려 다음 진입(.active)·새벽(BGTask)에 **다시 시도**되게 한다.
+            if !self.vpnReachable(addr, port: 49152) {
                 DispatchQueue.main.async {
                     self.running = false
                     self.silentRenew = false
+                    self.autoRenewStarted = false
+                    if silent { self.notifyVpnOff() }
+                    else { self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요." }
                 }
                 return
             }
@@ -405,6 +406,7 @@ final class ResignModel: ObservableObject {
                 let err = (json.data(using: .utf8)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["error"] as? String
                 DispatchQueue.main.async {
                     self.running = false; self.silentRenew = false
+                    self.autoRenewStarted = false   // 실패 → 다음에 다시 시도 가능하게
                     if !silent { self.errorText = "서명 단계 실패 — \(err ?? json)" }
                 }
                 return
@@ -422,26 +424,33 @@ final class ResignModel: ObservableObject {
                 self.running = false
                 let silentNow = self.silentRenew
                 self.silentRenew = false   // 다음 수동 재서명은 다시 팝업을 띄우게
-                if let d2 = json2.data(using: .utf8),
-                   let obj2 = try? JSONSerialization.jsonObject(with: d2) as? [String: Any] {
-                    if (obj2["ok"] as? Bool) == true {
-                        self.summary = obj2["path"] as? String
-                        // 재시작 팝업은 보통 rsd_install의 '@@RESTART@@' sentinel이 스테이징 직후(몇 초) 이미
-                        // 띄운다(appendLog). 여기는 fallback — 설치가 짧게 Ok로 끝나 sentinel이 안 나온 드문
-                        // 경우에도 팝업이 뜨게 한다. 자동(silent) 갱신은 팝업 없이 조용히 끝낸다.
-                        if !silentNow { self.showRestartAlert = true }
+                let obj2 = json2.data(using: .utf8)
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                if (obj2?["ok"] as? Bool) == true {
+                    self.summary = obj2?["path"] as? String
+                    // 성공: 자동(silent)이면 쿨다운을 **여기서만** 찍는다 — 옛 만료일을 콜드런치 전까지 계속
+                    // 읽어도 이번 성공 뒤엔 다시 안 하게. 실패면 안 찍으므로 다음 시도가 막히지 않는다.
+                    if silentNow {
+                        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "resign.lastAutoRenew")
+                    } else {
+                        // 재시작 팝업은 보통 rsd_install의 '@@RESTART@@' sentinel이 스테이징 직후 이미 띄운다.
+                        // 여기는 fallback(짧게 Ok로 끝나 sentinel이 안 나온 경우). 자동은 팝업 없이 조용히.
+                        self.showRestartAlert = true
                     }
-                    else if !silentNow {
-                        let e = obj2["error"] as? String ?? json2
-                        // 터널 연결 실패(대개 LocalDevVPN 꺼짐)는 그것만 콕 집어 안내한다 — "설치 실패"로 뭉개면
-                        // 사용자가 원인을 못 찾는다(요청). 연결 단계 마커/문구로 판별. (자동 갱신 실패는 조용히.)
-                        if e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과") {
-                            self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
-                        } else {
-                            self.errorText = "설치 실패 — \(e)"
-                        }
+                } else {
+                    // 실패 → **다음에 다시 시도**할 수 있게 플래그를 내린다(포그라운드는 다음 .active, 백그라운드는
+                    // 다음 BGTask). 사용자: "재서명 안됐으면 다시 시도해야지".
+                    self.autoRenewStarted = false
+                    let e = (obj2?["error"] as? String) ?? json2
+                    let vpnOff = e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과")
+                    if silentNow {
+                        if vpnOff { self.notifyVpnOff() }   // 백그라운드 VPN 꺼짐 → 로컬 알림
+                    } else if vpnOff {
+                        self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
+                    } else {
+                        self.errorText = "설치 실패 — \(e)"
                     }
-                } else if !silentNow { self.errorText = "설치 응답 파싱 실패" }
+                }
             }
         }
     }
@@ -474,25 +483,17 @@ final class ResignModel: ObservableObject {
             return
         }
 
-        // 백그라운드(BGTask): 팝업 없이 조용히 재서명한다. 하루 1회(테스트 2분), LocalDevVPN 켜짐일 때만.
+        // 백그라운드(BGTask): 팝업 없이 조용히 재서명한다. 쿨다운(성공 1회/일, 테스트 2분)만 여기서 보고,
+        // VPN 확인·꺼짐 알림·실패 재시도는 selfUpdate가 처리한다(선확인이 설치와 같은 연결이라 믿을 수 있음).
+        // 쿨다운은 selfUpdate가 **성공 때만** 찍으므로, VPN이 꺼졌던 밤은 다음 BGTask에서 다시 시도된다.
         let key = "resign.lastAutoRenew"
         let last = UserDefaults.standard.double(forKey: key)
         let cooldown: TimeInterval = test ? 120 : 24 * 3600
         if last > 0, Date().timeIntervalSince1970 - last < cooldown { return }
-        guard let inputs = savedRenewInputs() else { return }
-        let (email, password, addr) = inputs
-        DispatchQueue.global(qos: .utility).async {
-            guard self.vpnReachable(addr, port: 49152) else {
-                self.notifyVpnOff()   // 새벽에 VPN 꺼짐 → 로컬 알림(요청). 켜면 다음 시도에 갱신.
-                return
-            }
-            DispatchQueue.main.async {
-                guard !self.autoRenewStarted, !self.running else { return }
-                self.autoRenewStarted = true
-                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
-                self.selfUpdate(email: email, password: password, addr: addr, silent: true)
-            }
-        }
+        guard savedRenewInputs() != nil else { return }
+        let (email, password, addr) = savedRenewInputs()!
+        autoRenewStarted = true
+        selfUpdate(email: email, password: password, addr: addr, silent: true)
     }
 
     /// 저장된 계정+비번+터널주소(무인 재서명 입력). 없으면 nil — 그러면 자동 재서명을 안 한다.
@@ -646,45 +647,15 @@ final class ResignModel: ObservableObject {
         DispatchQueue.main.async { self.logLines.append(line) }
     }
 
-    /// LocalDevVPN(루프백 10.7.0.1 → 기기 RemotePairing 49152)이 실제로 닿는지 **원시 BSD 소켓 connect**로
-    /// 확인한다. 두 번 헛짚었다: ⓐ NWConnection으로 1.5초 안에 .ready를 못 받아 켜져 있어도 "꺼짐"으로
-    /// 오판(경로 평가·happy-eyeballs 오버헤드로 로컬 터널에도 느리게 붙음), ⓑ getifaddrs로 utun에 10.7.0.x
-    /// 주소가 있나 봤더니 LocalDevVPN은 **라우트로만** 넘겨 인터페이스엔 그 주소가 없어 늘 false → 또 오판(사용자:
-    /// "vpn 켜주세요 계속 뜬다"). 결국 **실제 설치가 쓰는 것과 같은 원시 소켓 connect**가 정답이다 — 논블로킹
-    /// connect + poll(POLLOUT)로, 터널이 살아 있으면 SYN-ACK가 즉시 와 붙고(true), 꺼져 있으면 라우트가 없어
-    /// connect가 곧바로 실패한다(EINPROGRESS 아님 → false). 양방향 다 빠르고, Rust ①(TcpStream::connect)과
-    /// 같은 커널 경로라 install이 붙는 상황과 정확히 일치한다.
+    /// LocalDevVPN(루프백 10.7.0.1 → 기기 RemotePairing 49152)이 살아 있는지 **실제 설치와 똑같은 연결**로
+    /// 확인한다 — Rust `shard_tunnel_reachable`가 설치 ①과 같은 `TcpStream::connect(addr:port)`를 timeout으로
+    /// 감싼다. Swift 쪽 프로브(NWConnection→인터페이스→원시 소켓)를 세 번 시도했지만 전부 이 터널을 켜져
+    /// 있어도 "꺼짐"으로 오판했다(사용자: "이전엔 바로 확인됐는데 안 된다"). 원인은 프로브 방식이 설치가
+    /// 붙는 방식과 달랐던 것 — 그래서 판정을 설치가 쓰는 그 커널 경로에 맡긴다. 붙으면 true(켜짐), 못 붙으면
+    /// false(꺼짐). "설치는 되는데 확인은 꺼짐" 불일치가 원천적으로 없다. (백그라운드 스레드에서 부른다 —
+    /// block_on이라 최대 timeout만큼 막힐 수 있음.)
     func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 3.0) -> Bool {
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-        // 논블로킹으로 두어야 timeout을 poll로 제어한다(블로킹 connect는 커널 기본 타임아웃까지 매달림).
-        let fl = fcntl(fd, F_GETFL, 0)
-        _ = fcntl(fd, F_SETFL, fl | O_NONBLOCK)
-        var sin = sockaddr_in()
-        sin.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        sin.sin_family = sa_family_t(AF_INET)
-        sin.sin_port = port.bigEndian
-        guard addr.withCString({ inet_pton(AF_INET, $0, &sin.sin_addr) }) == 1 else { return false }
-        var connErrno: Int32 = 0
-        let cres = withUnsafePointer(to: &sin) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sa -> Int32 in
-                let r = connect(fd, sa, socklen_t(MemoryLayout<sockaddr_in>.size))
-                connErrno = errno // errno는 이후 런타임 호출에 덮일 수 있어 connect 직후 즉시 붙잡는다
-                return r
-            }
-        }
-        if cres == 0 { return true } // 즉시 연결됨(드묾)
-        if connErrno != EINPROGRESS { return false } // 라우트 없음 등 → 즉시 실패 = VPN 꺼짐
-        var pfd = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
-        guard poll(&pfd, 1, Int32(timeout * 1000)) > 0, (pfd.revents & Int16(POLLOUT)) != 0 else {
-            return false // 타임아웃/에러
-        }
-        // 쓰기 가능 = connect 종료. SO_ERROR가 0이어야 진짜 연결(0 아니면 RST 등 실패).
-        var serr: Int32 = 0
-        var slen = socklen_t(MemoryLayout<Int32>.size)
-        guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &serr, &slen) == 0 else { return false }
-        return serr == 0
+        addr.withCString { shard_tunnel_reachable($0, port, UInt32(timeout * 1000)) } == 1
     }
 
     private func finish(_ json: String) {

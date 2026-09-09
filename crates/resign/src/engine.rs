@@ -889,6 +889,28 @@ pub fn rsd_install_blocking(
     local.block_on(&rt, crate::rsd::rsd_install(addr, pairing, &ipa, log))
 }
 
+/// 가벼운 VPN(LocalDevVPN) 터널 도달성 — **설치 ①과 같은** `TcpStream::connect(addr)`를 timeout으로 감싼다.
+/// 왜 이게 필요한가: Swift의 NWConnection·원시 소켓 프로브가 이 루프백 터널을 **켜져 있어도 "꺼짐"으로
+/// 오판**했다(사용자 반복 확인). 실제 설치는 이 connect로 잘 붙으니, **판정을 프로브가 아니라 설치가 쓰는
+/// 그 커널 경로로** 하면 "설치는 되는데 확인은 꺼짐" 불일치가 사라진다. 붙으면 true(켜짐), 라우트 없음/
+/// 타임아웃이면 false(꺼짐). 연결은 바로 드롭한다(도달성만 본다).
+pub fn tunnel_reachable_blocking(addr: std::net::SocketAddr, timeout_ms: u64) -> bool {
+    let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(_) => return false,
+    };
+    rt.block_on(async {
+        matches!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(timeout_ms),
+                tokio::net::TcpStream::connect(addr),
+            )
+            .await,
+            Ok(Ok(_))
+        )
+    })
+}
+
 /// 첫 폰 테스트용 — .ipa/설치 없이 **애플 실서버 왕복(②③)만** 검증한다:
 /// 로그인 → 팀 → 인증서(CSR 제출) → App ID → 프로파일 발급. 성공하면 요약 문자열.
 /// 이게 되면 가장 어려운 인증·발급이 폰에서 실증된 것 — 서명·설치는 그 다음.

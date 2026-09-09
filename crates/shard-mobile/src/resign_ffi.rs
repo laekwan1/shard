@@ -262,6 +262,29 @@ pub unsafe extern "C" fn shard_resign_probe(
     }
 }
 
+/// VPN(LocalDevVPN) 터널 도달성 — 설치 ①과 **같은** `TcpStream::connect(addr:port)`를 `timeout_ms`로 감싼다.
+/// 1=붙음(VPN 켜짐), 0=못 붙음(꺼짐/라우트 없음). 별도 프로브(NWConnection·원시 소켓)가 이 터널을 켜져
+/// 있어도 "꺼짐"으로 오판하던 것을, 설치가 실제로 붙는 그 방법으로 판정해 없앤다. 페어링 불필요(연결만 본다).
+///
+/// # Safety
+/// `addr`은 유효한 NUL 종단 UTF-8.
+#[no_mangle]
+pub unsafe extern "C" fn shard_tunnel_reachable(addr: *const c_char, port: u16, timeout_ms: u32) -> i32 {
+    let addr_s = match unsafe { arg(addr) } {
+        Some(s) => s,
+        None => return 0,
+    };
+    let ip = match IpAddr::from_str(&addr_s) {
+        Ok(a) => a,
+        Err(_) => return 0,
+    };
+    if resign::engine::tunnel_reachable_blocking(SocketAddr::new(ip, port), timeout_ms as u64) {
+        1
+    } else {
+        0
+    }
+}
+
 /// ④ RSD 스모크(iOS 17+): rppairing 터널(addr:port, 예 10.7.0.1:49152 + RP 페어링)을 세우고 터널 안
 /// RSD 서비스 목록을 확인. classic lockdown(shard_resign_probe)은 iOS 26에서 죽어(QueryType RST) 대체.
 /// `pairing_path`는 **RpPairingFile**(idevice_pair로 발급, classic .mobiledevicepairing 아님).
