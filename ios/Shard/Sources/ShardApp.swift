@@ -99,6 +99,11 @@ struct RootView: View {
             if phase == .background && !prefs.background {
                 player.stop()
             }
+            // '재서명 필요' 알림창이 떠 있는데 확인 없이 홈으로 가면(요청) 동의로 보고 백그라운드로 조용히
+            // 재서명한다. 팝업이 안 떠 있으면 no-op.
+            if phase == .background {
+                autoResign.confirmRenewFromBackground()
+            }
             // 활성화(콜드런치·포그라운드 복귀) 때: 포그라운드는 만료 급할 때(≤1일) '재서명 필요' 알림창을
             // 띄우고, 정기 갱신은 새벽 BGTask가 조용히 한다. 그리고 만료 하루 전 로컬 알림을 (재)예약해
             // 앱을 안 열어도 알림이 오게 한다.

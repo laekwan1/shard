@@ -154,6 +154,10 @@ final class ResignModel: ObservableObject {
     // 포그라운드를 임박 즉시 발동, 쿨다운 2분, BGTask도 곧 예약. **확인되면 false로 되돌린다(운영: 3일·
     // 포그라운드 ≤1일·BGTask 새벽4시).** AppDelegate도 이 값으로 BGTask 시각을 정하므로 static.
     static let testRenew = true
+    // 수동 시트 인스턴스와 자동 공유 인스턴스가 별개라, 둘이 동시에 재서명하면 rppairing 터널이 충돌할 수
+    // 있다(사용자 지적). instance별 running으로는 못 막으므로 **정적 플래그**로 교차 차단한다. selfUpdate의
+    // async defer에서 반드시 내려(모든 종료 경로에서 실행) 잠금이 남지 않게 한다.
+    static var anyResignRunning = false
     @Published var logLines: [String] = []
     @Published var running = false
     @Published var summary: String?
@@ -355,8 +359,10 @@ final class ResignModel: ObservableObject {
     /// 폰에 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
     func selfUpdate(email: String, password: String, addr: String, silent: Bool = false,
                     bundlePathOverride: String? = nil) {
-        guard !running, hasPairing else { return }
+        // 교차 차단: 다른 인스턴스(수동↔자동)가 이미 재서명 중이면 시작하지 않는다 — 두 터널 충돌 방지.
+        guard !running, !Self.anyResignRunning, hasPairing else { return }
         running = true
+        Self.anyResignRunning = true
         // 이번 실행에서 재서명을 시작했음을 표시한다 — 수동/자동/자체업데이트 모두. 이게 없으면 수동
         // '재서명' 뒤 앱을 껐다 켤 때(재시작 전엔 옛 만료일이라 여전히 "임박") autoRenewIfNeeded가 또
         // "재서명 필요" 팝업을 띄웠다(사용자 지적: "다시 실행하면 또 팝업창 뜬다"). 한 번 재서명했으면
@@ -379,7 +385,11 @@ final class ResignModel: ObservableObject {
         // 로 가도 스테이징까지 완료된다. main에서 얻고, async가 끝나거나 시간이 다하면 놓아준다.
         let bgTask = UIApplication.shared.beginBackgroundTask(withName: "resign")
         DispatchQueue.global(qos: .userInitiated).async {
-            defer { if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } } }
+            // 어느 경로로 끝나든(성공·실패·VPN꺼짐·조기 return) 반드시 실행 — 교차 잠금과 background task를 해제.
+            defer {
+                Self.anyResignRunning = false
+                if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } }
+            }
             // 0) VPN 선확인 — 이제 설치 ①과 **같은 연결**(vpnReachable→shard_tunnel_reachable, Rust
             //    TcpStream::connect)로 보므로 믿을 수 있다("설치는 되는데 확인은 꺼짐" 불일치 없음). 꺼져 있으면
             //    ①이 10초 매달리기 전에 즉시 갈린다: 수동은 "켜주세요", 자동(silent)은 로컬 알림. 그리고 실패로
@@ -476,8 +486,9 @@ final class ResignModel: ObservableObject {
     /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
     func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false) {
         // !showRestartAlert: 이미 재서명이 끝나 재시작 팝업이 떠 있으면(사용자가 아직 종료 안 함) 다시
-        // 물어보지 않는다 — 그 위에 또 팝업이 겹치던 것을 막는다.
-        guard !autoRenewStarted, !running, !showRestartAlert, hasPairing, nothingPlaying else { return }
+        // 물어보지 않는다 — 그 위에 또 팝업이 겹치던 것을 막는다. !anyResignRunning: 수동 시트가 재서명 중이면
+        // (다른 인스턴스라 running으론 안 잡힘) 자동을 띄우지 않는다 — 동시 실행/겹침 방지.
+        guard !autoRenewStarted, !running, !Self.anyResignRunning, !showRestartAlert, hasPairing, nothingPlaying else { return }
         guard let exp = SigningInfo.expirationDate() else { return }
         let test = Self.testRenew   // 테스트: 3일 → 6일23시간55분(갓 서명 ~5분 뒤 발동)
         let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 55 * 60) : (3 * 86400)
@@ -536,6 +547,18 @@ final class ResignModel: ObservableObject {
         renewConfirmed = true   // 이후 실패해도 포그라운드 복귀 시 자동 재시도(성공하면 리셋)
         guard let (email, password, addr) = savedRenewInputs() else { return }
         selfUpdate(email: email, password: password, addr: addr)
+    }
+
+    /// '재서명 필요' 알림창이 떠 있는데 사용자가 **확인 없이 홈으로** 가면(요청: 그걸 동의로 보고 진행)
+    /// 조용히(백그라운드) 재서명한다. beginBackgroundTask ~30초 안에 스테이징까지 가면 다음 콜드런치에 적용.
+    /// renewConfirmed=true라 VPN 꺼짐 등으로 실패하면 다음 포그라운드 복귀에 자동 재시도된다. ShardApp이
+    /// scenePhase .background에서 부른다.
+    func confirmRenewFromBackground() {
+        guard showRenewPrompt else { return }
+        showRenewPrompt = false
+        renewConfirmed = true
+        guard let (email, password, addr) = savedRenewInputs() else { return }
+        selfUpdate(email: email, password: password, addr: addr, silent: true)
     }
 
     /// 2단계 자체 업데이트: SelfUpdate가 Veil에서 받은 **미서명 ipa**를 사용자 인증서로 재서명·설치한다.
@@ -647,6 +670,16 @@ final class ResignModel: ObservableObject {
     // 백그라운드 스레드에서 호출된다. 메인에 2FA 요청을 띄우고 대기한 뒤 코드를 C 문자열로 돌려준다.
     // 반환 포인터는 Rust가 즉시 복사하므로 다음 호출 전까지만 유효하면 된다.
     fileprivate func provideTFA() -> UnsafePointer<CChar>? {
+        // 공유 인스턴스(자동/백그라운드/포그라운드 확인)엔 2FA 코드 입력 UI가 없다 — 로그인 세션이 만료돼
+        // Apple이 2FA를 다시 요구하면 예전엔 여기 tfaSem.wait()에서 **영영 대기**해 스피너가 멈췄다(사용자
+        // 지적: "재서명 중 만료되면 UI 멈춤"). 대신 즉시 nil을 돌려(Rust가 null→빈 코드로 처리해 로그인 실패)
+        // 깨끗이 실패시키고, 수동 '재서명' 화면(2FA 입력칸 있음)에서 한 번 로그인해 세션을 되살리게 안내한다.
+        if self === ResignModel.shared {
+            DispatchQueue.main.async {
+                self.errorText = "로그인 재인증(2단계 인증)이 필요합니다. ‘재서명’ 화면에서 한 번 로그인해 주세요."
+            }
+            return nil
+        }
         DispatchQueue.main.async { self.needs2FA = true }
         tfaSem.wait()
         if let old = tfaCPtr { free(old) }
@@ -761,7 +794,11 @@ struct ResignView: View {
             HStack {
                 Text("자체 서명").font(.headline).foregroundColor(.onSurface)
                 Spacer()
-                Button("닫기") { dismiss() }.foregroundColor(.accent)
+                // 재서명 중엔 닫기를 막는다(사용자 제안) — 시트를 닫고 루트로 나가면 자동 재서명과 겹칠 수
+                // 있어서. 끝나면 다시 눌러 닫을 수 있다.
+                Button("닫기") { dismiss() }
+                    .foregroundColor(model.running ? .muted : .accent)
+                    .disabled(model.running)
             }
             .padding()
             Divider().background(Color.toolbar)
