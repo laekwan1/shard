@@ -43,9 +43,10 @@ struct RootView: View {
                     guard !showLibrary else { return }
                     if on {
                         if player.isPlaying { player.pause() }
-                        // 웹 영상이 잠금화면 Now Playing/원격 명령을 갖도록 VLC가 비켜준다 — 안 그러면 패널
-                        // 명령이 VLC로 가 조작이 안 됐다(사용자 지적). VLC는 다시 재생하면 open/resume에서 되찾음.
-                        player.stepAsideForWeb()
+                        // 웹 영상은 오디오 세션을 **믹스(.mixWithOthers)**로 둔다 — 믹스 세션은 Now Playing
+                        // 주체가 안 돼 잠금화면 패널이 안 뜬다(사용자 요청: 웹 백그라운드가 안 되면 패널 자체를
+                        // 없앤다). VLC가 파일을 재생하면 open/resume이 비믹스로 되찾아 라이브러리 패널은 유지.
+                        player.webAudioMode()
                     }
                 }, libraryVisible: showLibrary, prefs: prefs) {
                     // If the browser was turned to landscape (address rotate button),
