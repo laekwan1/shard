@@ -433,6 +433,7 @@ final class ResignModel: ObservableObject {
                     self.running = false; self.silentRenew = false
                     self.autoRenewStarted = false   // 실패 → 다음에 다시 시도 가능하게
                     if !silent { self.errorText = "서명 단계 실패 — \(err ?? json)" }
+                    else { self.notifyResignFailed(err ?? "서명 단계 실패") }   // 조용한 경로 실패 → 로컬 알림(조기경보)
                 }
                 return
             }
@@ -470,7 +471,8 @@ final class ResignModel: ObservableObject {
                     let e = (obj2?["error"] as? String) ?? json2
                     let vpnOff = e.contains("① 연결") || e.contains("LocalDevVPN") || e.contains("못 닿음") || e.contains("시간초과")
                     if silentNow {
-                        if vpnOff { self.notifyVpnOff() }   // 백그라운드 VPN 꺼짐 → 로컬 알림
+                        if vpnOff { self.notifyVpnOff() }        // VPN 꺼짐(사용자가 켜면 됨) → 대기 알림
+                        else { self.notifyResignFailed(e) }      // 그 밖의 실패(애플이 서명 규칙 변경 등) → 실패 알림
                     } else if vpnOff {
                         self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
                     } else {
@@ -644,6 +646,20 @@ final class ResignModel: ObservableObject {
         content.title = "서명 갱신 대기"
         content.body = "LocalDevVPN을 켜면 다음에 서명이 자동으로 갱신됩니다."
         let req = UNNotificationRequest(identifier: "shard.vpnoff", content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req)
+    }
+
+    /// 조용한(백그라운드·홈/잠금·BGTask) 재서명이 **VPN 문제가 아닌 이유**로 실패하면 로컬 알림으로 알린다
+    /// (요청). 이런 실패는 대개 **애플이 서명·발급 규칙을 바꿔** 물릴 때 난다 — 애플은 그 변경을 미리 공지하지
+    /// 않으므로 실패가 유일한 신호이고, 이 알림이 사실상의 조기경보다. VPN 꺼짐(사용자가 켜면 됨)은 notifyVpnOff가
+    /// 따로 맡는다. 소리는 안 넣는다 — BGTask가 새벽에 돌 수 있고, 만료까지 며칠 여유가 있어 다음에 폰을 볼 때
+    /// 봐도 늦지 않다. 고정 id라 반복 실패가 쌓이지 않고 최신 것으로 갱신된다.
+    private func notifyResignFailed(_ reason: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "서명 갱신 실패"
+        let short = reason.replacingOccurrences(of: "\n", with: " ").prefix(140)
+        content.body = "자동 재서명이 실패했습니다. LocalDevVPN을 켜고 앱을 열어 확인해 주세요.\n(\(short))"
+        let req = UNNotificationRequest(identifier: "shard.resignfail", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)
     }
 
