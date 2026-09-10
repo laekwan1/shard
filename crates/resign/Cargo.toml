@@ -14,7 +14,7 @@ anyhow = "1"
 apple-codesign = { version = "0.29.0", default-features = false }
 zip = "8.6.0"
 
-# ③ Apple ID 로그인 + anisette = SideStore apple-private-apis 포팅(개인 사용이라 라이선스 무관).
+# ③ Apple ID 로그인 + anisette = SideStore apple-private-apis 포팅. 프로젝트 전체 AGPL-3.0(루트 NOTICE.md).
 # icloud_auth(로그인·2FA·GSA)와 omnisette(anisette 헤더)는 실제 구현이라 그대로 의존한다 —
 # 호스트 컴파일 확인됨. rev 고정(재현성). 트림/버전정리는 폰 동작 확인 뒤(동작 전 최적화 금지).
 # ② Developer API는 apple-private-apis에 스텁(todo!)뿐이라 여기서 안 씀 — dev_api.rs에 우리가 직접 구현.

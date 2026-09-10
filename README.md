@@ -69,7 +69,10 @@ The engine core also cross-compiles for iOS (`cargo build -p shard-mobile
 
 ## Status & license
 
-Active development. Windows and Android are shipping; iOS is underway.
+Active development. Windows, Android, and iOS are shipping.
 
-No open-source license is granted yet — all rights reserved. A formal license
-may be added later.
+Licensed under the **GNU Affero General Public License v3.0 or later
+(AGPL-3.0-or-later)** — see [LICENSE](LICENSE). If you redistribute Shard, or run a
+modified version as a network service, you must release your complete source under
+the same license. It incorporates AGPL and LGPL components (SideStore, libVLC) and
+MIT/Apache parts — see [NOTICE.md](NOTICE.md) for the full attribution.
