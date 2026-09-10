@@ -150,10 +150,12 @@ final class ResignModel: ObservableObject {
     // 앱 수준 자동 재서명 전용 공유 인스턴스 — ShardApp(포그라운드)과 AppDelegate(BGProcessingTask, 새벽)이
     // 같은 걸 쓴다(시트의 인스턴스와는 별개). 하나만 두어야 running 플래그로 동시 서명이 안 겹친다.
     static let shared = ResignModel()
-    // ⚠️ 테스트 모드(사용자 요청): 갱신 임박 판정을 3일 → 6일23시간50분으로 낮추고(갓 서명 ~10분 뒤 발동),
-    // 포그라운드를 임박 즉시 발동, 쿨다운 2분, BGTask도 곧 예약. **확인되면 false로 되돌린다(운영: 3일·
-    // 포그라운드 ≤1일·BGTask 새벽4시).** AppDelegate도 이 값으로 BGTask 시각을 정하므로 static.
-    static let testRenew = true
+    // 테스트 모드 스위치. true면 갱신 임박 판정을 3일 → 6일23시간55분으로 낮춰(갓 서명 ~5분 뒤 발동) 재서명
+    // 흐름을 바로 재현하고, 포그라운드 즉시 발동·쿨다운 2분·BGTask +20초로 빨리 돈다. **운영은 false**:
+    // 백그라운드 자동 재서명은 만료 3일 이내(하루 1회), 포그라운드 알림창은 ≤1일(급할 때)만, BGTask는 +60초
+    // 뒤 iOS가 밤낮 없이 기회를 줄 때. 폰에서 각 흐름 확인 완료(수동·포그라운드·재시도·VPN 감지) 후 false로
+    // 되돌림 — 백그라운드 자동 재서명만 iOS 스케줄에 달려 관찰 대기. AppDelegate도 이 값으로 BGTask를 정하므로 static.
+    static let testRenew = false
     // 수동 시트 인스턴스와 자동 공유 인스턴스가 별개라, 둘이 동시에 재서명하면 rppairing 터널이 충돌할 수
     // 있다(사용자 지적). instance별 running으로는 못 막으므로 **정적 플래그**로 교차 차단한다. selfUpdate의
     // async defer에서 반드시 내려(모든 종료 경로에서 실행) 잠금이 남지 않게 한다.
