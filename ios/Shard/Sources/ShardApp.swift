@@ -124,7 +124,18 @@ struct RootView: View {
         // 끝날 때**(isPlaying=false) 조용히 재서명한다(사용자: "백그라운드 재생이 종료되면 조용히 자동 재서명").
         // 백그라운드일 때만 — 포그라운드에서 정지한 건 홈/잠금이 아니므로 여기 대상 아님(그건 .active/타이머가 처리).
         .onChange(of: player.isPlaying) { playing in
-            if !playing, scenePhase == .background {
+            // 백그라운드 재생이 멈추면 미뤄둔 홈/잠금 재서명(#2·#3)을 처리하되, **플레이리스트가 다음
+            // 곡으로 넘어가는 찰나**를 재생 종료로 오인하지 않는다. 순서대로/셔플 자동 넘김(또는 헤드셋·
+            // 잠금화면 '다음 곡')은 곡과 곡 사이에서 isPlaying이 잠깐 false로 떨어지는데, 그때 곧바로
+            // 재서명하면 아직 며칠 여유가 있는데도 듣던 재생목록을 종료(설치=앱 종료)로 끊는다. 그래서
+            // 잠깐 기다렸다가 **여전히 멈춰 있을 때만**(다음 곡이 시작됐으면 isPlaying이 true로 돌아와
+            // 건너뜀) 재서명한다. 진짜 종료·일시정지는 그대로 처리된다(3초 늦을 뿐).
+            guard !playing, scenePhase == .background else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                // 지연 후에는 캡처된 scenePhase가 낡을 수 있어(그새 포그라운드 복귀 가능) 실시간
+                // applicationState로 다시 본다 — 포그라운드면 .active 핸들러가 재서명을 맡으니 건너뛴다.
+                guard !player.isPlaying,
+                      UIApplication.shared.applicationState != .active else { return }
                 autoResign.renewOnHomeLock(willPlayInBackground: false)
             }
         }
