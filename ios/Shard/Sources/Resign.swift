@@ -155,7 +155,7 @@ final class ResignModel: ObservableObject {
     // 백그라운드 자동 재서명은 만료 3일 이내(하루 1회), 포그라운드 알림창은 ≤1일(급할 때)만, BGTask는 +60초
     // 뒤 iOS가 밤낮 없이 기회를 줄 때. 폰에서 각 흐름 확인 완료(수동·포그라운드·재시도·VPN 감지) 후 false로
     // 되돌림 — 백그라운드 자동 재서명만 iOS 스케줄에 달려 관찰 대기. AppDelegate도 이 값으로 BGTask를 정하므로 static.
-    static let testRenew = false
+    static let testRenew = true   // ⚠️ 5단계 트리거 기기 확인용 임시 ON — 확인 후 다시 false(운영)로
     // 수동 시트 인스턴스와 자동 공유 인스턴스가 별개라, 둘이 동시에 재서명하면 rppairing 터널이 충돌할 수
     // 있다(사용자 지적). instance별 running으로는 못 막으므로 **정적 플래그**로 교차 차단한다. selfUpdate의
     // async defer에서 반드시 내려(모든 종료 경로에서 실행) 잠금이 남지 않게 한다.
