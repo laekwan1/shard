@@ -84,9 +84,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     private func handleRenew(_ task: BGProcessingTask) {
         scheduleRenew()   // 성공/실패와 무관하게 다음 새벽을 다시 예약(자동으로 이어지게)
         task.expirationHandler = { }   // iOS가 회수하면 그대로 둔다(스테이징까지 갔으면 다음 콜드런치에 적용)
-        // 새벽으로 예약돼 오므로 시간 게이트 없이 시도(preferredWindowOnly=false). 백그라운드라 재생 없음으로 본다.
+        // BGTask 백그라운드 자동 재서명(5단계 #1, ≤4일). 백그라운드라 재생 없음으로 본다.
         DispatchQueue.main.async {
-            ResignModel.shared.autoRenewIfNeeded(nothingPlaying: true, preferredWindowOnly: false, fromBackground: true)
+            ResignModel.shared.autoRenewIfNeeded(nothingPlaying: true, fromBackground: true)
         }
         // 재서명(터널·서명·설치명령)이 끝날 때까지 작업을 잡아 둔다 — 안 그러면 완료 처리 뒤 iOS가 앱을
         // 재우며 진행 중인 서명을 죽인다. running이 내려가거나 최대 150초까지. (VPN 꺼짐이면 running이

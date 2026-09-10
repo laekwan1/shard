@@ -104,23 +104,28 @@ struct RootView: View {
         // 컨트롤이 뜨고 아니면 그냥 종료"를 원했다 — stop()이 오디오 세션을 내리고 Now Playing을 지워 컨트롤을
         // 없앤다. 설정 ON이면 그대로 둬(재생·컨트롤 유지) 백그라운드 재생이 된다.
         .onChange(of: scenePhase) { phase in
-            if phase == .background && !prefs.background {
-                player.stop()
-            }
-            // '재서명 필요' 알림창이 떠 있는데 확인 없이 홈으로 가면(요청) 동의로 보고 백그라운드로 조용히
-            // 재서명한다. 팝업이 안 떠 있으면 no-op.
             if phase == .background {
-                autoResign.confirmRenewFromBackground()
+                if !prefs.background { player.stop() }
+                // 재서명 5단계 #2·#3: 홈/잠금(≤3일) 조용히 재서명 — 단 보관함이 백그라운드로 계속 재생될
+                // 상황(재생 중 + 백그라운드 재생 켬)이면 미룬다(그 재생이 끝나면 아래 isPlaying 감지가 처리).
+                autoResign.renewOnHomeLock(willPlayInBackground: player.isPlaying && prefs.background)
             }
-            // 활성화(콜드런치·포그라운드 복귀) 때: 포그라운드는 만료 급할 때(≤1일) '재서명 필요' 알림창을
-            // 띄우고, 정기 갱신은 새벽 BGTask가 조용히 한다. 그리고 만료 하루 전 로컬 알림을 (재)예약해
-            // 앱을 안 열어도 알림이 오게 한다.
+            // 활성화(콜드런치·포그라운드 복귀) 때: 포그라운드(≤2일)면 '재서명 필요' 알림. 그리고 만료 하루 전
+            // 로컬 알림을 (재)예약해 앱을 안 열어도 알림이 오게 한다.
             if phase == .active {
                 autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)   // 복귀: 재시도 허용
                 autoResign.scheduleExpiryReminder()
                 // 2단계 자체 업데이트: Veil 마커에 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
                 // update_url.txt(인프라)가 없으면 조용히 넘어가 — 켜기 전엔 아무 일도 안 한다.
                 Task { await autoResign.checkForUpdate() }
+            }
+        }
+        // 재서명 5단계 #2·#3 후반: 보관함이 백그라운드로 재생 중이라 홈/잠금 재서명을 미뤘다면, 그 **재생이
+        // 끝날 때**(isPlaying=false) 조용히 재서명한다(사용자: "백그라운드 재생이 종료되면 조용히 자동 재서명").
+        // 백그라운드일 때만 — 포그라운드에서 정지한 건 홈/잠금이 아니므로 여기 대상 아님(그건 .active/타이머가 처리).
+        .onChange(of: player.isPlaying) { playing in
+            if !playing, scenePhase == .background {
+                autoResign.renewOnHomeLock(willPlayInBackground: false)
             }
         }
         // 앱이 떠 있는 동안 주기 확인 — 웹 보는 도중 기간이 도래해도 팝업이 뜨게(사용자 지적). allowRetry:false로

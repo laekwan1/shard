@@ -481,56 +481,69 @@ final class ResignModel: ObservableObject {
         }
     }
 
-    /// 앱 실행/포그라운드에서 호출: 현재 서명이 만료 3일 이내이고 무인 서명이 가능하면 **조용히**(팝업 없이)
-    /// 백그라운드로 재서명한다. 자기 덮어쓰기 설치라 새 서명은 **다음 콜드런치**에 적용된다(installd가 앱
-    /// 종료 시 교체). 안전장치: 이번 실행 1회 + 하루 1회(스테이징이 적용 안 돼 옛 만료일을 계속 읽어도
-    /// 매 실행 재시도하지 않게), LocalDevVPN이 켜져 있고 재생 중이 아닐 때만. VPN이 꺼져 있으면 조용히
-    /// 건너뛴다(모래시계 앰버가 신호) — 진짜 백그라운드에선 VPN을 프로그램으로 못 켜기 때문.
-    /// allowRetry: 이미 확인(renewConfirmed)한 뒤 실패한 건에 대해 **재시도까지** 할지. 포그라운드 복귀
-    /// (.active)·백그라운드 작업은 true, 앱이 떠 있는 동안 도는 **주기 타이머는 false**(최초 알림만 띄우고
-    /// 재시도는 안 함 — VPN 꺼진 동안 30초마다 스피너·실패가 반복되는 걸 막는다).
-    func autoRenewIfNeeded(nothingPlaying: Bool, preferredWindowOnly: Bool = true, fromBackground: Bool = false, allowRetry: Bool = true) {
-        // !showRestartAlert: 이미 재서명이 끝나 재시작 팝업이 떠 있으면(사용자가 아직 종료 안 함) 다시
-        // 물어보지 않는다 — 그 위에 또 팝업이 겹치던 것을 막는다. !anyResignRunning: 수동 시트가 재서명 중이면
-        // (다른 인스턴스라 running으론 안 잡힘) 자동을 띄우지 않는다 — 동시 실행/겹침 방지.
+    /// 재서명 5단계 중 **포그라운드 알림(≤2일)**과 **BGTask 백그라운드 자동(≤4일)**을 담당한다. 홈/잠금
+    /// (≤3일)은 renewOnHomeLock가 따로. 자기 덮어쓰기라 새 서명은 다음 콜드런치에 적용. allowRetry: 이미
+    /// 확인(renewConfirmed)한 실패건을 재시도할지 — 복귀(.active)·백그라운드는 true, 주기 타이머는 false
+    /// (VPN 꺼진 동안 30초마다 스피너/실패가 반복되는 걸 막음). test 모드면 모든 임계를 6일23시간55분으로
+    /// 낮춰 갓 서명 ~5분 뒤 발동.
+    func autoRenewIfNeeded(nothingPlaying: Bool, fromBackground: Bool = false, allowRetry: Bool = true) {
+        // !showRestartAlert: 재시작 팝업 떠 있으면 겹치지 않게. !anyResignRunning: 수동 시트 재서명 중이면 겹침 방지.
         guard !autoRenewStarted, !running, !Self.anyResignRunning, !showRestartAlert, hasPairing, nothingPlaying else { return }
         guard let exp = SigningInfo.expirationDate() else { return }
-        let test = Self.testRenew   // 테스트: 3일 → 6일23시간55분(갓 서명 ~5분 뒤 발동)
-        let threshold: TimeInterval = test ? (6 * 86400 + 23 * 3600 + 55 * 60) : (3 * 86400)
-        guard exp.timeIntervalSinceNow <= threshold else { return }   // 만료 임박 아님
+        let test = Self.testRenew
+        let testT: TimeInterval = 6 * 86400 + 23 * 3600 + 55 * 60
+        let left = exp.timeIntervalSinceNow
 
         if !fromBackground {
-            // 포그라운드: 자동으로 서명하지 않고 **알림창으로 물어본다**(사용자: 1일 남으면 "재서명 필요" 알림 ·
-            // 확인 누르면 재서명/재설치). 정기 갱신은 새벽 BGTask가 조용히 하므로, 포그라운드는 그게 안 됐을
-            // 때의 안전망 — 급할 때(≤1일, 테스트는 즉시)만 뜬다. 무인 재서명할 계정+비번이 있어야 물어본다.
-            let urgent = test || exp.timeIntervalSinceNow <= 1 * 86400
-            guard urgent, let (email, password, addr) = savedRenewInputs() else { return }
+            // 포그라운드 ≤2일: 자동 서명 말고 **알림창으로 물어본다**(가장 급한 마지막 안전망 — BGTask(≤4일)·
+            // 홈잠금(≤3일)이 먼저 조용히 처리하므로 여기까지 왔다는 건 그것들이 안 됐다는 뜻).
+            guard left <= (test ? testT : 2 * 86400), let (email, password, addr) = savedRenewInputs() else { return }
             if renewConfirmed {
-                // 이미 한 번 확인을 눌렀다(그런데 VPN 꺼짐 등으로 실패) → 다시 묻지 않고 재시도. 단 재시도는
-                // 복귀(.active)·백그라운드에서만(allowRetry) — 주기 타이머(allowRetry=false)면 건너뛴다(autoRenewStarted도
-                // 안 건드려 다음 복귀에 재시도되게). 포그라운드로 돌아올 때 VPN을 켰으면 그때 성공한다.
+                // 이미 확인함(VPN 꺼짐 등으로 실패) → 다시 묻지 않고 재시도. 주기 타이머면(allowRetry=false) 건너뜀.
                 guard allowRetry else { return }
                 autoRenewStarted = true
                 selfUpdate(email: email, password: password, addr: addr)
             } else {
-                // 첫 도래: 자동으로 서명하지 않고 **알림창으로 물어본다**(사용자: "재서명 필요" 확인 후 진행).
-                // 앱이 떠 있는 동안(웹 보는 중 등) 기간이 도래해도 주기 타이머가 이 분기로 팝업을 띄운다.
                 autoRenewStarted = true
                 showRenewPrompt = true
             }
             return
         }
 
-        // 백그라운드(BGTask): 팝업 없이 조용히 재서명한다. 쿨다운(성공 1회/일, 테스트 2분)만 여기서 보고,
-        // VPN 확인·꺼짐 알림·실패 재시도는 selfUpdate가 처리한다(선확인이 설치와 같은 연결이라 믿을 수 있음).
-        // 쿨다운은 selfUpdate가 **성공 때만** 찍으므로, VPN이 꺼졌던 밤은 다음 BGTask에서 다시 시도된다.
+        // BGTask 백그라운드 ≤4일: 팝업 없이 조용히. 쿨다운(성공 1회/일)만 여기서, VPN·재시도는 selfUpdate가.
+        guard left <= (test ? testT : 4 * 86400) else { return }
         let key = "resign.lastAutoRenew"
         let last = UserDefaults.standard.double(forKey: key)
         let cooldown: TimeInterval = test ? 120 : 24 * 3600
         if last > 0, Date().timeIntervalSince1970 - last < cooldown { return }
-        guard savedRenewInputs() != nil else { return }
-        let (email, password, addr) = savedRenewInputs()!
+        guard let (email, password, addr) = savedRenewInputs() else { return }
         autoRenewStarted = true
+        selfUpdate(email: email, password: password, addr: addr, silent: true)
+    }
+
+    /// 재서명 5단계 중 **홈/잠금(≤3일) 조용히 재서명**(요청 #2·#3). 앱이 .background로 갈 때 ShardApp이
+    /// 부른다. 단 **보관함이 백그라운드로 계속 재생될 상황(재생 중 + 백그라운드 재생 켬)이면 미룬다** — 그
+    /// 재생이 끝나면(RootView가 player.isPlaying 꺼짐을 보고 willPlayInBackground:false로 다시 호출) 그때
+    /// 재서명한다(사용자: "백그라운드 재생이 종료되면 조용히 자동 재서명"). 팝업이 떠 있었으면 내리고 진행
+    /// (홈 이동=동의). silent라 재시작 팝업 없이 다음 콜드런치에 적용, renewConfirmed=true라 실패 시 복귀에 재시도.
+    func renewOnHomeLock(willPlayInBackground: Bool) {
+        guard !willPlayInBackground else { return }   // 백그라운드로 재생될 거면 미룸(끝나면 다시 불림)
+        // autoRenewStarted는 **안 본다** — ≤2일 팝업이 떠 autoRenewStarted=true여도 확인 없이 홈으로 나가면
+        // (=동의) 재서명해야 하기 때문. 대신 아래 쿨다운으로 성공 후 반복을 막는다.
+        guard !running, !Self.anyResignRunning, !showRestartAlert, hasPairing else { return }
+        guard let exp = SigningInfo.expirationDate() else { return }
+        let threshold: TimeInterval = Self.testRenew ? (6 * 86400 + 23 * 3600 + 55 * 60) : (3 * 86400)
+        guard exp.timeIntervalSinceNow <= threshold else { return }
+        // 쿨다운(성공 1회/일): 조용히 성공한 재서명은 옛 만료일을 콜드런치 전까지 계속 읽으므로, 그때마다 홈/
+        // 잠금할 때 또 재서명하지 않게. BGTask와 공유. selfUpdate가 **성공 때만** 찍으므로 실패는 다음에 재시도.
+        let key = "resign.lastAutoRenew"
+        let last = UserDefaults.standard.double(forKey: key)
+        let cooldown: TimeInterval = Self.testRenew ? 120 : 24 * 3600
+        if last > 0, Date().timeIntervalSince1970 - last < cooldown { return }
+        guard let (email, password, addr) = savedRenewInputs() else { return }
+        showRenewPrompt = false
+        autoRenewStarted = true
+        renewConfirmed = true
         selfUpdate(email: email, password: password, addr: addr, silent: true)
     }
 
@@ -555,18 +568,6 @@ final class ResignModel: ObservableObject {
         renewConfirmed = true   // 이후 실패해도 포그라운드 복귀 시 자동 재시도(성공하면 리셋)
         guard let (email, password, addr) = savedRenewInputs() else { return }
         selfUpdate(email: email, password: password, addr: addr)
-    }
-
-    /// '재서명 필요' 알림창이 떠 있는데 사용자가 **확인 없이 홈으로** 가면(요청: 그걸 동의로 보고 진행)
-    /// 조용히(백그라운드) 재서명한다. beginBackgroundTask ~30초 안에 스테이징까지 가면 다음 콜드런치에 적용.
-    /// renewConfirmed=true라 VPN 꺼짐 등으로 실패하면 다음 포그라운드 복귀에 자동 재시도된다. ShardApp이
-    /// scenePhase .background에서 부른다.
-    func confirmRenewFromBackground() {
-        guard showRenewPrompt else { return }
-        showRenewPrompt = false
-        renewConfirmed = true
-        guard let (email, password, addr) = savedRenewInputs() else { return }
-        selfUpdate(email: email, password: password, addr: addr, silent: true)
     }
 
     /// 2단계 자체 업데이트: SelfUpdate가 Veil에서 받은 **미서명 ipa**를 사용자 인증서로 재서명·설치한다.
