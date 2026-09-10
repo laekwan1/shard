@@ -504,6 +504,9 @@ final class ResignModel: ObservableObject {
                 autoRenewStarted = true
                 selfUpdate(email: email, password: password, addr: addr)
             } else {
+                // 테스트 모드에선 포그라운드 알림(#4)을 안 띄운다 — 테스트 땐 모든 임계가 같아(≈5분) 홈/잠금
+                // (#2·#3) 확인 중에 이 팝업이 끼어들기 때문(사용자 요청). 운영(test=false)에선 ≤2일에 정상 발동.
+                if test { return }
                 autoRenewStarted = true
                 showRenewPrompt = true
             }
