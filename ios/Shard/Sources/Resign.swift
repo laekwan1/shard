@@ -997,6 +997,9 @@ struct ResignView: View {
         let low = (secs ?? .greatestFiniteMagnitude) <= 3 * 86400.0
         let frac = exp.map { CGFloat(min(max($0.timeIntervalSince(now) / (7 * 86400.0), 0), 1)) } ?? 0
         let stamp = SigningInfo.resignStamp()
+        // 설치된 빌드 번호(CFBundleVersion). 자체 업데이트가 마커와 비교하는 바로 그 값이라, 폰이 최신인지
+        // 여기서 눈으로 확인할 수 있게 표시한다(요청). 마케팅 버전(ShortVersion)은 갱신을 안 해 낡았으므로 뺀다.
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return HStack(spacing: 12) {
             // SF Symbol hourglass 아이콘 + 모래 양(주소창과 동일). 옆에 실시간 남은 시간.
             HourglassSand(fraction: frac,
@@ -1004,7 +1007,7 @@ struct ResignView: View {
                           frameColor: .muted)
                 .frame(width: 22, height: 26)
             VStack(alignment: .leading, spacing: 2) {
-                Text("현재 서명").font(.caption).foregroundColor(.muted)
+                Text("현재 서명 · 빌드 \(build)").font(.caption).foregroundColor(.muted)
                 if let s = secs {
                     if s > 0 {
                         let t = Int(s)
