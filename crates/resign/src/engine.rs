@@ -900,14 +900,23 @@ pub fn tunnel_reachable_blocking(addr: std::net::SocketAddr, timeout_ms: u64) ->
         Err(_) => return false,
     };
     rt.block_on(async {
-        matches!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(timeout_ms),
-                tokio::net::TcpStream::connect(addr),
-            )
-            .await,
-            Ok(Ok(_))
-        )
+        // **단발 connect는 오탐을 낸다**: 자체 업데이트가 새 빌드를 연달아 설치하면(예: 311→312), 직전 RSD
+        // 세션이 닫히는 몇 초 동안 이 포트(49152)가 잠깐 연결을 안 받는다. 그 찰나에 프로브가 걸리면 VPN이
+        // **켜져 있어도** connect가 거부/리셋돼 "꺼짐"으로 오판했다(사용자 확인: VPN 계속 켜둔 채 팝업이 떴고,
+        // 곧바로 수동 재서명은 같은 connect로 성공). 그래서 timeout_ms 예산 안에서 **여러 번 재시도**한다 —
+        // 켜져 있으면 첫 시도에 즉시 붙고, 찰나 창이면 다음 시도에서 붙는다. 진짜 꺼짐이면 예산을 다 쓰고 false.
+        // 설치 ①이 쓰는 그 connect를 그대로 유지(다른 프로브로 바꾸지 않음 — 예전 VPN 감지 교훈).
+        let attempts: u32 = 4;
+        let per = std::time::Duration::from_millis((timeout_ms / attempts as u64).max(700));
+        for i in 0..attempts {
+            if let Ok(Ok(_)) = tokio::time::timeout(per, tokio::net::TcpStream::connect(addr)).await {
+                return true; // 붙음 = 터널 살아 있음
+            }
+            if i + 1 < attempts {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await; // 찰나 창이 지나가게 잠깐 쉼
+            }
+        }
+        false
     })
 }
 

@@ -396,7 +396,7 @@ final class ResignModel: ObservableObject {
             //    TcpStream::connect)로 보므로 믿을 수 있다("설치는 되는데 확인은 꺼짐" 불일치 없음). 꺼져 있으면
             //    ①이 10초 매달리기 전에 즉시 갈린다: 수동은 "켜주세요", 자동(silent)은 로컬 알림. 그리고 실패로
             //    끝나므로 autoRenewStarted를 내려 다음 진입(.active)·새벽(BGTask)에 **다시 시도**되게 한다.
-            if !self.vpnReachable(addr, port: 49152) {
+            if !self.vpnReachable(addr, port: 49152, timeout: 8.0) {   // 8초 예산 안에서 재시도(직후 RSD 포트 찰나 오탐 방지)
                 DispatchQueue.main.async {
                     self.running = false
                     self.silentRenew = false
