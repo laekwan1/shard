@@ -392,29 +392,14 @@ final class ResignModel: ObservableObject {
                 Self.anyResignRunning = false
                 if bgTask != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(bgTask) } }
             }
-            // 0) VPN 선확인 — 이제 설치 ①과 **같은 연결**(vpnReachable→shard_tunnel_reachable, Rust
-            //    TcpStream::connect)로 보므로 믿을 수 있다("설치는 되는데 확인은 꺼짐" 불일치 없음). 꺼져 있으면
-            //    ①이 10초 매달리기 전에 즉시 갈린다: 수동은 "켜주세요", 자동(silent)은 로컬 알림. 그리고 실패로
-            //    끝나므로 autoRenewStarted를 내려 다음 진입(.active)·새벽(BGTask)에 **다시 시도**되게 한다.
-            if !self.vpnReachable(addr, port: 49152, timeout: 8.0) {   // 8초 예산 안에서 재시도(직후 RSD 포트 찰나 오탐 방지)
-                DispatchQueue.main.async {
-                    self.running = false
-                    self.silentRenew = false
-                    self.autoRenewStarted = false
-                    if silent {
-                        self.notifyVpnOff()
-                    } else if self === ResignModel.shared {
-                        // 자동 경로(루트 알림창 '확인'). notice는 시트에서만 보여 여기선 아무 안내 없이 끝났었다
-                        // (사용자: "확인하면 스피너 돌다 사라지고 그냥 끝난다"). errorText로 루트에 알리고, VPN을
-                        // 켜고 포그라운드로 돌아오면 renewConfirmed로 자동 재시도된다.
-                        self.errorText = "LocalDevVPN 터널 미도달 — \(self.vpnProbeReason()). 켠 뒤 앱으로 돌아오면 다시 시도합니다. (VPN이 켜져 있는데도 이 창이 뜨면 위 사유를 알려주세요.)"
-                    } else {
-                        // 수동 '재서명' 버튼(시트) — 시트 안에 안내. 다시 누르면 재시도.
-                        self.notice = "LocalDevVPN 미도달(\(self.vpnProbeReason())) — 켠 뒤 ‘재서명’을 다시 눌러 주세요. (켜져 있는데도 뜨면 이 사유를 알려주세요.)"
-                    }
-                }
-                return
-            }
+            // 0) VPN 선확인 프로브는 **제거**했다(원인 규명 후). 예전엔 여기서 10.7.0.1:49152에 bare TCP로 붙어
+            //    "켜짐/꺼짐"을 봤는데, 그 포트는 평범한 서비스가 아니라 **한 세션짜리 RemotePairing 터널**이라
+            //    (rsd.rs: "터널이 이미 점유 중이면 리셋된다"), 프로브가 붙었다 끊는 것만으로 터널을 점유·교란해
+            //    **이후 진짜 설치 ①(과 수동 재서명)이 리셋**됐다(사용자: "VPN 켜놨는데 재서명 실패가 계속 뜨고
+            //    직접 재서명도 아예 안 된다"). 재시도(빌드313)는 그 붙었다끊기를 4번 반복해 오히려 악화시켰다.
+            //    → 프로브 없이 곧장 서명→설치로 간다. 터널은 **실제 설치 ①만** 건드린다. VPN 꺼짐은 ①의 10초
+            //    타임아웃 에러("① 연결 … 못 닿음 … LocalDevVPN")를 아래 설치 실패 분기가 vpnOff로 잡아 안내한다.
+            //    선판정을 없애 오탐·터널 교란을 원천 제거.
             // 1) Rust: 발급 + 자기 재서명 (설치는 minimuxer가 → device_addr/pairing_path = NULL로 서명만).
             let raw: UnsafeMutablePointer<CChar>? =
                 email.withCString { e in password.withCString { p in bundleId.withCString { b in
@@ -728,31 +713,10 @@ final class ResignModel: ObservableObject {
         DispatchQueue.main.async { self.logLines.append(line) }
     }
 
-    /// LocalDevVPN(루프백 10.7.0.1 → 기기 RemotePairing 49152)이 살아 있는지 **실제 설치와 똑같은 연결**로
-    /// 확인한다 — Rust `shard_tunnel_reachable`가 설치 ①과 같은 `TcpStream::connect(addr:port)`를 timeout으로
-    /// 감싼다. Swift 쪽 프로브(NWConnection→인터페이스→원시 소켓)를 세 번 시도했지만 전부 이 터널을 켜져
-    /// 있어도 "꺼짐"으로 오판했다(사용자: "이전엔 바로 확인됐는데 안 된다"). 원인은 프로브 방식이 설치가
-    /// 붙는 방식과 달랐던 것 — 그래서 판정을 설치가 쓰는 그 커널 경로에 맡긴다. 붙으면 true(켜짐), 못 붙으면
-    /// false(꺼짐). "설치는 되는데 확인은 꺼짐" 불일치가 원천적으로 없다. (백그라운드 스레드에서 부른다 —
-    /// block_on이라 최대 timeout만큼 막힐 수 있음.)
-    /// 마지막 VPN 프로브의 진단 코드(1=붙음, 2=timeout, 3=거부, 4=리셋, 5=경로없음, 0=기타). 실패 팝업에
-    /// 사유를 실어 "켜져 있는데 왜 꺼짐?"을 측정으로 가른다.
-    private var lastVpnCode: Int32 = 1
-    func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 3.0) -> Bool {
-        let code = addr.withCString { shard_tunnel_reachable($0, port, UInt32(timeout * 1000)) }
-        lastVpnCode = code
-        return code == 1
-    }
-    /// 프로브 실패 사유(진단, 사용자에게 보여 원인 측정). 4(리셋)면 49152가 bare 연결을 끊는 **구조 문제** 신호.
-    func vpnProbeReason() -> String {
-        switch lastVpnCode {
-        case 2: return "응답 없음(timeout)"
-        case 3: return "연결 거부(refused)"
-        case 4: return "연결 리셋(reset·errno54)"
-        case 5: return "경로 없음(unreachable)"
-        default: return "코드 \(lastVpnCode)"
-        }
-    }
+    // VPN 선확인 프로브(vpnReachable/shard_tunnel_reachable)는 **제거**했다. 49152는 한 세션짜리 RemotePairing
+    // 터널이라, 프로브가 붙었다 끊는 것만으로 터널을 점유·교란해 이후 실제 설치·수동 재서명까지 리셋시켰다
+    // (selfUpdate의 "0) VPN 선확인 프로브는 제거" 주석 참조). 이제 VPN 여부는 설치 ①의 실패로만 판정한다.
+    // (Rust shard_tunnel_reachable/tunnel_reachable_blocking는 호출부가 없어졌지만 FFI/헤더 호환 위해 남겨 둠.)
 
     private func finish(_ json: String) {
         running = false
