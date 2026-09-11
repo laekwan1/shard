@@ -407,10 +407,10 @@ final class ResignModel: ObservableObject {
                         // 자동 경로(루트 알림창 '확인'). notice는 시트에서만 보여 여기선 아무 안내 없이 끝났었다
                         // (사용자: "확인하면 스피너 돌다 사라지고 그냥 끝난다"). errorText로 루트에 알리고, VPN을
                         // 켜고 포그라운드로 돌아오면 renewConfirmed로 자동 재시도된다.
-                        self.errorText = "LocalDevVPN이 꺼져 있습니다. 켠 뒤 앱으로 돌아오면 자동으로 다시 시도합니다."
+                        self.errorText = "LocalDevVPN 터널 미도달 — \(self.vpnProbeReason()). 켠 뒤 앱으로 돌아오면 다시 시도합니다. (VPN이 켜져 있는데도 이 창이 뜨면 위 사유를 알려주세요.)"
                     } else {
                         // 수동 '재서명' 버튼(시트) — 시트 안에 안내. 다시 누르면 재시도.
-                        self.notice = "LocalDevVPN을 켜주세요 — 켠 뒤 ‘재서명’을 다시 눌러 주세요."
+                        self.notice = "LocalDevVPN 미도달(\(self.vpnProbeReason())) — 켠 뒤 ‘재서명’을 다시 눌러 주세요. (켜져 있는데도 뜨면 이 사유를 알려주세요.)"
                     }
                 }
                 return
@@ -735,8 +735,23 @@ final class ResignModel: ObservableObject {
     /// 붙는 방식과 달랐던 것 — 그래서 판정을 설치가 쓰는 그 커널 경로에 맡긴다. 붙으면 true(켜짐), 못 붙으면
     /// false(꺼짐). "설치는 되는데 확인은 꺼짐" 불일치가 원천적으로 없다. (백그라운드 스레드에서 부른다 —
     /// block_on이라 최대 timeout만큼 막힐 수 있음.)
+    /// 마지막 VPN 프로브의 진단 코드(1=붙음, 2=timeout, 3=거부, 4=리셋, 5=경로없음, 0=기타). 실패 팝업에
+    /// 사유를 실어 "켜져 있는데 왜 꺼짐?"을 측정으로 가른다.
+    private var lastVpnCode: Int32 = 1
     func vpnReachable(_ addr: String, port: UInt16, timeout: TimeInterval = 3.0) -> Bool {
-        addr.withCString { shard_tunnel_reachable($0, port, UInt32(timeout * 1000)) } == 1
+        let code = addr.withCString { shard_tunnel_reachable($0, port, UInt32(timeout * 1000)) }
+        lastVpnCode = code
+        return code == 1
+    }
+    /// 프로브 실패 사유(진단, 사용자에게 보여 원인 측정). 4(리셋)면 49152가 bare 연결을 끊는 **구조 문제** 신호.
+    func vpnProbeReason() -> String {
+        switch lastVpnCode {
+        case 2: return "응답 없음(timeout)"
+        case 3: return "연결 거부(refused)"
+        case 4: return "연결 리셋(reset·errno54)"
+        case 5: return "경로 없음(unreachable)"
+        default: return "코드 \(lastVpnCode)"
+        }
     }
 
     private func finish(_ json: String) {

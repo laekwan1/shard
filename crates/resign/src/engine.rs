@@ -894,29 +894,46 @@ pub fn rsd_install_blocking(
 /// 오판**했다(사용자 반복 확인). 실제 설치는 이 connect로 잘 붙으니, **판정을 프로브가 아니라 설치가 쓰는
 /// 그 커널 경로로** 하면 "설치는 되는데 확인은 꺼짐" 불일치가 사라진다. 붙으면 true(켜짐), 라우트 없음/
 /// 타임아웃이면 false(꺼짐). 연결은 바로 드롭한다(도달성만 본다).
-pub fn tunnel_reachable_blocking(addr: std::net::SocketAddr, timeout_ms: u64) -> bool {
+/// 반환 코드(진단): 1=붙음(VPN 켜짐), 2=응답 없음/timeout, 3=연결 거부(ECONNREFUSED),
+/// 4=연결 리셋(ECONNRESET, errno 54 — RemotePairing 엔드포인트가 bare 연결을 끊는 경우), 5=경로 없음
+/// (ENETUNREACH/EHOSTUNREACH), 0=기타. **왜 코드로 바꿨나**: 단발 재시도로도 "VPN 켜져 있는데 꺼짐"이
+/// 계속 떠서(사용자 확인), 추측 대신 **실패 사유를 측정**하려는 것 — 리셋(4)이면 49152가 RemotePairing이라
+/// bare TCP를 끊는 구조 문제(→ 프리플라이트를 실제 핸드셰이크로 바꾸거나 제거), timeout/경로없음(2/5)이면
+/// 그 순간 터널이 실제로 안 닿는 것. timeout_ms 예산 안에서 4회 재시도하되, 마지막 실패의 사유를 돌려준다.
+pub fn tunnel_reachable_blocking(addr: std::net::SocketAddr, timeout_ms: u64) -> i32 {
     let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(rt) => rt,
-        Err(_) => return false,
+        Err(_) => return 0,
     };
     rt.block_on(async {
-        // **단발 connect는 오탐을 낸다**: 자체 업데이트가 새 빌드를 연달아 설치하면(예: 311→312), 직전 RSD
-        // 세션이 닫히는 몇 초 동안 이 포트(49152)가 잠깐 연결을 안 받는다. 그 찰나에 프로브가 걸리면 VPN이
-        // **켜져 있어도** connect가 거부/리셋돼 "꺼짐"으로 오판했다(사용자 확인: VPN 계속 켜둔 채 팝업이 떴고,
-        // 곧바로 수동 재서명은 같은 connect로 성공). 그래서 timeout_ms 예산 안에서 **여러 번 재시도**한다 —
-        // 켜져 있으면 첫 시도에 즉시 붙고, 찰나 창이면 다음 시도에서 붙는다. 진짜 꺼짐이면 예산을 다 쓰고 false.
-        // 설치 ①이 쓰는 그 connect를 그대로 유지(다른 프로브로 바꾸지 않음 — 예전 VPN 감지 교훈).
         let attempts: u32 = 4;
         let per = std::time::Duration::from_millis((timeout_ms / attempts as u64).max(700));
+        let mut code: i32 = 2; // 아무 시도도 사유를 못 주면 timeout으로 본다
         for i in 0..attempts {
-            if let Ok(Ok(_)) = tokio::time::timeout(per, tokio::net::TcpStream::connect(addr)).await {
-                return true; // 붙음 = 터널 살아 있음
+            match tokio::time::timeout(per, tokio::net::TcpStream::connect(addr)).await {
+                Ok(Ok(_)) => return 1, // 붙음 = 터널 살아 있음
+                Ok(Err(e)) => {
+                    // connect가 실제로 에러 반환(SYN-ACK 뒤 거부/리셋 등). BSD errno 우선(iOS/macOS).
+                    code = match e.raw_os_error() {
+                        Some(61) => 3,            // ECONNREFUSED
+                        Some(54) => 4,            // ECONNRESET
+                        Some(51) | Some(65) => 5, // ENETUNREACH / EHOSTUNREACH
+                        Some(60) => 2,            // ETIMEDOUT
+                        _ => match e.kind() {
+                            std::io::ErrorKind::ConnectionRefused => 3,
+                            std::io::ErrorKind::ConnectionReset => 4,
+                            std::io::ErrorKind::TimedOut => 2,
+                            _ => 0,
+                        },
+                    };
+                }
+                Err(_) => code = 2, // tokio timeout: per 안에 SYN-ACK 없음(안 닿음)
             }
             if i + 1 < attempts {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await; // 찰나 창이 지나가게 잠깐 쉼
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             }
         }
-        false
+        code
     })
 }
 

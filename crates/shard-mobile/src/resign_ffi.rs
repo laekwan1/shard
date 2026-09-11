@@ -262,9 +262,10 @@ pub unsafe extern "C" fn shard_resign_probe(
     }
 }
 
-/// VPN(LocalDevVPN) 터널 도달성 — 설치 ①과 **같은** `TcpStream::connect(addr:port)`를 `timeout_ms`로 감싼다.
-/// 1=붙음(VPN 켜짐), 0=못 붙음(꺼짐/라우트 없음). 별도 프로브(NWConnection·원시 소켓)가 이 터널을 켜져
-/// 있어도 "꺼짐"으로 오판하던 것을, 설치가 실제로 붙는 그 방법으로 판정해 없앤다. 페어링 불필요(연결만 본다).
+/// VPN(LocalDevVPN) 터널 도달성 — 설치 ①과 **같은** `TcpStream::connect(addr:port)`를 `timeout_ms` 예산 안
+/// 4회 재시도로 감싼다. **진단 코드**를 돌려준다(1만 "켜짐"): 1=붙음, 2=timeout/응답없음, 3=거부, 4=리셋
+/// (errno 54 — 49152 RemotePairing 엔드포인트가 bare 연결을 끊는 구조 문제 신호), 5=경로 없음, 0=기타.
+/// 재시도로도 "켜져 있는데 꺼짐"이 계속 떠서, 추측 대신 **실패 사유를 측정**하려고 코드로 바꿨다.
 ///
 /// # Safety
 /// `addr`은 유효한 NUL 종단 UTF-8.
@@ -278,11 +279,7 @@ pub unsafe extern "C" fn shard_tunnel_reachable(addr: *const c_char, port: u16, 
         Ok(a) => a,
         Err(_) => return 0,
     };
-    if resign::engine::tunnel_reachable_blocking(SocketAddr::new(ip, port), timeout_ms as u64) {
-        1
-    } else {
-        0
-    }
+    resign::engine::tunnel_reachable_blocking(SocketAddr::new(ip, port), timeout_ms as u64)
 }
 
 /// ④ RSD 스모크(iOS 17+): rppairing 터널(addr:port, 예 10.7.0.1:49152 + RP 페어링)을 세우고 터널 안
