@@ -1044,15 +1044,7 @@ async fn ensure_certificate(
     app_name: &str,
     key: &InMemorySigningKeyPair,
 ) -> Result<CapturedX509Certificate> {
-    // 무료 계정은 개발 인증서 한도가 낮고(2~3개), 우리는 매번 새 키를 만들어 기존 인증서를 재사용
-    // 못 한다(개인키가 없어). 그래서 기존 개발 인증서를 폐기하고 새로 발급한다 — 안 그러면 애플이
-    // 7460("이미 인증서가 있음")으로 거부한다(폰/PC 로그로 확인).
-    // ⚠️ 같은 Apple ID로 서명된 다른 앱이 영향받을 수 있다. 제품에선 키+인증서를 저장해 재사용해야
-    //    churn이 없다(후속작업).
-    for c in dev.list_certificates(team).await? {
-        let _ = dev.revoke_certificate(team, &c.serial_number).await; // 실패해도 계속
-    }
-
+    // CSR 먼저 만든다.
     let mut builder = X509CertificateBuilder::default();
     builder
         .subject()
@@ -1064,7 +1056,22 @@ async fn ensure_certificate(
         .encode_pem()
         .map_err(|e| anyhow!("CSR PEM 인코딩: {e:?}"))?;
 
-    let cert_id = dev.submit_csr(team, app_name, &csr_pem).await?;
+    // **폐기는 한도(7460)에 부딪힐 때만** 한다. 예전엔 발급 전에 기존 인증서를 **무조건 전부 폐기**했는데,
+    // 그러면 그 인증서로 서명돼 **실행 중이던 앱**(Sideloadly로 깐 것 포함)이 즉시 무효화돼 다음 콜드 실행에서
+    // 검은화면·크래시 로그 없이 죽었다(실측: 9/11 설치→9/12 사망, 로그 없음 = AMFI 서명 거부). 그래서 먼저
+    // 그냥 발급을 시도하고, 애플이 7460("이미 인증서 있음"=무료 한도)으로 거부할 때만 기존 것을 폐기하고
+    // 재시도한다. 여유가 있으면 폐기 없이 새 인증서만 추가돼 실행 중 앱이 안 죽는다. (근본은 키+인증서 재사용
+    // (ensure_signing_identity)이지만, Sideloadly↔자체재서명 전환 첫 회엔 저장분이 없어 여기로 온다.)
+    let cert_id = match dev.submit_csr(team, app_name, &csr_pem).await {
+        Ok(id) => id,
+        Err(e) if e.to_string().contains("7460") => {
+            for c in dev.list_certificates(team).await? {
+                let _ = dev.revoke_certificate(team, &c.serial_number).await; // 실패해도 계속
+            }
+            dev.submit_csr(team, app_name, &csr_pem).await?
+        }
+        Err(e) => return Err(e),
+    };
 
     // 방금 만든 인증서를 목록에서 찾아 DER 취득. id가 안 맞으면(포털 응답 차이) 최신 것으로 폴백.
     let certs = dev.list_certificates(team).await?;
