@@ -18,6 +18,18 @@ pub type ShardTfa = extern "C" fn(ctx: *mut c_void) -> *const c_char;
 /// 진행 로그 한 줄(Swift가 화면에 표시). `line`은 이 호출 동안만 유효.
 pub type ShardLog = extern "C" fn(ctx: *mut c_void, line: *const c_char);
 
+/// blocking 호출을 감싸 **Rust 패닉이 C 경계를 넘지 않게** 한다. 패닉이 `extern "C"`를 통해 넘어가면
+/// (Rust ≥1.81) 프로세스가 abort된다 — 설치 도중이면 Network Extension이 죽고 앱이 사라진다(리뷰 지적).
+/// idevice/plist/zip 파서가 이상한 기기 응답에 unwrap/index 패닉할 수 있으므로, 여기서 잡아 에러 JSON으로
+/// 되돌린다. AssertUnwindSafe: 클로저가 콜백(FnMut)을 캡처하므로 필요 — 패닉 시엔 에러만 반환하고 이후
+/// 상태를 건드리지 않는다.
+fn guarded<F: FnOnce() -> *mut c_char>(f: F) -> *mut c_char {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(p) => p,
+        Err(_) => err("내부 오류: 예기치 못한 패닉이 발생했습니다(재시도해 주세요)"),
+    }
+}
+
 /// 로그인 → 재서명 → (기기 정보가 있으면) 설치를, 이 스레드에서 **동기로** 실행한다.
 ///
 /// # Safety
@@ -84,10 +96,10 @@ pub unsafe extern "C" fn shard_resign_run(
         }
     };
 
-    match resign::engine::resign_and_install_blocking(params, &tfa_fn, &mut log_fn) {
+    guarded(|| match resign::engine::resign_and_install_blocking(params, &tfa_fn, &mut log_fn) {
         Ok(path) => ok(&path.to_string_lossy()),
         Err(e) => err(&format!("{e:#}")),
-    }
+    })
 }
 
 /// 첫 폰 테스트: .ipa/설치 없이 로그인→인증서→App ID→프로파일 발급(②③)만 검증한다.
@@ -208,7 +220,7 @@ pub unsafe extern "C" fn shard_resign_selfupdate(
         bundle_id,
         app_name,
     };
-    match resign::engine::resign_selfupdate_blocking(
+    guarded(|| match resign::engine::resign_selfupdate_blocking(
         req,
         PathBuf::from(app_bundle_path),
         PathBuf::from(state_dir),
@@ -220,7 +232,7 @@ pub unsafe extern "C" fn shard_resign_selfupdate(
     ) {
         Ok(path) => ok(&path.to_string_lossy()),
         Err(e) => err(&format!("{e:#}")),
-    }
+    })
 }
 
 /// ④ 1단계 스모크 테스트: 페어링 파일 + 터널 주소로 폰 lockdownd에 붙는지 확인.
@@ -319,10 +331,10 @@ pub unsafe extern "C" fn shard_rsd_probe(
             log(ctx, c.as_ptr());
         }
     };
-    match resign::engine::rsd_probe_blocking(sockaddr, pairing, &mut log_fn) {
+    guarded(|| match resign::engine::rsd_probe_blocking(sockaddr, pairing, &mut log_fn) {
         Ok(s) => ok(&s),
         Err(e) => err(&format!("{e:#}")),
-    }
+    })
 }
 
 /// ④ RSD 설치(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치(installation_proxy).
@@ -366,10 +378,10 @@ pub unsafe extern "C" fn shard_rsd_install(
             log(ctx, c.as_ptr());
         }
     };
-    match resign::engine::rsd_install_blocking(sockaddr, pairing, PathBuf::from(ipa_path), &mut log_fn) {
+    guarded(|| match resign::engine::rsd_install_blocking(sockaddr, pairing, PathBuf::from(ipa_path), &mut log_fn) {
         Ok(s) => ok(&s),
         Err(e) => err(&format!("{e:#}")),
-    }
+    })
 }
 
 unsafe fn arg(p: *const c_char) -> Option<String> {

@@ -132,10 +132,11 @@ struct RootView: View {
             // 건너뜀) 재서명한다. 진짜 종료·일시정지는 그대로 처리된다(3초 늦을 뿐).
             guard !playing, scenePhase == .background else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                // 지연 후에는 캡처된 scenePhase가 낡을 수 있어(그새 포그라운드 복귀 가능) 실시간
-                // applicationState로 다시 본다 — 포그라운드면 .active 핸들러가 재서명을 맡으니 건너뛴다.
+                // 지연 후에는 캡처된 scenePhase가 낡을 수 있어(그새 포그라운드 복귀 가능) 실시간 applicationState로
+                // 다시 본다 — **완전히 백그라운드일 때만** 재서명한다. `!= .active`로 하면 .inactive(제어센터·알림
+                // 내림, 통화 배너 = 사실상 포그라운드)에서도 발동해 공연히 재서명이 돌았다(리뷰 지적) → `== .background`.
                 guard !player.isPlaying,
-                      UIApplication.shared.applicationState != .active else { return }
+                      UIApplication.shared.applicationState == .background else { return }
                 autoResign.renewOnHomeLock(willPlayInBackground: false)
             }
         }

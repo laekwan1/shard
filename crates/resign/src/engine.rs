@@ -790,10 +790,9 @@ pub fn resign_and_install_blocking(
         }
         Ok(signed)
     });
-    // 실패 시 저장 세션이 만료됐을 수 있으니 지운다 — 다음 실행이 새로 로그인하게.
-    if result.is_err() {
-        crate::auth::AppleSession::clear_session(&p.state_dir);
-    }
+    // 세션은 **위 1100(만료) 분기에서만** 비운다. 예전엔 여기서 `result.is_err()`면 **아무 에러에나** 세션을
+    // 비웠는데(설치 실패·서명 실패 포함), 그러면 멀쩡한 세션이 지워져 다음 실행이 매번 새로 로그인 → 애플이
+    // "낯선 기기 반복 접근"으로 **계정을 잠그는** 패턴이 된다(리뷰 지적). 만료가 아닌 실패는 세션을 보존한다.
     result
 }
 
@@ -1058,21 +1057,25 @@ async fn ensure_certificate(
 
     // 먼저 **폐기 없이** 발급을 시도한다 — 계정에 인증서 자리가 남아 있으면 기존 것을 안 건드리고 새것만 추가돼,
     // 그 인증서로 서명된 **실행 중 앱**(다른 기기 포함)이 안 죽는다(무조건 폐기가 "9/11 설치→9/12 사망, 크래시
-    // 로그 없음=AMFI 서명 거부"의 원인이었다). 실패하면 — 무료 계정은 이미 인증서가 있으면 새 CSR을 거부한다 —
-    // 기존 것을 폐기해 자리를 비우고 **한 번 재시도**한다.
-    // ※에러 코드(7460 등)로 판별하지 **않는다**: 코드가 계정/iOS버전/상황마다 달라, "7460일 때만 폐기"로 했더니
-    //   코드가 안 맞는 계정에서 재서명이 **통째로 실패**했다(실측 회귀: 한 기기는 되고 iOS 버전 다른 서브 기기는
-    //   316 업데이트 후 안 됨). 그래서 **어떤 실패든** 폐기+재시도로 되돌린다 — 코드/버전에 의존하지 않는다.
-    // ⚠️ 폐기는 같은 무료 Apple ID로 서명된 **다른 기기의 앱**을 무효화한다 — 두 대를 한 계정으로 쓰면 서로 죽일
-    //   수 있다(계정이 인증서 2개를 허용하면 위 '폐기 없는 발급'으로 공존, 아니면 기기별 별도 Apple ID가 답).
+    // 로그 없음=AMFI 서명 거부"의 원인이었다).
+    // **폐기는 "포털이 발급을 거부했을 때"만** 한다(대개 "이미 인증서 있음"=무료 한도). 네트워크/전송 오류는
+    //   폐기 사유가 **아니다** — 순간 오류에 폐기하면 그 인증서로 서명된 **다른 기기의 앱을 공연히 죽인다**(리뷰
+    //   지적). 포털 거부는 `dev_api::send`가 `"developer portal error N: ..."`로 bail하므로 그 문자열로 전송
+    //   오류와 가른다 — 특정 코드(7460 등)에 의존하지 **않는다**(코드가 계정/iOS버전마다 달라 316→317에서 회귀).
+    // ⚠️ 폐기는 같은 무료 Apple ID로 서명된 **다른 기기의 앱**을 무효화한다 — 두 대를 한 계정으로 쓰면, 계정이
+    //   인증서 2개를 허용하면 위 '폐기 없는 발급'으로 공존(평상시엔 ensure_signing_identity 재사용이라 폐기 자체가
+    //   안 일어남), 1개만 허용하면 서로 죽일 수 있어 기기별 별도 Apple ID가 답.
     let cert_id = match dev.submit_csr(team, app_name, &csr_pem).await {
         Ok(id) => id,
-        Err(_) => {
+        Err(e) if e.to_string().contains("developer portal error") => {
+            // 포털이 거부(=자리 없음) → 자리를 비우고 한 번 재시도.
             for c in dev.list_certificates(team).await? {
                 let _ = dev.revoke_certificate(team, &c.serial_number).await; // 실패해도 계속
             }
             dev.submit_csr(team, app_name, &csr_pem).await?
         }
+        // 전송/네트워크 오류: 폐기하지 않고 실패로 끝낸다 → 다음 시도에 재시도(다른 기기 인증서 안 건드림).
+        Err(e) => return Err(e),
     };
 
     // 방금 만든 인증서를 목록에서 찾아 DER 취득. id가 안 맞으면(포털 응답 차이) 최신 것으로 폴백.
@@ -1120,8 +1123,14 @@ async fn ensure_signing_identity(
     log("인증서 확보(CSR 제출)...");
     let key = generate_rsa_signing_key(app_name)?;
     let cert = ensure_certificate(dev, team, app_name, &key).await?;
-    let _ = fs::write(&key_path, &*key.to_pkcs8_one_asymmetric_key_der());
-    let _ = fs::write(&cert_path, cert.constructed_data());
+    // 저장 실패를 삼키지 않는다 — 저장이 안 되면 다음 갱신의 재사용(1094~)이 실패해 **매번 재발급+폐기**로
+    // 가고(다른 기기 앱을 죽이고 주간 한도를 태움), 지금까진 조용해서 진단이 안 됐다(리뷰 지적). 로그로 표면화.
+    if let Err(e) = fs::write(&key_path, &*key.to_pkcs8_one_asymmetric_key_der()) {
+        log(&format!("⚠️ 서명키 저장 실패({e}) — 다음 갱신이 인증서를 재발급(폐기)할 수 있음"));
+    }
+    if let Err(e) = fs::write(&cert_path, cert.constructed_data()) {
+        log(&format!("⚠️ 인증서 저장 실패({e}) — 다음 갱신이 재발급(폐기)할 수 있음"));
+    }
     log("인증서 OK(저장됨).");
     Ok((key, cert))
 }

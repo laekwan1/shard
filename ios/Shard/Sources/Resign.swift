@@ -300,7 +300,7 @@ final class ResignModel: ObservableObject {
     /// TCP→RemotePairing→TLS-PSK→jktcp 어댑터)을 세우고 **터널 안** RSD 서비스 목록을 확인한다.
     /// **RP 페어링 파일 필요**(idevice_pair 발급, classic과 다름). 포트는 StikDebug 기본 49152.
     func rsdProbe(addr: String) {
-        guard !running, hasPairing else { return }
+        guard !running, !Self.anyResignRunning, hasPairing else { return }   // 자동 재서명 중이면 두 번째 터널을 안 연다(단일세션 49152 리셋 방지)
         running = true
         logLines = []; summary = nil; errorText = nil
         let ctx = Unmanaged.passUnretained(self).toOpaque()
@@ -325,7 +325,7 @@ final class ResignModel: ObservableObject {
     /// ④ (구) 연결 테스트 — minimuxer(classic lockdown). iOS 26에서 QueryType RST로 막다른 길 확정.
     /// RSD 전환 완료 시 제거 예정. 지금은 비교용으로 남겨둠(호출 안 함).
     func minimuxerProbe() {
-        guard !running, hasPairing else { return }
+        guard !running, !Self.anyResignRunning, hasPairing else { return }   // 자동 재서명 중이면 두 번째 터널을 안 연다(단일세션 49152 리셋 방지)
         running = true
         logLines = []; summary = nil; errorText = nil
         let sd = stateDir
@@ -573,7 +573,7 @@ final class ResignModel: ObservableObject {
     /// 보다 크면 받아 적용(코드까지 갱신, in-place라 데이터 보존). **update_url.txt가 없으면(인프라 미설정)
     /// 조용히 넘어간다** — 켜기 전엔 아무 일도 안 한다. 서명·설치는 무인 계정으로, 완료 시 재시작 팝업.
     func checkForUpdate() async {
-        guard !selfUpdateStarted, !running, !showRestartAlert, hasPairing, savedRenewInputs() != nil else { return }
+        guard !selfUpdateStarted, !running, !Self.anyResignRunning, !showRestartAlert, hasPairing, savedRenewInputs() != nil else { return }
         // 마커 URL은 **앱에 내장**된 GitHub Release 고정 URL — 폰에 아무것도 입력할 필요 없다(사용자 요청).
         // state_dir/update_url.txt가 있으면 그걸로 덮는다(다른 채널로 바꿀 때만). 저장소가 PUBLIC이라 인증
         // 없이 받아진다(PRIVATE 전환 시엔 이 URL을 API+내장 토큰 방식으로 바꿔야 함).
@@ -602,7 +602,7 @@ final class ResignModel: ObservableObject {
         try? FileManager.default.removeItem(at: dest)
         guard (try? FileManager.default.moveItem(at: tmp, to: dest)) != nil else { return }
         await MainActor.run {
-            guard !self.selfUpdateStarted, !self.running else { return }
+            guard !self.selfUpdateStarted, !self.running, !Self.anyResignRunning else { return }
             self.selfUpdateStarted = true   // 이번 실행에선 더 안 함(콜드런치 전 옛 버전 반복 방지)
             self.selfUpdateFromDownloaded(ipaPath: dest.path)
         }
@@ -649,7 +649,7 @@ final class ResignModel: ObservableObject {
     }
 
     func run(email: String, password: String) {
-        guard !running else { return }
+        guard !running, !Self.anyResignRunning else { return }
         running = true
         logLines = []
         summary = nil
