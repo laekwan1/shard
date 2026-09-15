@@ -115,6 +115,8 @@ struct RootView: View {
             if phase == .active {
                 autoResign.autoRenewIfNeeded(nothingPlaying: !player.isPlaying)   // 복귀: 재시도 허용
                 autoResign.scheduleExpiryReminder()
+                // 오프라인이었거나 전송을 못 끝낸 이력을 서버로 밀어 보낸다(catch-up). 무해·논블로킹.
+                autoResign.flushHistory()
                 // 2단계 자체 업데이트: Veil 마커에 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
                 // update_url.txt(인프라)가 없으면 조용히 넘어가 — 켜기 전엔 아무 일도 안 한다.
                 Task { await autoResign.checkForUpdate() }

@@ -1042,6 +1042,7 @@ async fn ensure_certificate(
     team: &DeveloperTeam,
     app_name: &str,
     key: &InMemorySigningKeyPair,
+    log: &mut dyn FnMut(&str),
 ) -> Result<CapturedX509Certificate> {
     // CSR 먼저 만든다.
     let mut builder = X509CertificateBuilder::default();
@@ -1070,6 +1071,9 @@ async fn ensure_certificate(
         Err(e) if e.to_string().contains("developer portal error") => {
             // 포털이 거부(=자리 없음) → 자리를 비우고 한 번 재시도.
             for c in dev.list_certificates(team).await? {
+                // 폐기 시리얼을 sentinel로 흘린다 — Swift가 이벤트에 담아, 죽은 다른 기기의 인증서를
+                // "누가 언제 폐기했는지" 서버에서 교차 대조한다(결함 식별의 핵심 신호).
+                log(&format!("@@CERT_REVOKE@@{}", c.serial_number));
                 let _ = dev.revoke_certificate(team, &c.serial_number).await; // 실패해도 계속
             }
             dev.submit_csr(team, app_name, &csr_pem).await?
@@ -1085,6 +1089,8 @@ async fn ensure_certificate(
         .find(|c| c.certificate_id == cert_id)
         .or_else(|| certs.last())
         .ok_or_else(|| anyhow!("발급된 인증서를 못 찾음"))?;
+    // 발급 시리얼을 sentinel로 흘린다 — 이 기기가 "언제 어떤 인증서를 새로 발급했는지" 이력에 남긴다.
+    log(&format!("@@CERT_ISSUE@@{}", ours.serial_number));
     CapturedX509Certificate::from_der(ours.cert_content.clone())
         .map_err(|e| anyhow!("애플 인증서 파싱: {e:?}"))
 }
@@ -1122,7 +1128,7 @@ async fn ensure_signing_identity(
     // 2) 없거나 만료/폐기됨 → 새 키로 발급하고 저장(다음엔 재사용).
     log("인증서 확보(CSR 제출)...");
     let key = generate_rsa_signing_key(app_name)?;
-    let cert = ensure_certificate(dev, team, app_name, &key).await?;
+    let cert = ensure_certificate(dev, team, app_name, &key, log).await?;
     // 저장 실패를 삼키지 않는다 — 저장이 안 되면 다음 갱신의 재사용(1094~)이 실패해 **매번 재발급+폐기**로
     // 가고(다른 기기 앱을 죽이고 주간 한도를 태움), 지금까진 조용해서 진단이 안 됐다(리뷰 지적). 로그로 표면화.
     if let Err(e) = fs::write(&key_path, &*key.to_pkcs8_one_asymmetric_key_der()) {

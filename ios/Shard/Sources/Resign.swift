@@ -196,6 +196,12 @@ final class ResignModel: ObservableObject {
     private var lastEmail = ""
     private var tfaCPtr: UnsafeMutablePointer<CChar>?
 
+    // 재서명 이력 이벤트 조립용(저장·전송은 ResignHistory — 재서명 흐름 밖이라 실패해도 무해).
+    // currentOp는 selfUpdate/run 시작 때 세팅, evCert*는 appendLog가 sentinel에서 채운다.
+    private var currentOp = "resign"
+    private var evCertIssued: String?
+    private var evCertRevoked: [String] = []
+
     // anisette·세션 캐시 폴더(앱 컨테이너). 기기별로 유지된다.
     private var stateDir: String {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -360,7 +366,7 @@ final class ResignModel: ObservableObject {
     /// ④+⑤ 자기 자신 갱신 — Rust가 발급+재서명(설치 제외)해 서명된 .ipa를 만들고, RSD(rppairing 터널)로
     /// 폰에 업로드(AFC)+설치한다. 실행 중 번들ID로 서명해야 installation_proxy가 in-place 업그레이드(데이터 보존).
     func selfUpdate(email: String, password: String, addr: String, silent: Bool = false,
-                    bundlePathOverride: String? = nil) {
+                    bundlePathOverride: String? = nil, op: String = "resign") {
         // 교차 차단: 다른 인스턴스(수동↔자동)가 이미 재서명 중이면 시작하지 않는다 — 두 터널 충돌 방지.
         guard !running, !Self.anyResignRunning, hasPairing else { return }
         running = true
@@ -372,6 +378,7 @@ final class ResignModel: ObservableObject {
         autoRenewStarted = true
         silentRenew = silent   // appendLog가 이 값으로 재시작 팝업을 띄울지 결정
         logLines = []; summary = nil; errorText = nil; notice = nil
+        currentOp = op; evCertIssued = nil; evCertRevoked = []   // 이번 재서명 이벤트 조립 시작
         lastEmail = email
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         // 기본은 실행 중 번들(자기 재서명). **자체 업데이트(2단계)**면 Veil에서 받은 미서명 .ipa 경로를 넘긴다 —
@@ -419,6 +426,7 @@ final class ResignModel: ObservableObject {
                     self.autoRenewStarted = false   // 실패 → 다음에 다시 시도 가능하게
                     if !silent { self.errorText = "서명 단계 실패 — \(err ?? json)" }
                     else { self.notifyResignFailed(err ?? "서명 단계 실패") }   // 조용한 경로 실패 → 로컬 알림(조기경보)
+                    self.recordEvent(type: "resign", result: "fail", step: "sign", error: err ?? json)
                 }
                 return
             }
@@ -449,6 +457,7 @@ final class ResignModel: ObservableObject {
                         // 여기는 fallback(짧게 Ok로 끝나 sentinel이 안 나온 경우). 자동은 팝업 없이 조용히.
                         self.showRestartAlert = true
                     }
+                    self.recordEvent(type: "resign", result: "ok", step: "install", error: nil)
                 } else {
                     // 실패 → **다음에 다시 시도**할 수 있게 플래그를 내린다(포그라운드는 다음 .active, 백그라운드는
                     // 다음 BGTask). 사용자: "재서명 안됐으면 다시 시도해야지".
@@ -463,6 +472,7 @@ final class ResignModel: ObservableObject {
                     } else {
                         self.errorText = "설치 실패 — \(e)"
                     }
+                    self.recordEvent(type: "resign", result: "fail", step: "install", error: e)
                 }
             }
         }
@@ -489,7 +499,7 @@ final class ResignModel: ObservableObject {
                 // 이미 확인함(VPN 꺼짐 등으로 실패) → 다시 묻지 않고 재시도. 주기 타이머면(allowRetry=false) 건너뜀.
                 guard allowRetry else { return }
                 autoRenewStarted = true
-                selfUpdate(email: email, password: password, addr: addr)
+                selfUpdate(email: email, password: password, addr: addr, op: "foreground")
             } else {
                 // 테스트 모드에선 포그라운드 알림(#4)을 안 띄운다 — 테스트 땐 모든 임계가 같아(≈5분) 홈/잠금
                 // (#2·#3) 확인 중에 이 팝업이 끼어들기 때문(사용자 요청). 운영(test=false)에선 ≤2일에 정상 발동.
@@ -508,7 +518,7 @@ final class ResignModel: ObservableObject {
         if last > 0, Date().timeIntervalSince1970 - last < cooldown { return }
         guard let (email, password, addr) = savedRenewInputs() else { return }
         autoRenewStarted = true
-        selfUpdate(email: email, password: password, addr: addr, silent: true)
+        selfUpdate(email: email, password: password, addr: addr, silent: true, op: "bgtask")
     }
 
     /// 재서명 5단계 중 **홈/잠금(≤3일) 조용히 재서명**(요청 #2·#3). 앱이 .background로 갈 때 ShardApp이
@@ -534,7 +544,7 @@ final class ResignModel: ObservableObject {
         showRenewPrompt = false
         autoRenewStarted = true
         renewConfirmed = true
-        selfUpdate(email: email, password: password, addr: addr, silent: true)
+        selfUpdate(email: email, password: password, addr: addr, silent: true, op: "silent-homelock")
     }
 
     /// 저장된 계정+비번+터널주소(무인 재서명 입력). 없으면 nil — 그러면 자동 재서명을 안 한다.
@@ -557,7 +567,7 @@ final class ResignModel: ObservableObject {
         showRenewPrompt = false
         renewConfirmed = true   // 이후 실패해도 포그라운드 복귀 시 자동 재시도(성공하면 리셋)
         guard let (email, password, addr) = savedRenewInputs() else { return }
-        selfUpdate(email: email, password: password, addr: addr)
+        selfUpdate(email: email, password: password, addr: addr, op: "foreground")
     }
 
     /// 2단계 자체 업데이트: SelfUpdate가 Veil에서 받은 **미서명 ipa**를 사용자 인증서로 재서명·설치한다.
@@ -565,7 +575,7 @@ final class ResignModel: ObservableObject {
     /// 업그레이드(데이터 보존). 저장된 계정으로 무인 진행, silent=false라 완료 시 재시작 팝업.
     func selfUpdateFromDownloaded(ipaPath: String) {
         guard let (email, password, addr) = savedRenewInputs() else { return }
-        selfUpdate(email: email, password: password, addr: addr, bundlePathOverride: ipaPath)
+        selfUpdate(email: email, password: password, addr: addr, bundlePathOverride: ipaPath, op: "version-update")
     }
 
     /// 2단계 자체 업데이트 확인 — Veil의 마커를 보고 새 버전이 있으면 미서명 ipa를 받아 재서명·설치한다.
@@ -655,6 +665,10 @@ final class ResignModel: ObservableObject {
         summary = nil
         errorText = nil
         lastEmail = email
+        // 이 경로는 발급/최초 재서명(수동 '재서명' 화면) — 이벤트 종류는 issue.
+        currentOp = "issue"
+        evCertIssued = nil
+        evCertRevoked = []
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         DispatchQueue.global(qos: .userInitiated).async {
             let raw = email.withCString { e in
@@ -710,8 +724,52 @@ final class ResignModel: ObservableObject {
             if !silentRenew { DispatchQueue.main.async { self.showRestartAlert = true } }
             return
         }
+        // 인증서 시리얼 sentinel(engine.rs가 발급/폐기 때 흘림) — 이벤트에 담아 "누가 누구 폐기"를 서버에서 대조.
+        if line.hasPrefix("@@CERT_ISSUE@@") {
+            let s = String(line.dropFirst("@@CERT_ISSUE@@".count))
+            DispatchQueue.main.async { self.evCertIssued = s }
+            return
+        }
+        if line.hasPrefix("@@CERT_REVOKE@@") {
+            let s = String(line.dropFirst("@@CERT_REVOKE@@".count))
+            DispatchQueue.main.async { self.evCertRevoked.append(s) }
+            return
+        }
         DispatchQueue.main.async { self.logLines.append(line) }
     }
+
+    /// 재서명/발급 이벤트 기록(재서명 흐름 밖 — 실패해도 무해). op는 currentOp, 인증서 시리얼은 evCert*.
+    func recordEvent(type: String, result: String, step: String?, error: String?) {
+        let sd = stateDir
+        let email = (UserDefaults.standard.string(forKey: "resign.email")).flatMap { $0.isEmpty ? nil : $0 }
+            ?? (lastEmail.isEmpty ? nil : lastEmail)
+        let ev = ResignEvent(
+            device_id: ResignHistory.deviceID(sd),
+            device_name: UIDevice.current.name,
+            apple_email: email,
+            ts: Date().timeIntervalSince1970,
+            event_type: type,
+            op: currentOp,
+            app_build: Int(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""),
+            ios_version: UIDevice.current.systemVersion,
+            result: result,
+            step: step,
+            error: error,
+            cert_issued: evCertIssued,
+            certs_revoked: evCertRevoked.isEmpty ? nil : evCertRevoked,
+            profile_expiry: SigningInfo.expirationDate()?.timeIntervalSince1970,
+            resign_stamp: SigningInfo.resignStamp()?.timeIntervalSince1970,
+            detail: logLines.suffix(40).joined(separator: "\n")
+        )
+        ResignHistory.record(ev, stateDir: sd)
+    }
+
+    /// 앱 켤 때(.active) 미전송 이력을 서버로 밀어 보낸다(오프라인이었던 것 catch-up). 무해.
+    func flushHistory() { ResignHistory.flush(stateDir: stateDir) }
+    /// 로그 시트용 — 온디바이스 이력.
+    func historyEvents() -> [ResignEvent] { ResignHistory.loadAll(stateDir: stateDir) }
+    /// 로그 시트 상단 표시용 — 서버 전송 설정 여부.
+    var logServerConfigured: Bool { ResignHistory.serverConfig(stateDir) != nil }
 
     // VPN 선확인 프로브(vpnReachable/shard_tunnel_reachable)는 **제거**했다. 49152는 한 세션짜리 RemotePairing
     // 터널이라, 프로브가 붙었다 끊는 것만으로 터널을 점유·교란해 이후 실제 설치·수동 재서명까지 리셋시켰다
@@ -739,8 +797,10 @@ final class ResignModel: ObservableObject {
                 )
                 accounts = SignedAccountStore.upsert(acct)
             }
+            recordEvent(type: "issue", result: "ok", step: "install", error: nil)
         } else {
             errorText = obj["error"] as? String ?? "알 수 없는 오류"
+            recordEvent(type: "issue", result: "fail", step: "sign", error: errorText)
         }
     }
 
@@ -788,6 +848,8 @@ struct ResignView: View {
     // 없으면 펴진 채로 시작한다(accountKnown).
     @State private var editingAccount = false
     @State private var editingTunnel = false
+    // 재서명 이력은 화면에 인라인으로 뿌리면 지저분해서(사용자 지적) 별도 시트로만 연다.
+    @State private var showLog = false
     // 남은 유효기간을 **실시간**(일·시·분·초)으로 보이려고 1초마다 now를 갱신한다 — 만료일은 고정이고
     // now가 흐르면서 남은 시간이 매초 줄어드는 걸 화면이 그린다.
     @State private var now = Date()
@@ -801,6 +863,10 @@ struct ResignView: View {
             HStack {
                 Text("자체 서명").font(.headline).foregroundColor(.onSurface)
                 Spacer()
+                // 이력은 별도 시트로만 — 화면 본문엔 로그를 뿌리지 않는다(사용자 요청).
+                Button("로그") { showLog = true }
+                    .font(.subheadline.weight(.semibold)).foregroundColor(.accent)
+                    .padding(.trailing, 6)
                 // 재서명 중엔 닫기를 막는다(사용자 제안) — 시트를 닫고 루트로 나가면 자동 재서명과 겹칠 수
                 // 있어서. 끝나면 다시 눌러 닫을 수 있다.
                 Button("닫기") { dismiss() }
@@ -923,7 +989,7 @@ struct ResignView: View {
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
                             PasswordStore.save(password, for: email)
-                            model.selfUpdate(email: email, password: password, addr: probeAddr)
+                            model.selfUpdate(email: email, password: password, addr: probeAddr, op: "manual")
                         } label: {
                             Text(model.running ? "재서명 중..." : "재서명")
                                 .font(.body.weight(.semibold))
@@ -965,6 +1031,10 @@ struct ResignView: View {
         // 곧 자기 덮어쓰기 설치를 확정한다(installd가 앱 종료 시 새 번들로 교체).
         .alert("앱을 다시 시작해 주세요", isPresented: $model.showRestartAlert) {
             Button("확인") { exit(0) }
+        }
+        // '로그' 버튼이 여는 별도 시트 — 온디바이스 이력만, 최신순. 열 때마다 최신 이력을 읽는다.
+        .sheet(isPresented: $showLog) {
+            ResignLogView(events: model.historyEvents(), serverOn: model.logServerConfigured)
         }
     }
 
