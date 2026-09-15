@@ -1005,8 +1005,9 @@ struct ResignView: View {
                     }
 
                     // 설치엔 RP 페어링과 LocalDevVPN(별도 앱, 루프백 VPN)이 필요하다. 페어링이 **없을 때만**
-                    // 가져오기를 보인다. 터널 주소는 기본 10.7.0.1(probeAddr) — LocalDevVPN이 이 주소로 서명이
-                    // 잘 됐던 값이라 그대로 둔다.
+                    // 가져오기를 보인다. 터널 주소(probeAddr)는 **기기·설정마다 다르다** — LocalDevVPN이
+                    // 보여주는 "터널 IP"와 같아야 설치 ①이 붙는다. 기본 10.7.0.1이 안 되면(=매번 "VPN 꺼짐")
+                    // 보통 10.7.1.1이니 바꿔 쓴다. 하드코딩이 서브폰이 매번 실패한 원인이었다 → 편집칸으로 되살림.
                     Divider().background(Color.toolbar)
                     VStack(alignment: .leading, spacing: 10) {
                         if !model.hasPairing {
@@ -1018,6 +1019,14 @@ struct ResignView: View {
                                     .font(.footnote.weight(.semibold)).foregroundColor(.accent)
                             }
                         }
+                        labeled("터널 주소 (LocalDevVPN의 터널 IP와 같게)") {
+                            TextField("10.7.0.1", text: $probeAddr)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.numbersAndPunctuation)
+                                .disableAutocorrection(true)
+                        }
+                        Text("재서명이 매번 “VPN 꺼짐”으로 실패하면, LocalDevVPN이 보여주는 터널 IP(기기 IP가 10.7.0.1이면 터널은 보통 10.7.1.1)로 바꿔 보세요. 기기마다 다를 수 있습니다.")
+                            .font(.caption2).foregroundColor(.muted)
                         // 전 과정 한 번에: 발급 → 자기 재서명(⑤) → 자기 재설치(④ 업그레이드).
                         Button {
                             PasswordStore.save(password, for: email)
