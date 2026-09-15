@@ -65,22 +65,19 @@ sudo systemctl status shard-resign-log
 `SHARD_LOG_ADDR=127.0.0.1`로 로컬만 열고, 이미 Veil 박스에 있는 리버스 프록시(caddy/nginx)로
 `https://<veil-host>/resign-log/ → 127.0.0.1:8788`을 프록시한다. 앱은 https URL만 신뢰한다.
 
-## 2. 앱 쪽 설정 (기기마다 — 사용자가 넣는다)
+## 2. 앱 쪽 설정 (기기마다 — 앱 화면에서 입력, PC 불필요)
 
-앱 컨테이너의 `state_dir`에 `resign_log_url.txt`를 만든다. **1줄 = URL, 2줄 = 토큰**:
+앱의 `state_dir`은 iOS **Application Support** 폴더라 파일앱으로 넣을 수 없다. 그래서 앱 안에서
+입력하면 앱이 `resign_log_url.txt`(1줄 URL, 2줄 토큰)를 대신 써 준다(anisette 서버와 같은 방식).
 
-```
-https://<veil-host>/resign-log/events
-<서버와 같은 SHARD_LOG_TOKEN>
-```
+1. 앱 → **자체 서명(재서명) 화면** → 계정이 이미 있으면 **"변경"**을 눌러 설정칸을 편다.
+2. **이력 서버 URL**: `https://<veil-host>/resign-log/events` (반드시 `/events`로 끝. `http`로 시작).
+3. **이력 서버 토큰**: 서버의 `SHARD_LOG_TOKEN`과 **똑같은 값**.
+4. 입력하면 즉시 저장된다. URL을 **비우면 전송 OFF**(온디바이스 이력만, `resign-history.jsonl`).
 
-- 이 파일이 **없으면 전송 OFF** — 온디바이스 이력(`resign-history.jsonl`)만 남는다(로컬 '로그' 버튼).
-- URL은 `/events` 엔드포인트를 가리킨다(POST 대상). `http`로 시작해야 인식한다.
 - 전송은 **재서명할 때**와 **앱을 켤 때(.active)** 자동으로, 미전송분만 배치로 밀어 보낸다.
   실패해도 재서명을 절대 안 깨고(무해·논블로킹), 다음 기회에 다시 시도한다(워터마크로 중복 방지).
-
-state_dir 경로는 온디바이스 로그의 안내(또는 재서명 화면)에서 확인한다. 파일을 넣는 방법은
-기기 파일앱/파일 공유로 앱 컨테이너에 직접 두거나, 향후 설정 UI에서 입력.
+- 온디바이스 이력만 볼 거면 서버 없이 재서명 화면의 **'로그' 버튼**만 눌러도 된다.
 
 ## 3. 조회
 

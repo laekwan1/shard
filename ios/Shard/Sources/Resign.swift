@@ -243,6 +243,20 @@ final class ResignModel: ObservableObject {
         }
     }
 
+    /// 이력 서버 주소·토큰을 state_dir/`resign_log_url.txt`(1줄 URL, 2줄 토큰)에 저장 → ResignHistory가 읽어
+    /// 전송한다. state_dir(Application Support)은 파일앱으로 못 넣으므로 **여기 UI로만** 설정한다(anisette와 같은
+    /// 방식). URL을 비우면 파일을 지워 전송 OFF(온디바이스 이력만). 토큰은 서버 SHARD_LOG_TOKEN과 같은 값.
+    func saveLogServer(url: String, token: String) {
+        let f = URL(fileURLWithPath: stateDir).appendingPathComponent("resign_log_url.txt")
+        let u = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if u.isEmpty {
+            try? FileManager.default.removeItem(at: f)   // 전송 OFF
+        } else {
+            try? "\(u)\n\(t)".write(to: f, atomically: true, encoding: .utf8)
+        }
+    }
+
     /// 로그 파일에서 keyword에 맞는 줄만 골라 마지막 몇 줄을 준다(맞는 게 없으면 그냥 tail). 줄당 150자 컷.
     /// 폰에선 파일을 못 빼므로 UI로 끌어올려 근거로 다음 수를 정한다(추측 금지).
     private func fileTail(_ url: URL, maxLines: Int, keywords: [String]) -> [String] {
@@ -843,6 +857,9 @@ struct ResignView: View {
     @AppStorage("resign.tunnelAddr") private var probeAddr = "10.7.0.1"
     // 전용 anisette 서버 주소(비우면 기본 공유서버). 고정 기기 정체성 → 잠금·재로그인 근본 차단.
     @AppStorage("resign.anisetteURL") private var anisetteURL = ""
+    // 재서명 이력 서버(비우면 전송 OFF, 온디바이스만). state_dir은 파일앱으로 못 넣으므로 여기서만 설정한다.
+    @AppStorage("resign.logURL") private var logURL = ""
+    @AppStorage("resign.logToken") private var logToken = ""
     // 발급·페어링이 끝난 뒤엔 ID·anisette·터널 칸을 접어 두고(값은 @AppStorage로 기억됨) "변경"으로만
     // 편다 — 매번 다시 입력할 필요가 없고 화면도 깔끔해진다(사용자 요청). 처음이거나 계정 기록이
     // 없으면 펴진 채로 시작한다(accountKnown).
@@ -911,6 +928,21 @@ struct ResignView: View {
                                 .onChange(of: anisetteURL) { v in model.saveAnisetteURL(v) }
                         }
                         Text("전용 서버(고정 기기 정체성)를 쓰면 계정 잠금·재로그인이 근본적으로 준다. 도커 anisette-v3-server를 홈서버에 올리고 폰에서 닿게(LAN 또는 DuckDNS:6969).")
+                            .font(.caption2).foregroundColor(.muted)
+                        // 재서명 이력 서버 — 비우면 온디바이스 이력만(전송 OFF). 값은 state_dir 파일로 저장돼
+                        // ResignHistory가 재서명·앱 켤 때 미전송분을 보낸다(무해·논블로킹). 토큰은 서버와 같은 값.
+                        labeled("이력 서버 URL (비우면 전송 안 함)") {
+                            TextField("https://<서버>/events", text: $logURL)
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                .disableAutocorrection(true)
+                                .onChange(of: logURL) { v in model.saveLogServer(url: v, token: logToken) }
+                        }
+                        labeled("이력 서버 토큰 (서버 SHARD_LOG_TOKEN과 동일)") {
+                            SecureField("••••••••", text: $logToken)
+                                .onChange(of: logToken) { v in model.saveLogServer(url: logURL, token: v) }
+                        }
+                        Text("죽은 폰은 로그를 못 보내므로, 살아 있을 때 재서명 이력을 서버에 남겨 검은화면 원인을 추적한다. 서버 구축은 server/resign-log/README.md 참고.")
                             .font(.caption2).foregroundColor(.muted)
                         // 비밀번호도 계정 편집 안에 둔다 — 접으면 함께 숨는다(요청). 저장된 값(PasswordStore)은
                         // 자동으로 쓰이므로 접힌 상태에서도 '지금 갱신'이 된다.
@@ -1017,6 +1049,8 @@ struct ResignView: View {
                 // 저장해 둔 비밀번호가 있으면 채운다 — 그러면 재입력 없이 "지금 갱신"만 누르면 된다.
                 .onAppear {
                     model.saveAnisetteURL(anisetteURL)
+                    // 재설치로 state_dir이 비워졌을 수 있으니(AppStorage는 남음) 이력 서버 설정을 파일로 되살린다.
+                    model.saveLogServer(url: logURL, token: logToken)
                     if password.isEmpty { password = PasswordStore.load(for: email) }
                 }
             }
