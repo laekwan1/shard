@@ -447,12 +447,28 @@ final class ResignModel: ObservableObject {
             // 2) RSD(iOS 17+): rppairing 터널 위에서 서명된 .ipa를 업로드(AFC)+설치. classic minimuxer는
             //    iOS 26에서 죽어(QueryType RST) RSD로 대체. pairing은 RP 페어링(idevice_pair 발급).
             DispatchQueue.main.async { self.logLines.append("서명 완료. RSD 터널로 설치...") }
-            let raw2: UnsafeMutablePointer<CChar>? =
-                addr.withCString { a in pairingPath.withCString { pp in ipaPath.withCString { ip in
-                    shard_rsd_install(a, 49152, pp, ip, ResignModel.logCb, ctx)
-                } } }
-            let json2 = raw2.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
-            if let raw2 = raw2 { shard_string_free(raw2) }
+            // 설치 ①은 **터널 IP**(49152)로 붙는다. 그런데 LocalDevVPN 버전/설정에 따라 터널 IP가
+            // 10.7.0.1 또는 10.7.1.1로 갈려, 하나로 굳히면 다른 쪽 기기가 매번 "VPN 꺼짐"으로 실패했다
+            // (연결 실패를 VPN 꺼짐으로 오표시 — 두 폰 다 죽인 회귀). → 설정값으로 먼저 붙고, **연결 자체가
+            // 안 되면** 나머지 표준 IP로 1회 더 시도한다. 서로 다른 IP라 예전의 "같은 단일세션 터널을 프로브가
+            // 두드려 잼"과 무관하다: 없는 IP엔 리스너가 없어 즉시 실패할 뿐 진짜 터널(다른 IP)을 점유하지 않는다.
+            var candidates = [addr]
+            for alt in ["10.7.1.1", "10.7.0.1"] where !candidates.contains(alt) { candidates.append(alt) }
+            var json2 = #"{"ok":false,"error":"응답 없음"}"#
+            for (i, cand) in candidates.enumerated() {
+                if i > 0 { DispatchQueue.main.async { self.logLines.append("설치 재시도: 터널 \(cand)") } }
+                let r: UnsafeMutablePointer<CChar>? =
+                    cand.withCString { a in pairingPath.withCString { pp in ipaPath.withCString { ip in
+                        shard_rsd_install(a, 49152, pp, ip, ResignModel.logCb, ctx)
+                    } } }
+                json2 = r.map { String(cString: $0) } ?? #"{"ok":false,"error":"응답 없음"}"#
+                if let r = r { shard_string_free(r) }
+                let ok = ((json2.data(using: .utf8).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })?["ok"] as? Bool) == true
+                if ok { break }
+                // 연결 실패류가 아니면(서명·포털 오류 등) 다른 IP로 바꿔도 소용없으니 멈춘다.
+                let connFail = json2.contains("① 연결") || json2.contains("LocalDevVPN") || json2.contains("못 닿음") || json2.contains("시간초과")
+                if !connFail { break }
+            }
             DispatchQueue.main.async {
                 self.running = false
                 let silentNow = self.silentRenew
@@ -482,7 +498,8 @@ final class ResignModel: ObservableObject {
                         if vpnOff { self.notifyVpnOff() }        // VPN 꺼짐(사용자가 켜면 됨) → 대기 알림
                         else { self.notifyResignFailed(e) }      // 그 밖의 실패(애플이 서명 규칙 변경 등) → 실패 알림
                     } else if vpnOff {
-                        self.errorText = "LocalDevVPN이 꺼져 있는 것 같습니다. 켜고 ‘재서명’을 다시 눌러 주세요."
+                        // 10.7.0.1·10.7.1.1 둘 다 못 붙었다 → VPN이 정말 꺼졌거나, 터널 IP가 이 둘이 아니다.
+                        self.errorText = "터널에 못 붙었습니다. LocalDevVPN이 ‘연결됨’인지, 그리고 아래 ‘터널 주소’가 LocalDevVPN이 보여주는 터널 IP와 같은지 확인해 주세요."
                     } else {
                         self.errorText = "설치 실패 — \(e)"
                     }
